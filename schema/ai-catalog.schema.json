@@ -1,0 +1,1082 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vercel-labs:ai-catalog-sdk:schema:ai-catalog:63909bfd267fae992ec042c4e0865f28bdbac6c9",
+  "title": "AI Catalog",
+  "description": "An SDK-maintained structural schema for an AI Catalog.",
+  "x-ai-catalog-specification": {
+    "specVersion": "1.0",
+    "status": "editor's-draft",
+    "source": "specification/ai-catalog.md",
+    "commit": "63909bfd267fae992ec042c4e0865f28bdbac6c9"
+  },
+  "type": "object",
+  "properties": {
+    "specVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "host": {
+      "$ref": "#/$defs/HostInfo"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CatalogEntry"
+      }
+    },
+    "extensions": {
+      "$ref": "#/$defs/__schema6"
+    },
+    "signature": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "specVersion",
+    "entries"
+  ],
+  "additionalProperties": {
+    "$ref": "#/$defs/__schema37"
+  },
+  "$defs": {
+    "HostInfo": {
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "documentationUrl": {
+          "type": "string"
+        },
+        "logoUrl": {
+          "type": "string"
+        },
+        "trustManifest": {
+          "$ref": "#/$defs/TrustManifest"
+        }
+      },
+      "required": [
+        "displayName"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema22"
+      },
+      "title": "Host Info",
+      "description": "Information identifying an AI Catalog host."
+    },
+    "TrustManifest": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "identity": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "identityType": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "privacyPolicyUrl": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "termsOfServiceUrl": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "extensions": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "trustSchema": {
+              "$ref": "#/$defs/TrustSchema"
+            },
+            "attestations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Attestation"
+              }
+            },
+            "provenance": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ProvenanceLink"
+              }
+            },
+            "subject": {
+              "$ref": "#/$defs/TrustSubject"
+            },
+            "issuedAt": {
+              "$ref": "#/$defs/Rfc3339DateTime"
+            },
+            "signature": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "identity",
+            "subject",
+            "issuedAt",
+            "signature"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema13"
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "identity": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "identityType": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "privacyPolicyUrl": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "termsOfServiceUrl": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "extensions": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "subject": {
+              "$ref": "#/$defs/__schema14"
+            },
+            "issuedAt": {
+              "$ref": "#/$defs/__schema15"
+            },
+            "signature": {
+              "$ref": "#/$defs/__schema16"
+            },
+            "trustSchema": {
+              "$ref": "#/$defs/TrustSchema"
+            },
+            "attestations": {
+              "$ref": "#/$defs/__schema17"
+            },
+            "provenance": {
+              "$ref": "#/$defs/__schema18"
+            }
+          },
+          "required": [
+            "identity",
+            "trustSchema"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema19"
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "identity": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "identityType": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "privacyPolicyUrl": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "termsOfServiceUrl": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "extensions": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "subject": {
+              "$ref": "#/$defs/__schema14"
+            },
+            "issuedAt": {
+              "$ref": "#/$defs/__schema15"
+            },
+            "signature": {
+              "$ref": "#/$defs/__schema16"
+            },
+            "trustSchema": {
+              "$ref": "#/$defs/TrustSchema"
+            },
+            "attestations": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Attestation"
+              }
+            },
+            "provenance": {
+              "$ref": "#/$defs/__schema18"
+            }
+          },
+          "required": [
+            "identity",
+            "attestations"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema20"
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "identity": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "identityType": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "privacyPolicyUrl": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "termsOfServiceUrl": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "extensions": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "subject": {
+              "$ref": "#/$defs/__schema14"
+            },
+            "issuedAt": {
+              "$ref": "#/$defs/__schema15"
+            },
+            "signature": {
+              "$ref": "#/$defs/__schema16"
+            },
+            "trustSchema": {
+              "$ref": "#/$defs/TrustSchema"
+            },
+            "attestations": {
+              "$ref": "#/$defs/__schema17"
+            },
+            "provenance": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ProvenanceLink"
+              }
+            }
+          },
+          "required": [
+            "identity",
+            "provenance"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema21"
+          }
+        }
+      ],
+      "title": "Trust Manifest",
+      "description": "Structured but unverified trust metadata."
+    },
+    "__schema0": {
+      "type": "string"
+    },
+    "__schema1": {
+      "type": "string"
+    },
+    "__schema2": {
+      "type": "string"
+    },
+    "__schema3": {
+      "type": "string"
+    },
+    "__schema4": {
+      "$ref": "#/$defs/Rfc3339DateTime"
+    },
+    "Rfc3339DateTime": {
+      "type": "string",
+      "pattern": "^([0-9]{4})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9]|60)(?:\\.([0-9]+))?(?:[Zz]|([+-])([01][0-9]|2[0-3]):([0-5][0-9]))$",
+      "title": "RFC 3339 Date-Time",
+      "description": "An RFC 3339 timestamp with required seconds.",
+      "format": "date-time"
+    },
+    "__schema5": {
+      "$ref": "#/$defs/__schema6"
+    },
+    "__schema6": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema7"
+      }
+    },
+    "__schema7": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema7"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema7"
+          }
+        }
+      ]
+    },
+    "TrustSchema": {
+      "type": "object",
+      "properties": {
+        "identifier": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "governanceUri": {
+          "type": "string"
+        },
+        "verificationMethods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "identifier",
+        "version"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema8"
+      },
+      "title": "Trust Schema",
+      "description": "A trust framework applied to an artifact."
+    },
+    "__schema8": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema8"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema8"
+          }
+        }
+      ]
+    },
+    "Attestation": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "digest": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "uri"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema10"
+      },
+      "title": "Attestation",
+      "description": "A reference to evidence supporting a trust claim."
+    },
+    "__schema9": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9+._-]*:[0-9a-f]+$"
+    },
+    "__schema10": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema10"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema10"
+          }
+        }
+      ]
+    },
+    "ProvenanceLink": {
+      "type": "object",
+      "properties": {
+        "relation": {
+          "type": "string"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "sourceDigest": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "registryUri": {
+          "type": "string"
+        },
+        "statementUri": {
+          "type": "string"
+        },
+        "signatureRef": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "relation",
+        "sourceId"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema11"
+      },
+      "title": "Provenance Link",
+      "description": "A link in an artifact provenance chain."
+    },
+    "__schema11": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema11"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema11"
+          }
+        }
+      ]
+    },
+    "TrustSubject": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "digest": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "digest"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema12"
+      },
+      "title": "Trust Subject",
+      "description": "A digest binding between a Trust Manifest and an artifact."
+    },
+    "__schema12": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema12"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema12"
+          }
+        }
+      ]
+    },
+    "__schema13": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema13"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema13"
+          }
+        }
+      ]
+    },
+    "__schema14": {
+      "$ref": "#/$defs/TrustSubject"
+    },
+    "__schema15": {
+      "$ref": "#/$defs/Rfc3339DateTime"
+    },
+    "__schema16": {
+      "not": {}
+    },
+    "__schema17": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Attestation"
+      }
+    },
+    "__schema18": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ProvenanceLink"
+      }
+    },
+    "__schema19": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema19"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema19"
+          }
+        }
+      ]
+    },
+    "__schema20": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema20"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema20"
+          }
+        }
+      ]
+    },
+    "__schema21": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema21"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema21"
+          }
+        }
+      ]
+    },
+    "__schema22": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema22"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema22"
+          }
+        }
+      ]
+    },
+    "CatalogEntry": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "identifier": {
+              "$ref": "#/$defs/__schema23"
+            },
+            "displayName": {
+              "$ref": "#/$defs/__schema24"
+            },
+            "type": {
+              "$ref": "#/$defs/__schema25"
+            },
+            "version": {
+              "$ref": "#/$defs/__schema26"
+            },
+            "description": {
+              "$ref": "#/$defs/__schema27"
+            },
+            "tags": {
+              "$ref": "#/$defs/__schema28"
+            },
+            "publisher": {
+              "$ref": "#/$defs/__schema29"
+            },
+            "trustManifest": {
+              "$ref": "#/$defs/__schema31"
+            },
+            "updatedAt": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "extensions": {
+              "$ref": "#/$defs/__schema33"
+            },
+            "url": {
+              "type": "string"
+            },
+            "data": {
+              "not": {}
+            }
+          },
+          "required": [
+            "identifier",
+            "type",
+            "url"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema34"
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "identifier": {
+              "$ref": "#/$defs/__schema23"
+            },
+            "displayName": {
+              "$ref": "#/$defs/__schema24"
+            },
+            "type": {
+              "$ref": "#/$defs/__schema25"
+            },
+            "version": {
+              "$ref": "#/$defs/__schema26"
+            },
+            "description": {
+              "$ref": "#/$defs/__schema27"
+            },
+            "tags": {
+              "$ref": "#/$defs/__schema28"
+            },
+            "publisher": {
+              "$ref": "#/$defs/__schema29"
+            },
+            "trustManifest": {
+              "$ref": "#/$defs/__schema31"
+            },
+            "updatedAt": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "extensions": {
+              "$ref": "#/$defs/__schema33"
+            },
+            "data": {
+              "$ref": "#/$defs/__schema35"
+            },
+            "url": {
+              "not": {}
+            }
+          },
+          "required": [
+            "identifier",
+            "type",
+            "data"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema36"
+          }
+        }
+      ],
+      "title": "Catalog Entry",
+      "description": "A referenced or inline AI artifact catalog entry."
+    },
+    "__schema23": {
+      "type": "string"
+    },
+    "__schema24": {
+      "type": "string"
+    },
+    "__schema25": {
+      "type": "string"
+    },
+    "__schema26": {
+      "type": "string"
+    },
+    "__schema27": {
+      "type": "string"
+    },
+    "__schema28": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "__schema29": {
+      "$ref": "#/$defs/Publisher"
+    },
+    "Publisher": {
+      "type": "object",
+      "properties": {
+        "identifier": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "identityType": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "identifier",
+        "displayName"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema30"
+      },
+      "title": "Publisher",
+      "description": "Information identifying an artifact publisher."
+    },
+    "__schema30": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema30"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema30"
+          }
+        }
+      ]
+    },
+    "__schema31": {
+      "$ref": "#/$defs/TrustManifest"
+    },
+    "__schema32": {
+      "$ref": "#/$defs/Rfc3339DateTime"
+    },
+    "__schema33": {
+      "$ref": "#/$defs/__schema6"
+    },
+    "__schema34": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema34"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema34"
+          }
+        }
+      ]
+    },
+    "__schema35": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema35"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema35"
+          }
+        }
+      ]
+    },
+    "__schema36": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema36"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema36"
+          }
+        }
+      ]
+    },
+    "__schema37": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema37"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema37"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "name": "@vercel-labs/ai-catalog-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Parse, validate, and author JSON-native AI Catalog documents in TypeScript.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vercel-labs/ai-catalog-sdk.git"
+  },
+  "homepage": "https://github.com/vercel-labs/ai-catalog-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/vercel-labs/ai-catalog-sdk/issues"
+  },
+  "keywords": [
+    "ai-catalog",
+    "schema",
+    "zod"
+  ],
+  "license": "UNLICENSED",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "docs/spec-interpretation.md",
+    "schema"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./zod": {
+      "types": "./dist/zod.d.ts",
+      "default": "./dist/zod.js"
+    },
+    "./json-schema": {
+      "types": "./dist/json-schema.d.ts",
+      "default": "./dist/json-schema.js"
+    },
+    "./schema/ai-catalog.schema.json": "./schema/ai-catalog.schema.json"
+  },
+  "scripts": {
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "generate:schema": "pnpm build && node scripts/generate-schema.mjs && pnpm build",
+    "schema:check": "pnpm build && node scripts/generate-schema.mjs --check",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm schema:check && pnpm build && pnpm package:check",
+    "package:check": "npm pack --dry-run && publint && attw --pack . --profile esm-only && node scripts/smoke-package.mjs",
+    "prepack": "pnpm build"
+  },
+  "peerDependencies": {
+    "zod": "^4.4.0"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@biomejs/biome": "2.4.6",
+    "@types/node": "24.12.4",
+    "ajv": "8.17.1",
+    "publint": "0.3.14",
+    "typescript": "6.0.2",
+    "typescript-5-5": "npm:typescript@5.5.4",
+    "vitest": "4.1.4",
+    "zod": "4.4.3"
+  },
+  "engines": {
+    "node": ">=22.20.0"
+  },
+  "packageManager": "pnpm@11.1.3"
+}
