@@ -16,6 +16,14 @@ export interface AICatalog {
   /** Information identifying the operator of this catalog. */
   host?: HostInfo;
   entries: CatalogEntry[];
+
+  /**
+   * Custom catalog data keyed by an extension namespace.
+   *
+   * The specification requires each key to be a valid URL or reverse-DNS
+   * string. SDK validation preserves the JSON values but does not validate key
+   * syntax or interpret their contents.
+   */
   extensions?: JsonObject;
 
   /**
@@ -63,6 +71,14 @@ interface CatalogEntryFields {
 
   /** RFC 3339 timestamp indicating when this catalog entry was last modified. */
   updatedAt?: string;
+
+  /**
+   * Custom entry data keyed by an extension namespace.
+   *
+   * The specification requires each key to be a valid URL or reverse-DNS
+   * string. SDK validation preserves the JSON values but does not validate key
+   * syntax or interpret their contents.
+   */
   extensions?: JsonObject;
 }
 
@@ -135,6 +151,14 @@ export interface TrustManifest {
    * cover the surrounding catalog.
    */
   signature?: string;
+
+  /**
+   * Custom trust data included in the signed payload when `signature` is present.
+   *
+   * The specification requires each key to be a valid URL or reverse-DNS
+   * string. SDK validation preserves the JSON values but does not validate key
+   * syntax or interpret their contents.
+   */
   extensions?: JsonObject;
 }
 
