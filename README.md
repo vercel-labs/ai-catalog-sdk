@@ -82,6 +82,33 @@ function parseCatalogInput(source: string) {
 
 Use `code` to classify an issue and `path` to locate it in the input. Present `message` to users, but do not branch on its exact wording.
 
+## Author a catalog
+
+Catalogs are ordinary JSON-shaped objects. Use `satisfies AICatalog` to check known fields at compile time, `parseCatalog()` to perform runtime and catalog-wide validation, and `JSON.stringify()` to serialize the validated result:
+
+```ts
+import {
+  mediaTypes,
+  parseCatalog,
+  type AICatalog,
+} from '@vercel-labs/ai-catalog-sdk';
+
+const catalog = {
+  specVersion: '1.0',
+  entries: [
+    {
+      identifier: 'example-agent-plugin',
+      type: mediaTypes.agentPluginZip,
+      url: 'https://example.com/example-agent-plugin.zip',
+    },
+  ],
+} satisfies AICatalog;
+
+const json = JSON.stringify(parseCatalog(catalog), null, 2);
+```
+
+The SDK does not provide a builder abstraction or custom serializer. Authoring types expose fields known to this SDK. When parsing a compatible AI Catalog `1.x` document, the SDK preserves unknown JSON-valued properties.
+
 ## Schemas
 
 Use the Zod schemas to compose AI Catalog validation in TypeScript. The package also provides a JSON Schema for other validators and tools. It follows the [2020-12 version of the JSON Schema standard](https://json-schema.org/draft/2020-12). This SDK maintains the schema as an interpretation of the pinned AI Catalog specification; it is not the official AI Catalog schema definition.
