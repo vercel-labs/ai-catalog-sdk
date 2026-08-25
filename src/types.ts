@@ -106,12 +106,23 @@ export interface CatalogIssue {
   message: string;
 }
 
+/**
+ * The result of a non-throwing parsing operation.
+ *
+ * A failed result contains a {@link CatalogParseError}.
+ *
+ * @typeParam T - The validated value type.
+ */
 export type ParseResult<T> =
   | { success: true; data: T }
   | { success: false; error: CatalogParseError };
 
+/** Represents a failure while parsing or validating AI Catalog input. */
 export class CatalogParseError extends Error {
+  /** The machine-readable validation issues that caused the failure. */
   readonly issues: readonly CatalogIssue[];
+
+  /** The underlying error, when a lower-level operation supplied one. */
   readonly cause?: unknown;
 
   constructor(issues: readonly CatalogIssue[], cause?: unknown) {
