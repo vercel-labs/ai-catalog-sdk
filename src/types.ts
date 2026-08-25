@@ -8,7 +8,9 @@ export type JsonValue =
 
 export type JsonObject = { [key: string]: JsonValue };
 
+/** An AI Catalog document. */
 export interface AICatalog {
+  /** AI Catalog specification version in `Major.Minor` form. */
   specVersion: string;
   host?: HostInfo;
   entries: CatalogEntry[];
@@ -24,29 +26,45 @@ export interface HostInfo {
   trustManifest?: TrustManifest;
 }
 
+/** Fields shared by inline and referenced catalog entries. */
 interface CatalogEntryFields {
   identifier: string;
   displayName?: string;
+
+  /** Type identifier indicating how to interpret the entry's artifact. */
   type: string;
+
+  /** Version of the entry's artifact, when recorded in the catalog. */
   version?: string;
   description?: string;
   tags?: string[];
   publisher?: Publisher;
   trustManifest?: TrustManifest;
+
+  /** RFC 3339 timestamp indicating when this catalog entry was last modified. */
   updatedAt?: string;
   extensions?: JsonObject;
 }
 
+/** A catalog entry that references an artifact by URL. */
 export interface ReferencedCatalogEntry extends CatalogEntryFields {
+  /** Location of the referenced artifact. */
   url: string;
+
+  /** Referenced entries cannot contain inline data. */
   data?: never;
 }
 
+/** A catalog entry that embeds the complete artifact document in `data`. */
 export interface InlineCatalogEntry extends CatalogEntryFields {
+  /** The complete artifact document, embedded as a JSON value. */
   data: JsonValue;
+
+  /** Inline entries cannot reference an artifact URL. */
   url?: never;
 }
 
+/** An AI Catalog entry that references an artifact by URL or embeds it as inline data. */
 export type CatalogEntry = ReferencedCatalogEntry | InlineCatalogEntry;
 
 export interface Publisher {
