@@ -100,9 +100,15 @@ export interface ProvenanceLink {
   signatureRef?: string;
 }
 
+/** A parsing or validation issue reported by an SDK parser. */
 export interface CatalogIssue {
+  /** Machine-readable category for programmatic classification. */
   code: string;
+
+  /** Location in the input as property names and array indexes; empty means root. */
   path: readonly (string | number)[];
+
+  /** Human-readable explanation; exact wording is not guaranteed. */
   message: string;
 }
 
