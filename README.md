@@ -54,6 +54,34 @@ Treat parsed Trust Manifest data as unverified input. Parsing does not verify si
 
 The `parse*` functions throw `CatalogParseError` when input is invalid. The matching `safeParse*` functions return a discriminated `ParseResult` instead. All SDK parsers apply defensive input validation that the standalone schemas do not. `parseCatalog()` and `parseCatalogJson()` also perform catalog-wide checks. See [What gets validated](#what-gets-validated) for details.
 
+## Handle invalid input
+
+Use a safe parser when validation failures are expected and should be handled as values:
+
+```ts
+import { safeParseCatalogJson } from '@vercel-labs/ai-catalog-sdk';
+
+function parseCatalogInput(source: string) {
+  const result = safeParseCatalogJson(source);
+
+  if (result.success) {
+    return result.data;
+  }
+
+  for (const issue of result.error.issues) {
+    console.error({
+      code: issue.code, // Example: "invalid_value"
+      path: issue.path, // Example: ["entries", 0]
+      message: issue.message,
+    });
+  }
+
+  return undefined;
+}
+```
+
+Use `code` to classify an issue and `path` to locate it in the input. Present `message` to users, but do not branch on its exact wording.
+
 ## Schemas
 
 Use the Zod schemas to compose AI Catalog validation in TypeScript. The package also provides a JSON Schema for other validators and tools. It follows the [2020-12 version of the JSON Schema standard](https://json-schema.org/draft/2020-12). This SDK maintains the schema as an interpretation of the pinned AI Catalog specification; it is not the official AI Catalog schema definition.
