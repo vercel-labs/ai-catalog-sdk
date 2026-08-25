@@ -12,14 +12,19 @@ export type JsonObject = { [key: string]: JsonValue };
 export interface AICatalog {
   /** AI Catalog specification version in `Major.Minor` form. */
   specVersion: string;
+
+  /** Information identifying the operator of this catalog. */
   host?: HostInfo;
   entries: CatalogEntry[];
   extensions?: JsonObject;
   signature?: string;
 }
 
+/** Information identifying the operator of an AI Catalog. */
 export interface HostInfo {
   displayName: string;
+
+  /** Identifier for the catalog operator, such as a DID or domain name. Parsing does not verify it. */
   identifier?: string;
   documentationUrl?: string;
   logoUrl?: string;
@@ -38,6 +43,8 @@ interface CatalogEntryFields {
   version?: string;
   description?: string;
   tags?: string[];
+
+  /** Information identifying the entity responsible for this artifact. */
   publisher?: Publisher;
   trustManifest?: TrustManifest;
 
@@ -67,9 +74,13 @@ export interface InlineCatalogEntry extends CatalogEntryFields {
 /** An AI Catalog entry that references an artifact by URL or embeds it as inline data. */
 export type CatalogEntry = ReferencedCatalogEntry | InlineCatalogEntry;
 
+/** Identifies the entity responsible for a catalog entry's artifact. */
 export interface Publisher {
+  /** Identifier for the publisher. Parsing does not verify it. */
   identifier: string;
   displayName: string;
+
+  /** Type hint for the publisher identifier, such as `did` or `dns`. */
   identityType?: string;
 }
 
