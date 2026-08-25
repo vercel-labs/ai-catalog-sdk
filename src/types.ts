@@ -17,6 +17,15 @@ export interface AICatalog {
   host?: HostInfo;
   entries: CatalogEntry[];
   extensions?: JsonObject;
+
+  /**
+   * Detached JWS over the JCS-canonicalized catalog without this field.
+   *
+   * When verified, it covers every other catalog member, including entry order,
+   * URLs, and inline `data`, but not artifact bytes fetched from an entry URL.
+   * SDK validation checks only that this value is a string; it does not parse or
+   * verify the JWS.
+   */
   signature?: string;
 }
 
