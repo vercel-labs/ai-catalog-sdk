@@ -52,13 +52,25 @@ export interface HostInfo {
 
 /** Fields shared by inline and referenced catalog entries. */
 interface CatalogEntryFields {
+  /**
+   * Open-text identifier for the artifact; SDK validation does not interpret
+   * its format.
+   *
+   * Within a catalog, multiple entries may share an identifier only when every
+   * entry provides a distinct `version`. Whole-catalog parsing enforces this
+   * rule; standalone entry and schema validation do not.
+   */
   identifier: string;
   displayName?: string;
 
   /** Type identifier indicating how to interpret the entry's artifact. */
   type: string;
 
-  /** Version of the entry's artifact, when recorded in the catalog. */
+  /**
+   * Version of the entry's artifact, when recorded in the catalog.
+   *
+   * Used with `identifier` to distinguish multiple versions within one catalog.
+   */
   version?: string;
   description?: string;
   tags?: string[];
