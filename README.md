@@ -41,11 +41,18 @@ The parsed result is an ordinary mutable, JSON-shaped object. Parsing validates 
 
 Treat parsed Trust Manifest data as unverified input. Parsing does not verify signatures or digests, resolve identities, fetch attestations, evaluate provenance, or decide whether an artifact or publisher is trustworthy.
 
-## Parsing APIs
+## Choose a validation API
 
-`parseCatalog()`, `parseCatalogJson()`, and `parseCatalogEntry()` throw a `CatalogParseError` when input is invalid. Use their `safeParse*` counterparts when expected failures should be returned as a result instead.
+| Input or goal | API | Import path |
+| --- | --- | --- |
+| Catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `@vercel-labs/ai-catalog-sdk` |
+| An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `@vercel-labs/ai-catalog-sdk` |
+| An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `@vercel-labs/ai-catalog-sdk` |
+| Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `@vercel-labs/ai-catalog-sdk/zod` |
+| JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `@vercel-labs/ai-catalog-sdk/json-schema` |
+| Raw JSON Schema for another validator or tool | `ai-catalog.schema.json` | `@vercel-labs/ai-catalog-sdk/schema/ai-catalog.schema.json` |
 
-Use `parseCatalogJson()` for JSON text and `parseCatalog()` for an already-parsed JSON value.
+The `parse*` functions throw `CatalogParseError` when input is invalid. The matching `safeParse*` functions return a discriminated `ParseResult` instead. All SDK parsers apply defensive input validation that the standalone schemas do not. `parseCatalog()` and `parseCatalogJson()` also perform catalog-wide checks. See [What gets validated](#what-gets-validated) for details.
 
 ## Schemas
 
