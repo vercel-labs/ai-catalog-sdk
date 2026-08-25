@@ -159,27 +159,84 @@ export interface TrustSubject {
   url?: string;
 }
 
+/**
+ * Identifies the trust framework that a Trust Manifest claims to apply.
+ *
+ * SDK validation does not retrieve or evaluate the framework.
+ */
 export interface TrustSchema {
   identifier: string;
   version: string;
+
+  /**
+   * URI of the framework's governance policy document.
+   *
+   * SDK validation does not validate URI syntax or fetch the document.
+   */
   governanceUri?: string;
+
+  /** Open-text verification methods supported by the framework, such as `did`, `x509`, or `dns-01`. */
   verificationMethods?: string[];
 }
 
+/**
+ * Metadata locating evidence intended to support a trust claim.
+ *
+ * SDK validation does not fetch or verify the attestation document.
+ */
 export interface Attestation {
+  /** Open-text identifier for the kind of attestation; SDK validation does not interpret it. */
   type: string;
+
+  /**
+   * Location of the attestation document.
+   *
+   * The specification supports HTTPS and inline `data:` URIs. SDK validation
+   * does not validate the string as a URI or fetch the document.
+   */
   uri: string;
+
+  /** Declared digest in `algorithm:lowercase-hex` form; SDK validation checks syntax only. */
   digest?: string;
+
+  /**
+   * Declared size in bytes.
+   *
+   * SDK validation requires a non-negative safe integer but does not compare it
+   * with the document.
+   */
   size?: number;
   description?: string;
 }
 
+/**
+ * Records a claimed link in an artifact's upstream provenance chain.
+ *
+ * SDK validation does not validate URI syntax, resolve referenced resources,
+ * compare digests, or verify provenance statements.
+ */
 export interface ProvenanceLink {
+  /** Open-text relationship to the source; SDK validation does not constrain its vocabulary. */
   relation: string;
+
+  /** Identifier of the source artifact or data; no particular format is required. */
   sourceId: string;
+
+  /**
+   * Digest of the upstream source in `algorithm:lowercase-hex` form.
+   *
+   * This complements rather than replaces the artifact digest in
+   * `TrustSubject`. SDK validation checks syntax only.
+   */
   sourceDigest?: string;
+
+  /** URI of the registry holding the source. */
   registryUri?: string;
+
+  /** URI of a provenance statement document. */
   statementUri?: string;
+
+  /** Reference to the key used to sign the provenance statement, not the signature itself; SDK validation does not resolve it. */
   signatureRef?: string;
 }
 
