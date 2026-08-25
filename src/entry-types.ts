@@ -71,12 +71,26 @@ export function isEntryType(type: string | readonly string[]) {
     typeof type === 'string' ? entry.type === type : type.includes(entry.type);
 }
 
+/**
+ * Checks whether a catalog entry embeds its artifact in `data`.
+ *
+ * Prior entry narrowing, including an exact `type`, is preserved. This helper
+ * checks property presence; it does not validate catalog input or inspect the
+ * embedded artifact.
+ */
 export function isInlineCatalogEntry<Entry extends CatalogEntry>(
   entry: Entry,
 ): entry is Entry & Extract<CatalogEntry, { data: unknown }> {
   return 'data' in entry;
 }
 
+/**
+ * Checks whether a catalog entry references its artifact by `url`.
+ *
+ * Prior entry narrowing, including an exact `type`, is preserved. This helper
+ * checks property presence; it does not validate catalog input or retrieve the
+ * referenced artifact.
+ */
 export function isReferencedCatalogEntry<Entry extends CatalogEntry>(
   entry: Entry,
 ): entry is Entry & Extract<CatalogEntry, { url: string }> {
