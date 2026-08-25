@@ -28,6 +28,8 @@ export interface HostInfo {
   identifier?: string;
   documentationUrl?: string;
   logoUrl?: string;
+
+  /** Trust metadata for the catalog operator. SDK validation does not verify its claims. */
   trustManifest?: TrustManifest;
 }
 
@@ -46,6 +48,8 @@ interface CatalogEntryFields {
 
   /** Information identifying the entity responsible for this artifact. */
   publisher?: Publisher;
+
+  /** Trust metadata for this artifact. SDK validation does not verify its claims. */
   trustManifest?: TrustManifest;
 
   /** RFC 3339 timestamp indicating when this catalog entry was last modified. */
@@ -84,24 +88,65 @@ export interface Publisher {
   identityType?: string;
 }
 
+/**
+ * Structured but unverified identity and trust metadata for a catalog operator or artifact.
+ *
+ * SDK validation requires `identity` plus at least one of `signature`,
+ * `trustSchema`, non-empty `attestations`, or non-empty `provenance`. A
+ * `signature` also requires `subject` and `issuedAt`.
+ *
+ * Validation does not verify signatures, digests, identities, trust anchors,
+ * attestations, provenance, expiration policy, or artifact content.
+ */
 export interface TrustManifest {
+  /** Claimed globally unique URI identifying the catalog operator or artifact. */
   identity: string;
+
+  /** Type hint for `identity`, such as `did`, `spiffe`, or `dns`. */
   identityType?: string;
   trustSchema?: TrustSchema;
   attestations?: Attestation[];
   provenance?: ProvenanceLink[];
   privacyPolicyUrl?: string;
   termsOfServiceUrl?: string;
+
+  /** Content description included in the signed payload; required with `signature`. */
   subject?: TrustSubject;
+
+  /** RFC 3339 issuance timestamp; required with `signature`. */
   issuedAt?: string;
+
+  /** RFC 3339 timestamp after which the manifest is stale; validation does not enforce expiration. */
   expiresAt?: string;
+
+  /**
+   * Detached JWS over the JCS-canonicalized manifest without this field.
+   *
+   * SDK validation does not parse or verify the JWS. This signature does not
+   * cover the surrounding catalog.
+   */
   signature?: string;
   extensions?: JsonObject;
 }
 
+/**
+ * Describes content referenced by a Trust Manifest and included in its signed
+ * payload when a signature is present.
+ */
 export interface TrustSubject {
+  /** Type identifier for the content; catalog-entry parsing requires it to match the containing entry's `type`. */
   type: string;
+
+  /**
+   * Digest of the content in `algorithm:lowercase-hex` form.
+   *
+   * For a referenced artifact, this covers the exact bytes served. For inline
+   * `data`, it covers the JCS-canonicalized JSON value. SDK validation checks
+   * syntax only, not algorithm strength or artifact content.
+   */
   digest: string;
+
+  /** Content URL; catalog-entry parsing requires it to match a referenced entry's `url`. */
   url?: string;
 }
 
