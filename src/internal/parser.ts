@@ -626,16 +626,42 @@ function safeParseWith<T>(
   return { success: true, data };
 }
 
+/**
+ * Validates an already-parsed JSON value as an AI Catalog.
+ *
+ * Applies the SDK's defensive input checks and catalog-wide validation.
+ *
+ * @param input - The already-parsed JSON value to validate.
+ * @returns A {@link ParseResult} containing the validated catalog or validation
+ * diagnostics.
+ * @see {@link parseCatalog} for the throwing variant.
+ */
 export function safeParseCatalog(input: unknown): ParseResult<AICatalog> {
   return safeParseWith(input, parseCatalogValue);
 }
 
+/**
+ * Validates and returns an already-parsed JSON value as an AI Catalog.
+ *
+ * @param input - The already-parsed JSON value to validate.
+ * @returns The validated catalog.
+ * @throws `CatalogParseError` if validation fails.
+ * @see {@link safeParseCatalog} for the non-throwing variant.
+ */
 export function parseCatalog(input: unknown): AICatalog {
   const result = safeParseCatalog(input);
   if (!result.success) throw result.error;
   return result.data;
 }
 
+/**
+ * Validates an already-parsed JSON value as a single AI Catalog entry.
+ *
+ * @param input - The already-parsed JSON value to validate.
+ * @returns A {@link ParseResult} containing the validated entry or validation
+ * diagnostics.
+ * @see {@link parseCatalogEntry} for the throwing variant.
+ */
 export function safeParseCatalogEntry(
   input: unknown,
 ): ParseResult<CatalogEntry> {
@@ -644,12 +670,29 @@ export function safeParseCatalogEntry(
   );
 }
 
+/**
+ * Validates and returns an already-parsed JSON value as a single AI Catalog
+ * entry.
+ *
+ * @param input - The already-parsed JSON value to validate.
+ * @returns The validated catalog entry.
+ * @throws `CatalogParseError` if validation fails.
+ * @see {@link safeParseCatalogEntry} for the non-throwing variant.
+ */
 export function parseCatalogEntry(input: unknown): CatalogEntry {
   const result = safeParseCatalogEntry(input);
   if (!result.success) throw result.error;
   return result.data;
 }
 
+/**
+ * Parses and validates an AI Catalog JSON string.
+ *
+ * @param json - The JSON text to parse and validate.
+ * @returns A {@link ParseResult} containing the validated catalog or parsing
+ * and validation diagnostics.
+ * @see {@link parseCatalogJson} for the throwing variant.
+ */
 export function safeParseCatalogJson(json: string): ParseResult<AICatalog> {
   if (typeof json !== 'string') {
     return {
@@ -674,6 +717,15 @@ export function safeParseCatalogJson(json: string): ParseResult<AICatalog> {
   return safeParseCatalog(value);
 }
 
+/**
+ * Parses and validates an AI Catalog JSON string.
+ *
+ * @param json - The JSON text to parse and validate.
+ * @returns The validated catalog.
+ * @throws `CatalogParseError` if the text is not valid JSON or catalog
+ * validation fails.
+ * @see {@link safeParseCatalogJson} for the non-throwing variant.
+ */
 export function parseCatalogJson(json: string): AICatalog {
   const result = safeParseCatalogJson(json);
   if (!result.success) throw result.error;
