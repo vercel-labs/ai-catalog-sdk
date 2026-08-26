@@ -12,7 +12,7 @@ export const mediaTypes = {
   agentCard: 'application/agent-card+json',
   a2aAgentCard: 'application/a2a-agent-card+json',
   mcpServerCard: 'application/mcp-server-card+json',
-  agentSkillJson: 'application/agent-skills+json',
+  agentSkillIndexJson: 'application/agent-skills+json',
   agentSkillMarkdown: 'application/agent-skills+md',
   agentSkillZip: 'application/agent-skills+zip',
   agentSkillGzip: 'application/agent-skills+gzip',
@@ -27,7 +27,7 @@ export const entryTypes = {
   a2aAgentCard: [mediaTypes.a2aAgentCard],
   mcpServerCard: [mediaTypes.mcpServerCard],
   agentSkill: [
-    mediaTypes.agentSkillJson,
+    mediaTypes.agentSkillIndexJson,
     mediaTypes.agentSkillMarkdown,
     mediaTypes.agentSkillZip,
     mediaTypes.agentSkillGzip,
