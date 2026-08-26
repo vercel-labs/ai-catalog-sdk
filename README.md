@@ -82,6 +82,24 @@ function parseCatalogInput(source: string) {
 
 Use `code` to classify an issue and `path` to locate it in the input. Present `message` to users, but do not branch on its exact wording.
 
+### Diagnostic codes
+
+Issue codes identify broad failure categories:
+
+| Code | Meaning |
+| --- | --- |
+| `invalid_json` | Catalog text could not be decoded as JSON. |
+| `invalid_json_value` | Input is not accepted as plain, acyclic JSON data. |
+| `invalid_type` | A required value is missing or has the wrong JSON type. |
+| `invalid_value` | A value violates another structural rule, such as a format, range, or allowed representation. |
+| `unsupported_spec_version` | A well-formed catalog version declares an unsupported major. |
+| `duplicate_entry` | Catalog entries violate identifier/version uniqueness. |
+| `inconsistent_value` | Related fields disagree, currently a Trust Manifest subject and its containing entry. |
+| `resource_limit` | Input exceeds a parser node or nesting limit. |
+| `diagnostics_truncated` | Additional validation issues were omitted after the reporting limit was reached. |
+
+Codes may be added in future releases. Keep a fallback for unknown codes, and do not depend on issue order or a lower-level `cause` for classification.
+
 ## Author a catalog
 
 Catalogs are ordinary JSON-shaped objects. Use `satisfies AICatalog` to check known fields at compile time, `parseCatalog()` to perform runtime and catalog-wide validation, and `JSON.stringify()` to serialize the validated result:
