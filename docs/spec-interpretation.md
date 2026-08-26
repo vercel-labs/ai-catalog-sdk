@@ -2,6 +2,8 @@
 
 AI Catalog is still prerelease, so this SDK targets one exact [upstream specification snapshot](https://github.com/Agent-Card/ai-catalog/blob/63909bfd267fae992ec042c4e0865f28bdbac6c9/specification/ai-catalog.md) rather than a moving branch. The authoritative revision metadata lives in [`src/spec-revision.ts`](https://github.com/vercel-labs/ai-catalog-sdk/blob/main/src/spec-revision.ts); the generated [JSON Schema](../schema/ai-catalog.schema.json) copies it under `x-ai-catalog-specification`.
 
+The upstream specification and documentation are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); this SDK is an independent implementation, and this document records where its interpretation differs from the pinned snapshot.
+
 ## Where the snapshot disagrees
 
 The snapshot's normative CDDL lags its accepted prose and ADRs: it omits the top-level catalog `signature`, Trust Manifest `subject`, `issuedAt`, and `expiresAt`, the Subject object, and the substantive-manifest and signed-manifest conditional rules. The SDK follows the newer prose plus accepted ADR-0019 and ADR-0020 because that interpretation preserves signed artifact binding and rejects misleading empty manifests.
