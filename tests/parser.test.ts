@@ -198,7 +198,7 @@ describe('root parsing', () => {
   });
 
   it('groups recognized representations by entry concept', () => {
-    const pluginEntries = [
+    const entries = [
       parseCatalogEntry({
         identifier: 'zip',
         type: mediaTypes.agentPluginZip,
@@ -210,15 +210,27 @@ describe('root parsing', () => {
         url: 'https://example.com/plugin.tar.gz',
       }),
       parseCatalogEntry({
+        identifier: 'index',
+        type: mediaTypes.agentSkillIndexJson,
+        url: 'https://example.com/.well-known/agent-skills/index.json',
+      }),
+      parseCatalogEntry({
         identifier: 'skill',
         type: mediaTypes.agentSkillZip,
         url: 'https://example.com/skill.zip',
       }),
-    ].filter(isEntryType(entryTypes.agentPlugin));
+    ];
+
+    const pluginEntries = entries.filter(isEntryType(entryTypes.agentPlugin));
+    const skillEntries = entries.filter(isEntryType(entryTypes.agentSkill));
 
     expect(pluginEntries.map(({ identifier }) => identifier)).toEqual([
       'zip',
       'gzip',
+    ]);
+    expect(skillEntries.map(({ identifier }) => identifier)).toEqual([
+      'index',
+      'skill',
     ]);
   });
 });
