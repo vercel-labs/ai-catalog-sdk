@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:vercel-labs:ai-catalog-sdk:schema:ai-catalog:63909bfd267fae992ec042c4e0865f28bdbac6c9",
+  "$id": "urn:ai-catalog-sdk:schema:ai-catalog:63909bfd267fae992ec042c4e0865f28bdbac6c9",
   "title": "AI Catalog",
   "description": "An SDK-maintained structural schema for an AI Catalog.",
   "x-ai-catalog-specification": {

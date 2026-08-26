@@ -1,4 +1,4 @@
-# @vercel-labs/ai-catalog-sdk
+# ai-catalog-sdk
 
 Parse, validate, and author JSON-native AI Catalog documents in TypeScript.
 
@@ -11,7 +11,7 @@ import {
   entryTypes,
   isEntryType,
   parseCatalogJson,
-} from '@vercel-labs/ai-catalog-sdk';
+} from 'ai-catalog-sdk';
 
 const source = `{
   "specVersion": "1.0",
@@ -45,12 +45,12 @@ Treat parsed Trust Manifest data as unverified input. Parsing does not verify si
 
 | Input or goal | API | Import path |
 | --- | --- | --- |
-| Catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `@vercel-labs/ai-catalog-sdk` |
-| An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `@vercel-labs/ai-catalog-sdk` |
-| An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `@vercel-labs/ai-catalog-sdk` |
-| Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `@vercel-labs/ai-catalog-sdk/zod` |
-| JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `@vercel-labs/ai-catalog-sdk/json-schema` |
-| Raw JSON Schema for another validator or tool | `ai-catalog.schema.json` | `@vercel-labs/ai-catalog-sdk/schema/ai-catalog.schema.json` |
+| Catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `ai-catalog-sdk` |
+| An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
+| An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
+| Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
+| JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
+| Raw JSON Schema for another validator or tool | `ai-catalog.schema.json` | `ai-catalog-sdk/schema/ai-catalog.schema.json` |
 
 The `parse*` functions throw `CatalogParseError` when input is invalid. The matching `safeParse*` functions return a discriminated `ParseResult` instead. All SDK parsers apply defensive input validation that the standalone schemas do not. `parseCatalog()` and `parseCatalogJson()` also perform catalog-wide checks. See [What gets validated](#what-gets-validated) for details.
 
@@ -59,7 +59,7 @@ The `parse*` functions throw `CatalogParseError` when input is invalid. The matc
 Use a safe parser when validation failures are expected and should be handled as values:
 
 ```ts
-import { safeParseCatalogJson } from '@vercel-labs/ai-catalog-sdk';
+import { safeParseCatalogJson } from 'ai-catalog-sdk';
 
 function parseCatalogInput(source: string) {
   const result = safeParseCatalogJson(source);
@@ -109,7 +109,7 @@ import {
   mediaTypes,
   parseCatalog,
   type AICatalog,
-} from '@vercel-labs/ai-catalog-sdk';
+} from 'ai-catalog-sdk';
 
 const catalog = {
   specVersion: '1.0',
@@ -132,17 +132,17 @@ The SDK does not provide a builder abstraction or custom serializer. Authoring t
 Use the Zod schemas to compose AI Catalog validation in TypeScript. The package also provides a JSON Schema for other validators and tools. It follows the [2020-12 version of the JSON Schema standard](https://json-schema.org/draft/2020-12). This SDK maintains the schema as an interpretation of the pinned AI Catalog specification; it is not the official AI Catalog schema definition.
 
 ```ts
-import { aiCatalogSchema } from '@vercel-labs/ai-catalog-sdk/zod';
-import { aiCatalogJsonSchema } from '@vercel-labs/ai-catalog-sdk/json-schema';
+import { aiCatalogSchema } from 'ai-catalog-sdk/zod';
+import { aiCatalogJsonSchema } from 'ai-catalog-sdk/json-schema';
 ```
 
 Modern Node ESM consumers can import the raw artifact with a JSON import attribute:
 
 ```ts
-import schema from '@vercel-labs/ai-catalog-sdk/schema/ai-catalog.schema.json' with { type: 'json' };
+import schema from 'ai-catalog-sdk/schema/ai-catalog.schema.json' with { type: 'json' };
 ```
 
-TypeScript NodeNext consumers also need `compilerOptions.resolveJsonModule: true` for the raw JSON import. Importing `aiCatalogJsonSchema` from `@vercel-labs/ai-catalog-sdk/json-schema` avoids that configuration.
+TypeScript NodeNext consumers also need `compilerOptions.resolveJsonModule: true` for the raw JSON import. Importing `aiCatalogJsonSchema` from `ai-catalog-sdk/json-schema` avoids that configuration.
 
 ## What gets validated
 

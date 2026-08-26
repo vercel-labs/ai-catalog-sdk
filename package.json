@@ -1,5 +1,5 @@
 {
-  "name": "@vercel-labs/ai-catalog-sdk",
+  "name": "ai-catalog-sdk",
   "version": "0.0.0",
   "private": true,
   "description": "Parse, validate, and author JSON-native AI Catalog documents in TypeScript.",
