@@ -21,7 +21,7 @@
   "sideEffects": false,
   "files": [
     "dist",
-    "docs/spec-interpretation.md",
+    "docs/**/*.md",
     "schema"
   ],
   "exports": {
