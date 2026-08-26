@@ -99,7 +99,9 @@ describe('public schemas and generated artifact', () => {
     expect(rawSchema.$schema).toBe(
       'https://json-schema.org/draft/2020-12/schema',
     );
-    expect(rawSchema.$id).toContain(implementedSpecRevision.commit);
+    expect(rawSchema.$id).toBe(
+      `urn:ai-catalog-sdk:schema:ai-catalog:${implementedSpecRevision.commit}`,
+    );
     expect(rawSchema['x-ai-catalog-specification']).toEqual(
       implementedSpecRevision,
     );

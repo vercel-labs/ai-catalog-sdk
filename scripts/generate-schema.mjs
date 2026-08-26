@@ -24,7 +24,7 @@ const converted = z.toJSONSchema(concreteAICatalogSchema, {
 const { $schema, ...structuralSchema } = converted;
 const schema = {
   $schema: $schema ?? 'https://json-schema.org/draft/2020-12/schema',
-  $id: `urn:vercel-labs:ai-catalog-sdk:schema:ai-catalog:${implementedSpecRevision.commit}`,
+  $id: `urn:ai-catalog-sdk:schema:ai-catalog:${implementedSpecRevision.commit}`,
   title: 'AI Catalog',
   description: 'An SDK-maintained structural schema for an AI Catalog.',
   'x-ai-catalog-specification': implementedSpecRevision,
@@ -41,7 +41,7 @@ const moduleSource = `import type { JsonSchema } from '../json-schema-types.js';
  *
  * This value follows JSON Schema Draft 2020-12 and contains the same JSON data
  * as the raw
- * \`@vercel-labs/ai-catalog-sdk/schema/ai-catalog.schema.json\` package export.
+ * \`ai-catalog-sdk/schema/ai-catalog.schema.json\` package export.
  * Format validation depends on the validator and its configuration.
  *
  * Unlike \`parseCatalog()\`, it does not require a supported specification major,
