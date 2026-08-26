@@ -2,8 +2,6 @@
 
 Parse, validate, and author JSON-native AI Catalog documents in TypeScript.
 
-**Status:** This package is in private incubation. Publishing and public distribution are disabled until it completes the public graduation gate. The package name is a working identifier and does not claim an npm package.
-
 ## Parse a catalog
 
 ```ts
