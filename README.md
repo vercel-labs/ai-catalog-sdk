@@ -39,6 +39,26 @@ The parsed result is an ordinary mutable, JSON-shaped object. Parsing validates 
 
 Treat parsed Trust Manifest data as unverified input. Parsing does not verify signatures or digests, resolve identities, fetch attestations, evaluate provenance, or decide whether an artifact or publisher is trustworthy.
 
+## Check exact bytes against a digest
+
+Use the separate verification subpath to compare caller-supplied bytes with a
+declared digest:
+
+```ts
+import { checkDigest } from 'ai-catalog-sdk/verification';
+
+const result = checkDigest(artifactBytes, expectedDigest);
+if (result.status !== 'match') {
+  throw new Error(`Digest check failed: ${result.status}`);
+}
+```
+
+`checkDigest()` currently implements the exact `sha256` algorithm token. It
+does not fetch, decode, serialize, or JCS-canonicalize content, and a match does
+not establish who declared the digest or whether it is trustworthy. See
+[Verification utilities](./docs/verification.md) for the complete result and
+error semantics.
+
 ## Choose a validation API
 
 | Input or goal | API | Import path |
@@ -46,6 +66,7 @@ Treat parsed Trust Manifest data as unverified input. Parsing does not verify si
 | Catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
+| Exact bytes and a declared digest | `checkDigest()` | `ai-catalog-sdk/verification` |
 | Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
 | JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
 | Raw JSON Schema for another validator or tool | `ai-catalog.schema.json` | `ai-catalog-sdk/schema/ai-catalog.schema.json` |

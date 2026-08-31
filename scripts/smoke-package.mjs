@@ -87,6 +87,7 @@ try {
     `import { implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
+import { checkDigest } from ${JSON.stringify(`${pkg.name}/verification`)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
 const value = { specVersion: '1.0', entries: [] };
@@ -94,6 +95,7 @@ if (parseCatalog(value).entries.length !== 0) process.exit(1);
 if (!aiCatalogSchema.safeParse(value).success) process.exit(1);
 if (aiCatalogJsonSchema.$id !== rawSchema.$id) process.exit(1);
 if (implementedSpecRevision.commit.length !== 40) process.exit(1);
+if (checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855').status !== 'match') process.exit(1);
 `,
   );
   run(node, ['smoke.mjs'], { cwd: consumerDirectory });
@@ -111,6 +113,11 @@ if (implementedSpecRevision.commit.length !== 40) process.exit(1);
 } from '${pkg.name}';
 import { aiCatalogSchema } from '${pkg.name}/zod';
 import { aiCatalogJsonSchema, type JsonSchema } from '${pkg.name}/json-schema';
+import {
+  checkDigest,
+  DigestAlgorithmUnavailableError,
+  type DigestCheckResult,
+} from '${pkg.name}/verification';
 import rawSchema from '${pkg.name}/schema/ai-catalog.schema.json' with { type: 'json' };
 
 const authored: AICatalog = { specVersion: '1.0', entries: [] };
@@ -127,9 +134,19 @@ authored.entries.filter(predicate).filter(isInlineCatalogEntry);
 authored.entries.filter(isInlineCatalogEntry).filter(predicate);
 aiCatalogSchema.parse(authored);
 const schema: JsonSchema = aiCatalogJsonSchema;
+const digestResult: DigestCheckResult = checkDigest(
+  new Uint8Array(),
+  'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+);
+if (digestResult.status === 'algorithm_not_implemented') {
+  const algorithm: string = digestResult.algorithm;
+  void algorithm;
+}
+const unavailable: Error = new DigestAlgorithmUnavailableError('sha256');
 void result;
 void pluginType;
 void schema;
+void unavailable;
 void rawSchema;
 `,
   );
@@ -138,7 +155,7 @@ void rawSchema;
     JSON.stringify(
       {
         compilerOptions: {
-          target: 'ES2022',
+          target: 'ES2020',
           module: 'NodeNext',
           moduleResolution: 'NodeNext',
           strict: true,

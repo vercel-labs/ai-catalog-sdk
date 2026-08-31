@@ -1,12 +1,11 @@
 import * as z from 'zod';
 
 import type { AICatalog, CatalogEntry, TrustManifest } from '../types.js';
+import { DIGEST_PATTERN } from './digest.js';
 import { isRfc3339DateTime, RFC3339_PATTERN_SOURCE } from './rfc3339.js';
 
 const jsonObjectSchema = z.object({}).catchall(z.json());
-const digestSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9+._-]*:[0-9a-f]+$/);
+const digestSchema = z.string().regex(DIGEST_PATTERN);
 
 export const rfc3339DateTimeSchema = z
   .string()
