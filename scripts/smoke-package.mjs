@@ -87,7 +87,7 @@ try {
     `import { implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
-import { canonicalizeJsonValueToBytes, checkDigest } from ${JSON.stringify(`${pkg.name}/verification`)};
+import { canonicalizeJsonValueToBytes, checkDigest, createTrustManifestSignaturePayload } from ${JSON.stringify(`${pkg.name}/verification`)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
 const value = { specVersion: '1.0', entries: [] };
@@ -96,6 +96,7 @@ if (!aiCatalogSchema.safeParse(value).success) process.exit(1);
 if (aiCatalogJsonSchema.$id !== rawSchema.$id) process.exit(1);
 if (implementedSpecRevision.commit.length !== 40) process.exit(1);
 if (new TextDecoder().decode(canonicalizeJsonValueToBytes({ b: 2, a: 1 })) !== '{"a":1,"b":2}') process.exit(1);
+if (new TextDecoder().decode(createTrustManifestSignaturePayload({ identity: 'did:example:alice', signature: 'detached-jws' })) !== '{"identity":"did:example:alice"}') process.exit(1);
 if (checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855').status !== 'match') process.exit(1);
 `,
   );
@@ -106,6 +107,7 @@ if (checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41
     `import {
   type AICatalog,
   type ParseResult,
+  type TrustManifest,
   entryTypes,
   isEntryType,
   isInlineCatalogEntry,
@@ -117,6 +119,7 @@ import { aiCatalogJsonSchema, type JsonSchema } from '${pkg.name}/json-schema';
 import {
   canonicalizeJsonValueToBytes,
   checkDigest,
+  createTrustManifestSignaturePayload,
   DigestAlgorithmUnavailableError,
   type DigestCheckResult,
 } from '${pkg.name}/verification';
@@ -141,6 +144,17 @@ const digestResult: DigestCheckResult = checkDigest(
   'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
 );
 const canonicalBytes: Uint8Array = canonicalizeJsonValueToBytes({ b: 2, a: 1 });
+const trustManifest: TrustManifest = {
+  identity: 'did:example:alice',
+  issuedAt: '2026-08-31T00:00:00Z',
+  subject: {
+    type: 'application/example',
+    digest: 'sha256:${'a'.repeat(64)}',
+  },
+  signature: 'detached-jws',
+};
+const signaturePayload: Uint8Array =
+  createTrustManifestSignaturePayload(trustManifest);
 if (digestResult.status === 'algorithm_not_implemented') {
   const algorithm: string = digestResult.algorithm;
   void algorithm;
@@ -151,6 +165,7 @@ void pluginType;
 void schema;
 void unavailable;
 void canonicalBytes;
+void signaturePayload;
 void rawSchema;
 `,
   );

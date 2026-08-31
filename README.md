@@ -63,6 +63,26 @@ or recover details already lost during parsing. See
 [Verification utilities](./docs/verification.md) for its input constraints and
 source-level limitations.
 
+## Create a Trust Manifest signature payload
+
+Use `createTrustManifestSignaturePayload()` to produce the detached-JWS
+payload defined by the AI Catalog Trust Manifest protocol:
+
+```ts
+import { createTrustManifestSignaturePayload } from 'ai-catalog-sdk/verification';
+
+const payload = createTrustManifestSignaturePayload(trustManifest);
+```
+
+The function omits exactly the manifest's own, top-level, case-sensitive
+`signature` member and returns fresh RFC 8785 UTF-8 bytes. It preserves all
+other members, including unknown fields, extensions, and nested fields named
+`signature`, without mutating the manifest. It does not validate the Trust
+Manifest schema, construct or verify a JWS, choose a key or algorithm, or
+establish trust. The entire input, including the omitted `signature` member,
+must satisfy the canonicalizer's programmatic I-JSON restrictions. See
+[Verification utilities](./docs/verification.md) for the complete boundary.
+
 ## Check exact bytes against a digest
 
 Use the separate verification subpath to compare caller-supplied bytes with a
@@ -91,6 +111,7 @@ error semantics.
 | An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
 | A logical JSON value requiring RFC 8785 bytes | `canonicalizeJsonValueToBytes()` | `ai-catalog-sdk/verification` |
+| A Trust Manifest requiring its detached-JWS payload | `createTrustManifestSignaturePayload()` | `ai-catalog-sdk/verification` |
 | Exact bytes and a declared digest | `checkDigest()` | `ai-catalog-sdk/verification` |
 | Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
 | JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
