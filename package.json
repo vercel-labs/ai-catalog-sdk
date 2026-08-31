@@ -29,6 +29,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./verification": {
+      "types": "./dist/verification.d.ts",
+      "default": "./dist/verification.js"
+    },
     "./zod": {
       "types": "./dist/zod.d.ts",
       "default": "./dist/zod.js"
