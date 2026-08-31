@@ -39,6 +39,30 @@ The parsed result is an ordinary mutable, JSON-shaped object. Parsing validates 
 
 Treat parsed Trust Manifest data as unverified input. Parsing does not verify signatures or digests, resolve identities, fetch attestations, evaluate provenance, or decide whether an artifact or publisher is trustworthy.
 
+## Canonicalize a logical JSON value
+
+Use `canonicalizeJsonValueToBytes()` when an AI Catalog operation defines its
+input as RFC 8785 JSON Canonicalization Scheme (JCS) bytes. For example, an
+inline entry's digest is computed over the canonicalized `data` value:
+
+```ts
+import {
+  canonicalizeJsonValueToBytes,
+  checkDigest,
+} from 'ai-catalog-sdk/verification';
+
+const result = checkDigest(
+  canonicalizeJsonValueToBytes(entry.data),
+  expectedDigest,
+);
+```
+
+The function accepts an already-materialized JSON value, not JSON source text,
+and returns fresh UTF-8 bytes. It does not parse JSON, remove signature fields,
+or recover details already lost during parsing. See
+[Verification utilities](./docs/verification.md) for its input constraints and
+source-level limitations.
+
 ## Check exact bytes against a digest
 
 Use the separate verification subpath to compare caller-supplied bytes with a
@@ -66,6 +90,7 @@ error semantics.
 | Catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
+| A logical JSON value requiring RFC 8785 bytes | `canonicalizeJsonValueToBytes()` | `ai-catalog-sdk/verification` |
 | Exact bytes and a declared digest | `checkDigest()` | `ai-catalog-sdk/verification` |
 | Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
 | JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |

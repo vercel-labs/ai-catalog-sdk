@@ -56,6 +56,9 @@
     "package:check": "npm pack --dry-run && publint && attw --pack . --profile esm-only && node scripts/smoke-package.mjs",
     "prepack": "pnpm build"
   },
+  "dependencies": {
+    "canonicalize": "4.0.0"
+  },
   "peerDependencies": {
     "zod": "^4.4.0"
   },
