@@ -4,6 +4,45 @@ Verification utilities are available from the `ai-catalog-sdk/verification`
 subpath. They are separate from parsing so applications can distinguish
 structural validation from checks performed against external content.
 
+## Canonicalize a logical JSON value
+
+`canonicalizeJsonValueToBytes(value)` encodes an already-materialized logical
+JSON value as fresh RFC 8785 JSON Canonicalization Scheme (JCS) UTF-8 bytes:
+
+```ts
+import {
+  canonicalizeJsonValueToBytes,
+  checkDigest,
+} from 'ai-catalog-sdk/verification';
+
+const result = checkDigest(
+  canonicalizeJsonValueToBytes(entry.data),
+  expectedDigest,
+);
+```
+
+The function sorts object property names by UTF-16 code units, recursively,
+while preserving array order and Unicode normalization form. It uses the JCS
+ECMAScript number representation; for example, the JavaScript value `-0`
+canonicalizes as `0`.
+
+The input is a value, not source text. Passing `'{"x":1}'` canonicalizes a JSON
+string value; it does not parse an object. By the time a normal JSON parser has
+produced a value, duplicate member names, original number spelling and
+precision, invalid source UTF-8, and a source spelling of negative zero can no
+longer be recovered. Callers that need to authenticate those source-level
+properties need a separate I-JSON-aware parsing boundary.
+
+Programmatic input must consist of plain JSON objects, arrays, and JSON
+primitives. The function rejects non-finite numbers, lone Unicode surrogates,
+noncharacters, cycles, sparse or decorated arrays, accessors, proxies, exotic
+objects, and other non-JSON values with `TypeError`. Inputs beyond the SDK's
+fixed node or nesting-depth limits throw `RangeError`.
+
+Canonicalization does not remove or reinterpret any member. In particular,
+signature verification code must first construct the exact value that its
+protocol defines as signed; this function does not remove a `signature` member.
+
 ## Check a digest
 
 `checkDigest(bytes, expectedDigest)` compares the exact byte range supplied by

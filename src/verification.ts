@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto';
 import { types as utilTypes } from 'node:util';
+import canonicalize from 'canonicalize';
 
 import { DIGEST_PATTERN } from './internal/digest.js';
+import { preflightJsonValue } from './internal/json-value.js';
+import type { JsonValue } from './types.js';
+
+const utf8Encoder = new TextEncoder();
 
 const digestImplementations = {
   sha256: {
@@ -57,6 +62,48 @@ export class DigestAlgorithmUnavailableError extends Error {
     this.name = 'DigestAlgorithmUnavailableError';
     this.algorithm = algorithm;
   }
+}
+
+/**
+ * Encodes a logical JSON value as RFC 8785 JSON Canonicalization Scheme (JCS)
+ * bytes.
+ *
+ * The input is an already-materialized JSON value, not JSON source text. The
+ * function preserves array order and Unicode normalization form, sorts object
+ * properties as required by RFC 8785, and returns a fresh UTF-8 byte array.
+ * It does not parse JSON, detect duplicate member names erased by a previous
+ * parse, remove signature fields, or hash the result.
+ *
+ * @throws {TypeError} If `value` is not a plain I-JSON value, including when
+ * it contains non-finite numbers, forbidden Unicode code points, cycles,
+ * sparse arrays, accessors, proxies, or exotic objects.
+ * @throws {RangeError} If `value` exceeds the SDK's supported node or nesting
+ * depth limit.
+ */
+export function canonicalizeJsonValueToBytes(value: JsonValue): Uint8Array {
+  const preflightIssue = preflightJsonValue(value, {
+    allowOwnProtoMember: true,
+    isDisallowedObject: utilTypes.isProxy,
+    requireIJsonStrings: true,
+  });
+  if (preflightIssue) {
+    const ErrorClass =
+      preflightIssue.code === 'resource_limit' ? RangeError : TypeError;
+    throw new ErrorClass(preflightIssue.message);
+  }
+
+  let canonicalJson: string | undefined;
+  try {
+    canonicalJson = canonicalize(value);
+  } catch (cause) {
+    throw new TypeError('The value could not be canonicalized as JSON.', {
+      cause,
+    });
+  }
+  if (typeof canonicalJson !== 'string') {
+    throw new TypeError('The value could not be canonicalized as JSON.');
+  }
+  return utf8Encoder.encode(canonicalJson);
 }
 
 /**
