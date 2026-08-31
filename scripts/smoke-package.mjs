@@ -76,6 +76,7 @@ try {
       '--no-fund',
       '--fetch-retries=1',
       '--fetch-timeout=30000',
+      '@types/node@24.12.4',
       'zod@4.4.0',
       join(temporaryDirectory, packed.filename),
     ],
@@ -84,10 +85,11 @@ try {
 
   await writeFile(
     join(consumerDirectory, 'smoke.mjs'),
-    `import { implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
+    `import { createPublicKey } from 'node:crypto';
+import { implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
-import { canonicalizeJsonValueToBytes, checkDigest, createTrustManifestSignaturePayload } from ${JSON.stringify(`${pkg.name}/verification`)};
+import { canonicalizeJsonValueToBytes, checkDigest, checkTrustManifestSignature, createTrustManifestSignaturePayload } from ${JSON.stringify(`${pkg.name}/verification`)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
 const value = { specVersion: '1.0', entries: [] };
@@ -98,13 +100,33 @@ if (implementedSpecRevision.commit.length !== 40) process.exit(1);
 if (new TextDecoder().decode(canonicalizeJsonValueToBytes({ b: 2, a: 1 })) !== '{"a":1,"b":2}') process.exit(1);
 if (new TextDecoder().decode(createTrustManifestSignaturePayload({ identity: 'did:example:alice', signature: 'detached-jws' })) !== '{"identity":"did:example:alice"}') process.exit(1);
 if (checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855').status !== 'match') process.exit(1);
+const signedManifest = {
+  identity: 'did:example:alice',
+  issuedAt: '2026-03-15T10:00:00Z',
+  subject: {
+    digest: 'sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
+    type: 'application/json',
+  },
+  signature: 'eyJhbGciOiJFUzI1NiJ9..NKmmKrtfVExTyrPwimVozLDtLRAZP0r29iJYkrBRAR7rFsM3UqsXFFH3htDDVUKWPJ-UjvgFQqOWDT97iDzT0A',
+};
+const signaturePublicKey = createPublicKey({
+  key: {
+    kty: 'EC',
+    crv: 'P-256',
+    x: 'f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU',
+    y: 'x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0',
+  },
+  format: 'jwk',
+});
+if ((await checkTrustManifestSignature(signedManifest, { publicKey: signaturePublicKey, expectedAlgorithm: 'ES256' })).status !== 'valid') process.exit(1);
 `,
   );
   run(node, ['smoke.mjs'], { cwd: consumerDirectory });
 
   await writeFile(
     join(consumerDirectory, 'consumer.ts'),
-    `import {
+    `import { createPublicKey } from 'node:crypto';
+import {
   type AICatalog,
   type ParseResult,
   type TrustManifest,
@@ -119,9 +141,12 @@ import { aiCatalogJsonSchema, type JsonSchema } from '${pkg.name}/json-schema';
 import {
   canonicalizeJsonValueToBytes,
   checkDigest,
+  checkTrustManifestSignature,
   createTrustManifestSignaturePayload,
   DigestAlgorithmUnavailableError,
   type DigestCheckResult,
+  type TrustManifestSignatureCheckOptions,
+  type TrustManifestSignatureCheckResult,
 } from '${pkg.name}/verification';
 import rawSchema from '${pkg.name}/schema/ai-catalog.schema.json' with { type: 'json' };
 
@@ -155,6 +180,21 @@ const trustManifest: TrustManifest = {
 };
 const signaturePayload: Uint8Array =
   createTrustManifestSignaturePayload(trustManifest);
+const signaturePublicKey = createPublicKey({
+  key: {
+    kty: 'EC',
+    crv: 'P-256',
+    x: 'f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU',
+    y: 'x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0',
+  },
+  format: 'jwk',
+});
+const signatureOptions: TrustManifestSignatureCheckOptions = {
+  publicKey: signaturePublicKey,
+  expectedAlgorithm: 'ES256',
+};
+const signatureCheck: Promise<TrustManifestSignatureCheckResult> =
+  checkTrustManifestSignature(trustManifest, signatureOptions);
 if (digestResult.status === 'algorithm_not_implemented') {
   const algorithm: string = digestResult.algorithm;
   void algorithm;
@@ -166,6 +206,7 @@ void schema;
 void unavailable;
 void canonicalBytes;
 void signaturePayload;
+void signatureCheck;
 void rawSchema;
 `,
   );
@@ -181,6 +222,7 @@ void rawSchema;
           exactOptionalPropertyTypes: true,
           resolveJsonModule: true,
           skipLibCheck: false,
+          types: ['node'],
           noEmit: true,
         },
         include: ['consumer.ts'],

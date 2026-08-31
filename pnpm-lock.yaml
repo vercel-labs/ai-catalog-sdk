@@ -11,6 +11,9 @@ importers:
       canonicalize:
         specifier: 4.0.0
         version: 4.0.0
+      jose:
+        specifier: ~6.2.10
+        version: 6.2.10
     devDependencies:
       '@arethetypeswrong/cli':
         specifier: 0.18.5
@@ -413,6 +416,9 @@ packages:
   is-fullwidth-code-point@3.0.0:
     resolution: {integrity: sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==}
     engines: {node: '>=8'}
+
+  jose@6.2.10:
+    resolution: {integrity: sha512-iiW7J9qRFlGxvCOIBDBDxFePQSn7ZMAnrYGhrrOo6siO/MIqwfyilLR27pkfDgUk+raLuzADS8A3S/KLBisc0g==}
 
   json-schema-traverse@1.0.0:
     resolution: {integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==}
@@ -1061,6 +1067,8 @@ snapshots:
   highlight.js@10.7.3: {}
 
   is-fullwidth-code-point@3.0.0: {}
+
+  jose@6.2.10: {}
 
   json-schema-traverse@1.0.0: {}
 

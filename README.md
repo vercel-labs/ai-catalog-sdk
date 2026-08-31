@@ -83,6 +83,35 @@ establish trust. The entire input, including the omitted `signature` member,
 must satisfy the canonicalizer's programmatic I-JSON restrictions. See
 [Verification utilities](./docs/verification.md) for the complete boundary.
 
+## Check a Trust Manifest signature
+
+`checkTrustManifestSignature()` checks the manifest's detached JWS against one
+public key and algorithm selected by the caller:
+
+```ts
+import { createPublicKey } from 'node:crypto';
+import { checkTrustManifestSignature } from 'ai-catalog-sdk/verification';
+
+const publicKey = createPublicKey(configuredPublisherPublicKeyPem);
+const result = await checkTrustManifestSignature(trustManifest, {
+  publicKey,
+  expectedAlgorithm: 'ES256',
+});
+
+if (result.status !== 'valid') {
+  throw new Error(`Signature check failed: ${result.status}`);
+}
+```
+
+The function currently supports ES256 with a public P-256 `KeyObject` or
+`CryptoKey`. The caller must obtain the key through an independently trusted
+path; JWS header fields do not select a key, trigger network requests, or
+override the expected algorithm. A `valid` result covers the exact canonical
+manifest snapshot but does not prove who controls the key, establish trust,
+validate the manifest schema, check the subject digest, or enforce timestamps.
+See [Verification utilities](./docs/verification.md) for the complete result,
+error, and JWS-profile semantics.
+
 ## Check exact bytes against a digest
 
 Use the separate verification subpath to compare caller-supplied bytes with a
@@ -112,6 +141,7 @@ error semantics.
 | An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
 | A logical JSON value requiring RFC 8785 bytes | `canonicalizeJsonValueToBytes()` | `ai-catalog-sdk/verification` |
 | A Trust Manifest requiring its detached-JWS payload | `createTrustManifestSignaturePayload()` | `ai-catalog-sdk/verification` |
+| A Trust Manifest, trusted public key, and expected signature algorithm | `checkTrustManifestSignature()` | `ai-catalog-sdk/verification` |
 | Exact bytes and a declared digest | `checkDigest()` | `ai-catalog-sdk/verification` |
 | Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
 | JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
