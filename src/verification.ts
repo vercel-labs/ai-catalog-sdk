@@ -4,7 +4,7 @@ import canonicalize from 'canonicalize';
 
 import { DIGEST_PATTERN } from './internal/digest.js';
 import { preflightJsonValue } from './internal/json-value.js';
-import type { JsonValue } from './types.js';
+import type { JsonValue, TrustManifest } from './types.js';
 
 const utf8Encoder = new TextEncoder();
 
@@ -37,6 +37,35 @@ function assertStableBytes(bytes: unknown): asserts bytes is Uint8Array {
   } catch {
     throw new TypeError('bytes must not have a detached ArrayBuffer.');
   }
+}
+
+function assertCanonicalizableJsonValue(
+  value: unknown,
+): asserts value is JsonValue {
+  const preflightIssue = preflightJsonValue(value, {
+    allowOwnProtoMember: true,
+    isDisallowedObject: utilTypes.isProxy,
+    requireIJsonStrings: true,
+  });
+  if (preflightIssue) {
+    const ErrorClass =
+      preflightIssue.code === 'resource_limit' ? RangeError : TypeError;
+    throw new ErrorClass(preflightIssue.message);
+  }
+}
+
+function assertCanonicalizableJsonObject(
+  value: unknown,
+): asserts value is Record<string, JsonValue> {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    utilTypes.isProxy(value) ||
+    Array.isArray(value)
+  ) {
+    throw new TypeError('manifest must be a plain JSON object.');
+  }
+  assertCanonicalizableJsonValue(value);
 }
 
 /** The outcome of comparing bytes with a declared AI Catalog digest. */
@@ -81,16 +110,7 @@ export class DigestAlgorithmUnavailableError extends Error {
  * depth limit.
  */
 export function canonicalizeJsonValueToBytes(value: JsonValue): Uint8Array {
-  const preflightIssue = preflightJsonValue(value, {
-    allowOwnProtoMember: true,
-    isDisallowedObject: utilTypes.isProxy,
-    requireIJsonStrings: true,
-  });
-  if (preflightIssue) {
-    const ErrorClass =
-      preflightIssue.code === 'resource_limit' ? RangeError : TypeError;
-    throw new ErrorClass(preflightIssue.message);
-  }
+  assertCanonicalizableJsonValue(value);
 
   let canonicalJson: string | undefined;
   try {
@@ -104,6 +124,40 @@ export function canonicalizeJsonValueToBytes(value: JsonValue): Uint8Array {
     throw new TypeError('The value could not be canonicalized as JSON.');
   }
   return utf8Encoder.encode(canonicalJson);
+}
+
+/**
+ * Creates the RFC 8785 payload covered by a Trust Manifest's detached JWS.
+ *
+ * The input is an already-materialized Trust Manifest. The function omits
+ * exactly its own, top-level, case-sensitive `signature` member and preserves
+ * every other JSON member, including unknown members and nested members named
+ * `signature`. It does not mutate the manifest or validate its schema.
+ * The entire input, including the omitted member, must be plain I-JSON data.
+ *
+ * The returned bytes are the detached JWS payload, not a base64url encoding or
+ * complete JWS signing input. This function does not parse, create, or verify a
+ * JWS, select keys or algorithms, or establish trust.
+ *
+ * @throws {TypeError} If `manifest` is not a plain I-JSON object, including when
+ * it contains non-finite numbers, forbidden Unicode code points, cycles,
+ * sparse arrays, accessors, proxies, or exotic objects.
+ * @throws {RangeError} If `manifest` exceeds the SDK's supported node or
+ * nesting depth limit.
+ */
+export function createTrustManifestSignaturePayload(
+  manifest: TrustManifest,
+): Uint8Array {
+  assertCanonicalizableJsonObject(manifest);
+
+  const descriptors = Object.getOwnPropertyDescriptors(manifest);
+  delete descriptors.signature;
+  const payload = Object.defineProperties(
+    Object.create(null),
+    descriptors,
+  ) as Record<string, JsonValue>;
+
+  return canonicalizeJsonValueToBytes(payload);
 }
 
 /**

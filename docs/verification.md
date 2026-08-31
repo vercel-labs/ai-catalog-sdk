@@ -40,8 +40,42 @@ objects, and other non-JSON values with `TypeError`. Inputs beyond the SDK's
 fixed node or nesting-depth limits throw `RangeError`.
 
 Canonicalization does not remove or reinterpret any member. In particular,
-signature verification code must first construct the exact value that its
-protocol defines as signed; this function does not remove a `signature` member.
+this function does not remove a `signature` member. Use
+`createTrustManifestSignaturePayload()` for the AI Catalog Trust Manifest
+rule described below.
+
+## Create a Trust Manifest signature payload
+
+`createTrustManifestSignaturePayload(manifest)` returns the exact RFC 8785
+UTF-8 payload covered by a Trust Manifest's detached JWS:
+
+```ts
+import { createTrustManifestSignaturePayload } from 'ai-catalog-sdk/verification';
+
+const payload = createTrustManifestSignaturePayload(trustManifest);
+```
+
+The function omits exactly an own, top-level member whose name is the
+case-sensitive string `signature`. It preserves every other member, including
+unknown future fields, extensions, a differently cased top-level name such as
+`Signature`, and nested fields named `signature`. It does not mutate the input,
+and signed and otherwise-identical unsigned manifests produce the same bytes.
+
+The input is an already-materialized Trust Manifest value. This function does
+not parse or structurally validate it, so validate untrusted catalog input at
+the appropriate boundary first. It cannot recover source-level information
+already lost during parsing, such as duplicate member names or original number
+spellings. The same programmatic I-JSON restrictions and fixed resource limits
+as `canonicalizeJsonValueToBytes()` apply, producing `TypeError` or `RangeError`
+respectively. Those restrictions apply to the entire input, including the
+omitted `signature` member. Accessors and proxies are rejected without invoking
+them; non-enumerable and non-JSON `signature` values are rejected rather than
+silently ignored.
+
+The result is only the detached JWS payload. It is not base64url-encoded and is
+not the complete JWS signing input. The function does not create or verify a
+JWS, select or evaluate keys, algorithms, or key identifiers, check a subject
+digest, enforce timestamps, resolve an identity, or establish trust.
 
 ## Check a digest
 
