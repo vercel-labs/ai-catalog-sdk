@@ -37,7 +37,9 @@ Programmatic input must consist of plain JSON objects, arrays, and JSON
 primitives. The function rejects non-finite numbers, lone Unicode surrogates,
 noncharacters, cycles, sparse or decorated arrays, accessors, proxies, exotic
 objects, and other non-JSON values with `TypeError`. Inputs beyond the SDK's
-fixed node or nesting-depth limits throw `RangeError`.
+fixed node or nesting-depth limits throw `RangeError`. Canonicalization uses
+only the accepted own data properties; it does not invoke inherited `toJSON`
+hooks or overridden array methods.
 
 Canonicalization does not remove or reinterpret any member. In particular,
 this function does not remove a `signature` member. Use
@@ -145,6 +147,79 @@ A `valid` result does not prove who owns the public key or connect it with the
 manifest's claimed identity. It also does not establish a trust anchor, check
 the subject digest or surrounding catalog, validate timestamps, or decide
 whether the manifest should be trusted.
+
+## Check a catalog entry's artifact binding
+
+`checkCatalogEntryArtifactBinding()` checks a signed Trust Manifest subject
+against one catalog-entry context and selected artifact representation:
+
+```ts
+import { checkCatalogEntryArtifactBinding } from 'ai-catalog-sdk/verification';
+
+const referencedResult = await checkCatalogEntryArtifactBinding(
+  referencedEntry,
+  artifactBytes,
+  { publicKey, expectedAlgorithm: 'ES256' },
+);
+
+const inlineResult = await checkCatalogEntryArtifactBinding(
+  inlineEntry,
+  { publicKey, expectedAlgorithm: 'ES256' },
+);
+```
+
+The two overloads deliberately reflect the entry representation. A referenced
+entry requires caller-supplied `Uint8Array` bytes. They are hashed as the exact
+byte range supplied, without fetching, decoding, decompressing, parsing, or
+canonicalizing them. An inline entry takes no separate bytes; its `data` value
+is encoded with `canonicalizeJsonValueToBytes()` before hashing.
+
+The check succeeds only when all of the following are true:
+
+- the caller-selected key and expected algorithm produce a `valid` Trust
+  Manifest signature result;
+- the signed subject's `type` exactly equals the entry's `type`;
+- if the subject has a `url`, the entry is referenced and the URL exactly
+  equals the entry's `url`; and
+- the artifact representation matches the subject's declared digest.
+
+The result preserves the lower-level diagnostic vocabulary:
+
+| Status | Meaning |
+| --- | --- |
+| `valid` | The caller-selected key signed the manifest, its subject digest matches the selected artifact representation, and its type and any URL are consistent with the entry. |
+| `missing_trust_manifest` | The entry has no own `trustManifest` member. |
+| `signature_check_failed` | Signature checking did not produce `valid`; `signatureResult` contains the complete lower-level result. |
+| `subject_check_failed` | The authenticated subject is absent or does not match the entry or artifact; `subjectResult` is `missing_subject`, `type_mismatch`, `url_mismatch`, or the lower-level digest failure. |
+
+Signature failure takes precedence over subject failure, so an unauthenticated
+subject cannot produce a successful or independently authoritative binding.
+Within the subject check, type is checked before URL and digest, and URL is
+checked before digest. Programmer-contract and runtime failures reject rather
+than being hidden by a protocol status; in particular, the call shape, options,
+and referenced byte view are validated before `missing_trust_manifest` can be
+returned.
+
+Before its first asynchronous operation, the function captures all relevant
+own data properties, signature inputs, options, and subject fields. It
+canonicalizes inline data or hashes referenced bytes synchronously and retains
+the digest result. Caller mutation after invocation therefore cannot combine a
+signature result from one state with a subject or artifact result from another,
+and referenced artifacts do not need to be copied and retained while signature
+verification is pending.
+
+The function expects a typed or previously parsed entry but does not perform
+schema validation. Wrong runtime types, malformed programmatic JSON, accessors,
+proxies, and shared or detached referenced byte views reject with `TypeError`.
+Canonicalization resource limits reject with `RangeError`; digest backend and
+unexpected signature-backend errors propagate with their existing causes.
+
+A `valid` binding remains narrower than a trust decision. The function does
+not authenticate the entry as a whole, prove that referenced bytes came from
+the entry's URL, establish who owns the public key, connect it with the
+manifest identity, fetch content, infer HTTP media types, normalize URLs,
+enforce timestamps, evaluate provenance or attestations, resolve keys, or
+perform network I/O.
 
 ## Check a digest
 

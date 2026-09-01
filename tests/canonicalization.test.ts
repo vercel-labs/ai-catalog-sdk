@@ -271,6 +271,61 @@ describe('canonicalizeJsonValueToBytes', () => {
     expect(reads).toBe(0);
   });
 
+  it('does not invoke inherited serialization hooks or array methods', () => {
+    const value = { items: [{ b: 2, a: 1 }] };
+    let calls = 0;
+
+    const originalToJson = Object.getOwnPropertyDescriptor(
+      Object.prototype,
+      'toJSON',
+    );
+    let inheritedHookResult: string;
+    try {
+      Object.defineProperty(Object.prototype, 'toJSON', {
+        configurable: true,
+        value() {
+          calls += 1;
+          return null;
+        },
+      });
+      inheritedHookResult = decode(canonicalizeJsonValueToBytes(value));
+    } finally {
+      if (originalToJson) {
+        Object.defineProperty(
+          Object.prototype,
+          'toJSON',
+          originalToJson,
+        );
+      } else {
+        delete (Object.prototype as { toJSON?: unknown }).toJSON;
+      }
+    }
+
+    const originalMap = Object.getOwnPropertyDescriptor(
+      Array.prototype,
+      'map',
+    );
+    let inheritedMapResult: string;
+    try {
+      Object.defineProperty(Array.prototype, 'map', {
+        configurable: true,
+        value() {
+          calls += 1;
+          throw new Error('inherited map must not be called');
+        },
+      });
+      inheritedMapResult = decode(canonicalizeJsonValueToBytes(value));
+    } finally {
+      if (originalMap) {
+        Object.defineProperty(Array.prototype, 'map', originalMap);
+      }
+    }
+
+    expect(inheritedHookResult).toBe('{"items":[{"a":1,"b":2}]}');
+    expect(inheritedMapResult).toBe('{"items":[{"a":1,"b":2}]}');
+    expect(calls).toBe(0);
+  });
+
   it('rejects non-enumerable and symbol members', () => {
     const hidden = {};
     Object.defineProperty(hidden, 'value', { value: true });
