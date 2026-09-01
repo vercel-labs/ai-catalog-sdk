@@ -305,7 +305,7 @@ schemaRegistry.add(concreteAICatalogSchema, {
 schemaRegistry.add(concreteCatalogEntrySchema, {
   id: 'CatalogEntry',
   title: 'Catalog Entry',
-  description: 'A referenced or inline AI artifact catalog entry.',
+  description: 'An AI artifact catalog entry with `url` or inline `data`.',
 });
 schemaRegistry.add(concreteHostInfoSchema, {
   id: 'HostInfo',

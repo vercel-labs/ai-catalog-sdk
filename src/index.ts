@@ -1,8 +1,8 @@
 export {
   entryTypes,
+  isCatalogEntryWithData,
+  isCatalogEntryWithUrl,
   isEntryType,
-  isInlineCatalogEntry,
-  isReferencedCatalogEntry,
   mediaTypes,
 } from './entry-types.js';
 export {
@@ -19,15 +19,15 @@ export {
   type AICatalog,
   type Attestation,
   type CatalogEntry,
+  type CatalogEntryWithData,
+  type CatalogEntryWithUrl,
   type CatalogIssue,
   type HostInfo,
-  type InlineCatalogEntry,
   type JsonObject,
   type JsonValue,
   type ParseResult,
   type ProvenanceLink,
   type Publisher,
-  type ReferencedCatalogEntry,
   type TrustManifest,
   type TrustSchema,
   type TrustSubject,

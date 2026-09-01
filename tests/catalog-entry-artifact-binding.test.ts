@@ -9,9 +9,9 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import type {
-  InlineCatalogEntry,
+  CatalogEntryWithData,
+  CatalogEntryWithUrl,
   JsonValue,
-  ReferencedCatalogEntry,
   TrustManifest,
   TrustSubject,
 } from '../src/index.js';
@@ -73,10 +73,10 @@ function manifestFor(subject?: TrustSubject): TrustManifest {
   });
 }
 
-function referencedEntry(
+function entryWithUrl(
   bytes: Uint8Array,
   subject: Partial<TrustSubject> = {},
-): ReferencedCatalogEntry {
+): CatalogEntryWithUrl {
   const url = 'https://example.com/artifact.bin';
   return {
     identifier: 'example-artifact',
@@ -91,12 +91,12 @@ function referencedEntry(
   };
 }
 
-function inlineEntry(
+function entryWithData(
   data: JsonValue,
   subject: Partial<TrustSubject> = {},
-): InlineCatalogEntry {
+): CatalogEntryWithData {
   return {
-    identifier: 'example-inline-artifact',
+    identifier: 'example-artifact-with-data',
     type: 'application/example+json',
     data,
     trustManifest: manifestFor({
@@ -108,19 +108,19 @@ function inlineEntry(
 }
 
 describe('checkCatalogEntryArtifactBinding', () => {
-  it('checks exact referenced bytes with an optional matching subject URL', async () => {
+  it('checks exact bytes for an entry with `url` and an optional matching subject URL', async () => {
     const backing = new Uint8Array([255, 116, 101, 115, 116, 0]);
     const bytes = backing.subarray(1, 5);
 
     await expect(
       checkCatalogEntryArtifactBinding(
-        referencedEntry(bytes),
+        entryWithUrl(bytes),
         bytes,
         optionsFor(),
       ),
     ).resolves.toEqual({ status: 'valid' });
 
-    const withoutSubjectUrl = referencedEntry(bytes);
+    const withoutSubjectUrl = entryWithUrl(bytes);
     if (withoutSubjectUrl.trustManifest?.subject) {
       delete withoutSubjectUrl.trustManifest.subject.url;
       withoutSubjectUrl.trustManifest = signManifest(
@@ -136,17 +136,17 @@ describe('checkCatalogEntryArtifactBinding', () => {
     ).resolves.toEqual({ status: 'valid' });
   });
 
-  it('canonicalizes inline JSON before checking its digest', async () => {
+  it('canonicalizes JSON from an entry with `data` before checking its digest', async () => {
     const data = { b: 2, a: 1 };
     expect(JSON.stringify(data)).toBe('{"b":2,"a":1}');
 
     await expect(
-      checkCatalogEntryArtifactBinding(inlineEntry(data), optionsFor()),
+      checkCatalogEntryArtifactBinding(entryWithData(data), optionsFor()),
     ).resolves.toEqual({ status: 'valid' });
   });
 
   it('reports an absent Trust Manifest', async () => {
-    const entry: InlineCatalogEntry = {
+    const entry: CatalogEntryWithData = {
       identifier: 'unsigned',
       type: 'application/example+json',
       data: null,
@@ -159,7 +159,7 @@ describe('checkCatalogEntryArtifactBinding', () => {
 
   it('preserves every signature failure as a nested result', async () => {
     const bytes = new TextEncoder().encode('test');
-    const base = referencedEntry(bytes);
+    const base = entryWithUrl(bytes);
     const manifest = base.trustManifest as TrustManifest;
     const { signature: _signature, ...unsigned } = manifest;
     const cases: [TrustManifest, object][] = [
@@ -199,7 +199,7 @@ describe('checkCatalogEntryArtifactBinding', () => {
 
   it('reports a signature failure before a subject failure', async () => {
     const bytes = new TextEncoder().encode('test');
-    const entry = referencedEntry(bytes, {
+    const entry = entryWithUrl(bytes, {
       type: 'application/wrong',
       digest: 'sha256:abc',
     });
@@ -218,7 +218,7 @@ describe('checkCatalogEntryArtifactBinding', () => {
 
   it('reports a missing subject after a valid signature', async () => {
     const bytes = new TextEncoder().encode('test');
-    const entry = referencedEntry(bytes);
+    const entry = entryWithUrl(bytes);
     entry.trustManifest = manifestFor();
 
     await expect(
@@ -231,7 +231,7 @@ describe('checkCatalogEntryArtifactBinding', () => {
 
   it('checks subject type before its URL or digest', async () => {
     const bytes = new TextEncoder().encode('test');
-    const entry = referencedEntry(bytes, {
+    const entry = entryWithUrl(bytes, {
       type: 'application/wrong',
       url: 'https://example.com/wrong',
       digest: 'sha256:abc',
@@ -245,9 +245,9 @@ describe('checkCatalogEntryArtifactBinding', () => {
     });
   });
 
-  it('requires a present subject URL to match a referenced entry', async () => {
+  it('requires a present subject URL to match an entry with `url`', async () => {
     const bytes = new TextEncoder().encode('test');
-    const entry = referencedEntry(bytes, {
+    const entry = entryWithUrl(bytes, {
       url: 'https://example.com/other.bin',
     });
 
@@ -259,9 +259,9 @@ describe('checkCatalogEntryArtifactBinding', () => {
     });
   });
 
-  it('rejects a subject URL on an inline entry', async () => {
-    const entry = inlineEntry({ ok: true }, {
-      url: 'https://example.com/inline.json',
+  it('rejects a subject URL on an entry with `data`', async () => {
+    const entry = entryWithData({ ok: true }, {
+      url: 'https://example.com/artifact-with-data.json',
     });
 
     await expect(
@@ -286,7 +286,7 @@ describe('checkCatalogEntryArtifactBinding', () => {
     ],
   ])('preserves the digest failure for %s', async (_label, value, result) => {
     const bytes = new TextEncoder().encode('test');
-    const entry = referencedEntry(bytes, { digest: value });
+    const entry = entryWithUrl(bytes, { digest: value });
 
     await expect(
       checkCatalogEntryArtifactBinding(entry, bytes, optionsFor()),
@@ -299,17 +299,17 @@ describe('checkCatalogEntryArtifactBinding', () => {
   it('enforces context omitted by direct /zod entry parsing', async () => {
     const bytes = new TextEncoder().encode('test');
     const typeMismatch = catalogEntrySchema.parse(
-      referencedEntry(bytes, { type: 'application/wrong' }),
+      entryWithUrl(bytes, { type: 'application/wrong' }),
     );
     const urlMismatch = catalogEntrySchema.parse(
-      referencedEntry(bytes, {
+      entryWithUrl(bytes, {
         url: 'https://example.com/other.bin',
       }),
     );
 
     await expect(
       checkCatalogEntryArtifactBinding(
-        typeMismatch as ReferencedCatalogEntry,
+        typeMismatch as CatalogEntryWithUrl,
         bytes,
         optionsFor(),
       ),
@@ -319,7 +319,7 @@ describe('checkCatalogEntryArtifactBinding', () => {
     });
     await expect(
       checkCatalogEntryArtifactBinding(
-        urlMismatch as ReferencedCatalogEntry,
+        urlMismatch as CatalogEntryWithUrl,
         bytes,
         optionsFor(),
       ),
@@ -329,9 +329,9 @@ describe('checkCatalogEntryArtifactBinding', () => {
     });
   });
 
-  it('checks one coherent inline entry snapshot', async () => {
+  it('checks one coherent snapshot of an entry with `data`', async () => {
     const data = { nested: { value: 'original' } };
-    const entry = inlineEntry(data) as InlineCatalogEntry &
+    const entry = entryWithData(data) as CatalogEntryWithData &
       Record<string, JsonValue>;
     const manifest = entry.trustManifest as TrustManifest &
       Record<string, JsonValue>;
@@ -358,10 +358,10 @@ describe('checkCatalogEntryArtifactBinding', () => {
     await expect(pending).resolves.toEqual({ status: 'valid' });
   });
 
-  it('checks referenced bytes and entry context before yielding', async () => {
+  it('checks supplied bytes and entry-with-`url` context before yielding', async () => {
     const backing = new Uint8Array([255, 116, 101, 115, 116, 0]);
     const bytes = backing.subarray(1, 5);
-    const entry = referencedEntry(bytes);
+    const entry = entryWithUrl(bytes);
     const manifest = entry.trustManifest as TrustManifest;
     const options = optionsFor();
 
@@ -387,7 +387,7 @@ describe('checkCatalogEntryArtifactBinding', () => {
 
   it('validates the selected key before capturing entry context', async () => {
     const bytes = new TextEncoder().encode('test');
-    const entry = referencedEntry(bytes);
+    const entry = entryWithUrl(bytes);
     const key = createPublicKey({
       key: trustedKeys.publicKey.export({ format: 'jwk' }),
       format: 'jwk',
@@ -418,7 +418,7 @@ describe('checkCatalogEntryArtifactBinding', () => {
 
   it('does not invoke an overridden byte-view buffer getter', async () => {
     const bytes = new TextEncoder().encode('test');
-    const entry = referencedEntry(bytes);
+    const entry = entryWithUrl(bytes);
     const backingBuffer = bytes.buffer;
     let reads = 0;
     Object.defineProperty(bytes, 'buffer', {
@@ -441,7 +441,7 @@ describe('checkCatalogEntryArtifactBinding', () => {
 
   it('rejects accessors without invoking them', async () => {
     let reads = 0;
-    const entry = inlineEntry(null);
+    const entry = entryWithData(null);
     Object.defineProperty(entry, 'data', {
       enumerable: true,
       get() {
@@ -456,9 +456,9 @@ describe('checkCatalogEntryArtifactBinding', () => {
     expect(reads).toBe(0);
   });
 
-  it('rejects shared and detached referenced byte views', async () => {
+  it('rejects shared and detached byte views for an entry with `url`', async () => {
     const bytes = new TextEncoder().encode('test');
-    const entry = referencedEntry(bytes);
+    const entry = entryWithUrl(bytes);
     const shared = new Uint8Array(new SharedArrayBuffer(4));
     await expect(
       checkCatalogEntryArtifactBinding(entry, shared, optionsFor()),
@@ -471,13 +471,13 @@ describe('checkCatalogEntryArtifactBinding', () => {
     ).rejects.toThrow('bytes must not have a detached ArrayBuffer.');
   });
 
-  it('preserves inline canonicalization resource errors', async () => {
+  it('preserves canonicalization resource errors for an entry with `data`', async () => {
     let data: JsonValue = null;
     for (let depth = 0; depth < 130; depth += 1) {
       data = { nested: data };
     }
     const entry = {
-      identifier: 'deep-inline',
+      identifier: 'deep-entry-with-data',
       type: 'application/example+json',
       data,
       trustManifest: {
@@ -489,7 +489,7 @@ describe('checkCatalogEntryArtifactBinding', () => {
         },
         signature: 'not-a-jws',
       },
-    } satisfies InlineCatalogEntry;
+    } satisfies CatalogEntryWithData;
 
     await expect(
       checkCatalogEntryArtifactBinding(entry, optionsFor()),

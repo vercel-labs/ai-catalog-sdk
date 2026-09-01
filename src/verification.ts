@@ -13,9 +13,9 @@ import { DIGEST_PATTERN } from './internal/digest.js';
 import { preflightJsonValue } from './internal/json-value.js';
 import type {
   CatalogEntry,
-  InlineCatalogEntry,
+  CatalogEntryWithData,
+  CatalogEntryWithUrl,
   JsonValue,
-  ReferencedCatalogEntry,
   TrustManifest,
 } from './types.js';
 
@@ -666,33 +666,33 @@ export async function checkTrustManifestSignature(
 /**
  * Checks a catalog entry's signed Trust Manifest binding to its artifact.
  *
- * Inline entries are checked against the RFC 8785 canonicalization of their
- * `data`. Referenced entries are checked against the exact caller-supplied byte
- * range. The entry context, manifest, signature options, and key are captured,
- * and the artifact digest check is completed, before the first asynchronous
- * operation.
+ * Entries with `url` are checked against the exact caller-supplied byte range.
+ * Entries with `data` are checked against the RFC 8785 canonicalization of
+ * their inline data. The entry context, manifest, signature options, and key
+ * are captured, and the artifact digest check is completed, before the first
+ * asynchronous operation.
  *
  * A `valid` result establishes only that the caller-selected key signed the
  * manifest, its subject digest matches the selected artifact representation,
  * and its type and any URL are consistent with the entry. It does not
- * authenticate the entry as a whole or establish where referenced bytes came
- * from, key ownership, or trust.
+ * authenticate the entry as a whole or establish where caller-supplied bytes
+ * came from, key ownership, or trust.
  *
  * @throws {TypeError} If an argument or relevant entry or subject field has the
  * wrong runtime type, if an input uses accessors, proxies, or unsupported
- * programmatic JSON values, or if referenced bytes are shared or detached.
- * @throws {RangeError} If inline data or the Trust Manifest exceeds the SDK's
+ * programmatic JSON values, or if caller-supplied bytes are shared or detached.
+ * @throws {RangeError} If entry data or the Trust Manifest exceeds the SDK's
  * supported node or nesting depth limit.
  * @throws {DigestAlgorithmUnavailableError} If the runtime cannot execute a
  * digest algorithm implemented by this SDK.
  */
 export function checkCatalogEntryArtifactBinding(
-  entry: InlineCatalogEntry,
+  entry: CatalogEntryWithData,
   options: TrustManifestSignatureCheckOptions,
 ): Promise<CatalogEntryArtifactBindingCheckResult>;
 /** @inheritdoc */
 export function checkCatalogEntryArtifactBinding(
-  entry: ReferencedCatalogEntry,
+  entry: CatalogEntryWithUrl,
   artifactBytes: Uint8Array,
   options: TrustManifestSignatureCheckOptions,
 ): Promise<CatalogEntryArtifactBindingCheckResult>;
@@ -703,9 +703,9 @@ export async function checkCatalogEntryArtifactBinding(
     | TrustManifestSignatureCheckOptions,
   maybeOptions?: TrustManifestSignatureCheckOptions,
 ): Promise<CatalogEntryArtifactBindingCheckResult> {
-  const isInlineCall = maybeOptions === undefined;
+  const isDataCall = maybeOptions === undefined;
   const options = snapshotSignatureCheckOptions(
-    isInlineCall ? artifactBytesOrOptions : maybeOptions,
+    isDataCall ? artifactBytesOrOptions : maybeOptions,
   );
   assertCatalogEntryObject(entry);
 
@@ -722,23 +722,23 @@ export async function checkCatalogEntryArtifactBinding(
     );
   }
 
-  const isInline = dataProperty.present;
-  let referencedBytes: Uint8Array | undefined;
+  const hasData = dataProperty.present;
+  let artifactBytesForUrl: Uint8Array | undefined;
   let entryUrl: string | undefined;
-  if (isInline) {
-    if (!isInlineCall) {
+  if (hasData) {
+    if (!isDataCall) {
       throw new TypeError(
-        'inline entries accept options as the second argument.',
+        'entries with data accept options as the second argument.',
       );
     }
   } else {
-    if (isInlineCall) {
+    if (isDataCall) {
       throw new TypeError(
-        'referenced entries require artifact bytes as the second argument.',
+        'entries with url require artifact bytes as the second argument.',
       );
     }
     assertStableBytes(artifactBytesOrOptions);
-    referencedBytes = artifactBytesOrOptions;
+    artifactBytesForUrl = artifactBytesOrOptions;
     if (typeof urlProperty.value !== 'string') {
       throw new TypeError('entry.url must be a string.');
     }
@@ -791,13 +791,13 @@ export async function checkCatalogEntryArtifactBinding(
       subjectResult = { status: 'type_mismatch' };
     } else if (
       subjectSnapshot.hasUrl &&
-      (isInline || subjectSnapshot.url !== entryUrl)
+      (hasData || subjectSnapshot.url !== entryUrl)
     ) {
       subjectResult = { status: 'url_mismatch' };
     } else {
-      const artifactBytes = isInline
+      const artifactBytes = hasData
         ? canonicalizeJsonValueToBytes(dataProperty.value as JsonValue)
-        : referencedBytes;
+        : artifactBytesForUrl;
       if (!artifactBytes) {
         throw new TypeError('artifactBytes must be a Uint8Array.');
       }

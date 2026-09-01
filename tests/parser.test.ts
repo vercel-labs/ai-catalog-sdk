@@ -5,8 +5,8 @@ import {
   CatalogParseError,
   entryTypes,
   isEntryType,
-  isInlineCatalogEntry,
-  isReferencedCatalogEntry,
+  isCatalogEntryWithData,
+  isCatalogEntryWithUrl,
   mediaTypes,
   parseCatalog,
   parseCatalogEntry,
@@ -59,7 +59,7 @@ describe('root parsing', () => {
     expect(parsed.entries).toHaveLength(3);
   });
 
-  it('accepts every JSON value as inline artifact data', () => {
+  it('accepts every JSON value as data in an entry with `data`', () => {
     const values = [null, false, 0, 'text', [], {}];
     for (const data of values) {
       expect(
@@ -182,19 +182,19 @@ describe('root parsing', () => {
   });
 
   it('keeps helper narrowing limited to declared entry properties', () => {
-    const inline = parseCatalogEntry({
+    const entryWithData = parseCatalogEntry({
       identifier: 'x',
-      type: 'inline',
+      type: 'with-data',
       data: {},
     });
-    const referenced = parseCatalogEntry({
+    const entryWithUrl = parseCatalogEntry({
       identifier: 'y',
       type: mediaTypes.mcpServerCard,
       url: 'https://example.com/card',
     });
-    expect(isInlineCatalogEntry(inline)).toBe(true);
-    expect(isReferencedCatalogEntry(referenced)).toBe(true);
-    expect(isEntryType(mediaTypes.mcpServerCard)(referenced)).toBe(true);
+    expect(isCatalogEntryWithData(entryWithData)).toBe(true);
+    expect(isCatalogEntryWithUrl(entryWithUrl)).toBe(true);
+    expect(isEntryType(mediaTypes.mcpServerCard)(entryWithUrl)).toBe(true);
   });
 
   it('groups recognized representations by entry concept', () => {

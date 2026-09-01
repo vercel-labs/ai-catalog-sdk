@@ -881,7 +881,7 @@ export const aiCatalogJsonSchema: JsonSchema = {
         }
       ],
       "title": "Catalog Entry",
-      "description": "A referenced or inline AI artifact catalog entry."
+      "description": "An AI artifact catalog entry with `url` or inline `data`."
     },
     "__schema23": {
       "type": "string"
