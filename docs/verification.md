@@ -329,10 +329,11 @@ The result statuses have deliberately narrow meanings:
 | `invalid_digest` | The declaration is malformed, or a known algorithm has an invalid output length. |
 | `algorithm_not_implemented` | The declaration is syntactically valid, but the SDK does not implement its exact algorithm token. |
 
-The SDK currently implements only the exact, case-sensitive `sha256` token
-with 64 lowercase hexadecimal characters. This is an SDK capability boundary,
-not a claim that other algorithms are forbidden or insecure. If the runtime
-cannot execute a registered implementation, the function throws
+The SDK currently implements the exact, case-sensitive `sha256`, `sha384`, and
+`sha512` tokens with 64, 96, and 128 lowercase hexadecimal characters,
+respectively. This is an SDK capability boundary, not a claim that other
+algorithms are forbidden or insecure. If the runtime cannot execute a
+registered implementation, the function throws
 `DigestAlgorithmUnavailableError` and preserves the underlying error as
 `cause`.
 
