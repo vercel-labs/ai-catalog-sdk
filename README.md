@@ -39,98 +39,51 @@ The parsed result is an ordinary mutable, JSON-shaped object. Parsing validates 
 
 Treat parsed Trust Manifest data as unverified input. Parsing does not verify signatures or digests, resolve identities, fetch attestations, evaluate provenance, or decide whether an artifact or publisher is trustworthy.
 
-## Canonicalize a logical JSON value
+## Check a catalog entry's artifact binding
 
-Use `canonicalizeJsonValueToBytes()` when an AI Catalog operation defines its
-input as RFC 8785 JSON Canonicalization Scheme (JCS) bytes. For example, an
-inline entry's digest is computed over the canonicalized `data` value:
+`checkCatalogEntryArtifactBinding()` composes signature, subject-context, and
+digest checks from one coherent invocation snapshot:
 
 ```ts
-import {
-  canonicalizeJsonValueToBytes,
-  checkDigest,
-} from 'ai-catalog-sdk/verification';
+import { checkCatalogEntryArtifactBinding } from 'ai-catalog-sdk/verification';
 
-const result = checkDigest(
-  canonicalizeJsonValueToBytes(entry.data),
-  expectedDigest,
+const result = await checkCatalogEntryArtifactBinding(
+  referencedEntry,
+  artifactBytes,
+  { publicKey, expectedAlgorithm: 'ES256' },
 );
-```
-
-The function accepts an already-materialized JSON value, not JSON source text,
-and returns fresh UTF-8 bytes. It does not parse JSON, remove signature fields,
-or recover details already lost during parsing. See
-[Verification utilities](./docs/verification.md) for its input constraints and
-source-level limitations.
-
-## Create a Trust Manifest signature payload
-
-Use `createTrustManifestSignaturePayload()` to produce the detached-JWS
-payload defined by the AI Catalog Trust Manifest protocol:
-
-```ts
-import { createTrustManifestSignaturePayload } from 'ai-catalog-sdk/verification';
-
-const payload = createTrustManifestSignaturePayload(trustManifest);
-```
-
-The function omits exactly the manifest's own, top-level, case-sensitive
-`signature` member and returns fresh RFC 8785 UTF-8 bytes. It preserves all
-other members, including unknown fields, extensions, and nested fields named
-`signature`, without mutating the manifest. It does not validate the Trust
-Manifest schema, construct or verify a JWS, choose a key or algorithm, or
-establish trust. The entire input, including the omitted `signature` member,
-must satisfy the canonicalizer's programmatic I-JSON restrictions. See
-[Verification utilities](./docs/verification.md) for the complete boundary.
-
-## Check a Trust Manifest signature
-
-`checkTrustManifestSignature()` checks the manifest's detached JWS against one
-public key and algorithm selected by the caller:
-
-```ts
-import { createPublicKey } from 'node:crypto';
-import { checkTrustManifestSignature } from 'ai-catalog-sdk/verification';
-
-const publicKey = createPublicKey(configuredPublisherPublicKeyPem);
-const result = await checkTrustManifestSignature(trustManifest, {
-  publicKey,
-  expectedAlgorithm: 'ES256',
-});
 
 if (result.status !== 'valid') {
-  throw new Error(`Signature check failed: ${result.status}`);
+  throw new Error(`Artifact binding check failed: ${result.status}`);
 }
 ```
 
-The function currently supports ES256 with a public P-256 `KeyObject` or
-`CryptoKey`. The caller must obtain the key through an independently trusted
-path; JWS header fields do not select a key, trigger network requests, or
-override the expected algorithm. A `valid` result covers the exact canonical
-manifest snapshot but does not prove who controls the key, establish trust,
-validate the manifest schema, check the subject digest, or enforce timestamps.
-See [Verification utilities](./docs/verification.md) for the complete result,
-error, and JWS-profile semantics.
+For an inline entry, omit `artifactBytes`; the function canonicalizes the
+entry's `data` with JCS. For a referenced entry, it hashes the exact supplied
+byte range without fetching or decoding it. A `valid` result means the
+caller-selected key signed the manifest, the subject digest matches the
+selected artifact representation, and the subject type and any URL are
+consistent with the entry. It does not authenticate the entry as a whole,
+prove that referenced bytes came from its URL, or establish key ownership,
+identity, freshness, or trust. See
+[Verification utilities](./docs/verification.md) for failure details and the
+complete boundary.
 
-## Check exact bytes against a digest
+## Use lower-level verification utilities
 
-Use the separate verification subpath to compare caller-supplied bytes with a
-declared digest:
+Use the individual utilities when the composed catalog-entry check does not fit
+your workflow:
 
-```ts
-import { checkDigest } from 'ai-catalog-sdk/verification';
+| API | Use it for | Important boundary |
+| --- | --- | --- |
+| `canonicalizeJsonValueToBytes()` | Encoding a logical JSON value as RFC 8785 JCS UTF-8 bytes | Accepts an already-materialized JSON value, not JSON source text |
+| `createTrustManifestSignaturePayload()` | Creating the canonical detached-JWS payload for a Trust Manifest | Does not validate the manifest, construct or verify a JWS, or establish trust |
+| `checkTrustManifestSignature()` | Checking a manifest snapshot with one caller-selected public key and expected algorithm | Currently supports ES256; does not check the subject digest, identity, freshness, or trust |
+| `checkDigest()` | Comparing exact caller-supplied bytes with a declared digest | Currently supports `sha256`; a match does not authenticate the digest declaration |
 
-const result = checkDigest(artifactBytes, expectedDigest);
-if (result.status !== 'match') {
-  throw new Error(`Digest check failed: ${result.status}`);
-}
-```
-
-`checkDigest()` currently implements the exact `sha256` algorithm token. It
-does not fetch, decode, serialize, or JCS-canonicalize content, and a match does
-not establish who declared the digest or whether it is trustworthy. See
-[Verification utilities](./docs/verification.md) for the complete result and
-error semantics.
+These utilities do not fetch content or resolve keys. See
+[Verification utilities](./docs/verification.md) for their inputs, results,
+errors, security boundaries, and examples.
 
 ## Choose a validation API
 
@@ -139,10 +92,7 @@ error semantics.
 | Catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
-| A logical JSON value requiring RFC 8785 bytes | `canonicalizeJsonValueToBytes()` | `ai-catalog-sdk/verification` |
-| A Trust Manifest requiring its detached-JWS payload | `createTrustManifestSignaturePayload()` | `ai-catalog-sdk/verification` |
-| A Trust Manifest, trusted public key, and expected signature algorithm | `checkTrustManifestSignature()` | `ai-catalog-sdk/verification` |
-| Exact bytes and a declared digest | `checkDigest()` | `ai-catalog-sdk/verification` |
+| A catalog entry, trusted public key, and its inline or caller-supplied referenced artifact | `checkCatalogEntryArtifactBinding()` | `ai-catalog-sdk/verification` |
 | Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
 | JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
 | Raw JSON Schema for another validator or tool | `ai-catalog.schema.json` | `ai-catalog-sdk/schema/ai-catalog.schema.json` |

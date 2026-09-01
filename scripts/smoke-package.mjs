@@ -89,7 +89,7 @@ try {
 import { implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
-import { canonicalizeJsonValueToBytes, checkDigest, checkTrustManifestSignature, createTrustManifestSignaturePayload } from ${JSON.stringify(`${pkg.name}/verification`)};
+import { canonicalizeJsonValueToBytes, checkCatalogEntryArtifactBinding, checkDigest, checkTrustManifestSignature, createTrustManifestSignaturePayload } from ${JSON.stringify(`${pkg.name}/verification`)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
 const value = { specVersion: '1.0', entries: [] };
@@ -119,6 +119,14 @@ const signaturePublicKey = createPublicKey({
   format: 'jwk',
 });
 if ((await checkTrustManifestSignature(signedManifest, { publicKey: signaturePublicKey, expectedAlgorithm: 'ES256' })).status !== 'valid') process.exit(1);
+const artifactBytes = new TextEncoder().encode('test');
+const signedEntry = {
+  identifier: 'signed-artifact',
+  type: 'application/json',
+  url: 'https://example.com/artifact.json',
+  trustManifest: signedManifest,
+};
+if ((await checkCatalogEntryArtifactBinding(signedEntry, artifactBytes, { publicKey: signaturePublicKey, expectedAlgorithm: 'ES256' })).status !== 'valid') process.exit(1);
 `,
   );
   run(node, ['smoke.mjs'], { cwd: consumerDirectory });
@@ -128,7 +136,9 @@ if ((await checkTrustManifestSignature(signedManifest, { publicKey: signaturePub
     `import { createPublicKey } from 'node:crypto';
 import {
   type AICatalog,
+  type InlineCatalogEntry,
   type ParseResult,
+  type ReferencedCatalogEntry,
   type TrustManifest,
   entryTypes,
   isEntryType,
@@ -140,11 +150,13 @@ import { aiCatalogSchema } from '${pkg.name}/zod';
 import { aiCatalogJsonSchema, type JsonSchema } from '${pkg.name}/json-schema';
 import {
   canonicalizeJsonValueToBytes,
+  checkCatalogEntryArtifactBinding,
   checkDigest,
   checkTrustManifestSignature,
   createTrustManifestSignaturePayload,
   DigestAlgorithmUnavailableError,
   type DigestCheckResult,
+  type CatalogEntryArtifactBindingCheckResult,
   type TrustManifestSignatureCheckOptions,
   type TrustManifestSignatureCheckResult,
 } from '${pkg.name}/verification';
@@ -195,6 +207,48 @@ const signatureOptions: TrustManifestSignatureCheckOptions = {
 };
 const signatureCheck: Promise<TrustManifestSignatureCheckResult> =
   checkTrustManifestSignature(trustManifest, signatureOptions);
+const inlineBindingEntry: InlineCatalogEntry = {
+  identifier: 'inline-binding',
+  type: 'application/example',
+  data: null,
+  trustManifest,
+};
+const referencedBindingEntry: ReferencedCatalogEntry = {
+  identifier: 'referenced-binding',
+  type: 'application/example',
+  url: 'https://example.com/artifact',
+  trustManifest,
+};
+const inlineBindingCheck: Promise<CatalogEntryArtifactBindingCheckResult> =
+  checkCatalogEntryArtifactBinding(inlineBindingEntry, signatureOptions);
+const referencedBindingCheck: Promise<CatalogEntryArtifactBindingCheckResult> =
+  checkCatalogEntryArtifactBinding(
+    referencedBindingEntry,
+    new Uint8Array(),
+    signatureOptions,
+  );
+const unionBindingEntry = authored.entries[0];
+const unionBindingCheck = unionBindingEntry === undefined
+  ? undefined
+  : isInlineCatalogEntry(unionBindingEntry)
+    ? checkCatalogEntryArtifactBinding(unionBindingEntry, signatureOptions)
+    : checkCatalogEntryArtifactBinding(
+        unionBindingEntry,
+        new Uint8Array(),
+        signatureOptions,
+      );
+// @ts-expect-error Referenced entries require explicit artifact bytes.
+checkCatalogEntryArtifactBinding(referencedBindingEntry, signatureOptions);
+// @ts-expect-error Inline entries do not accept separate artifact bytes.
+checkCatalogEntryArtifactBinding(inlineBindingEntry, new Uint8Array(), signatureOptions);
+const bindingResult = {} as CatalogEntryArtifactBindingCheckResult;
+if (
+  bindingResult.status === 'subject_check_failed' &&
+  bindingResult.subjectResult.status === 'algorithm_not_implemented'
+) {
+  const algorithm: string = bindingResult.subjectResult.algorithm;
+  void algorithm;
+}
 if (digestResult.status === 'algorithm_not_implemented') {
   const algorithm: string = digestResult.algorithm;
   void algorithm;
@@ -207,6 +261,9 @@ void unavailable;
 void canonicalBytes;
 void signaturePayload;
 void signatureCheck;
+void inlineBindingCheck;
+void referencedBindingCheck;
+void unionBindingCheck;
 void rawSchema;
 `,
   );
