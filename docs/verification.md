@@ -156,31 +156,32 @@ against one catalog-entry context and selected artifact representation:
 ```ts
 import { checkCatalogEntryArtifactBinding } from 'ai-catalog-sdk/verification';
 
-const referencedResult = await checkCatalogEntryArtifactBinding(
-  referencedEntry,
+const resultForEntryWithUrl = await checkCatalogEntryArtifactBinding(
+  entryWithUrl,
   artifactBytes,
   { publicKey, expectedAlgorithm: 'ES256' },
 );
 
-const inlineResult = await checkCatalogEntryArtifactBinding(
-  inlineEntry,
+const resultForEntryWithData = await checkCatalogEntryArtifactBinding(
+  entryWithData,
   { publicKey, expectedAlgorithm: 'ES256' },
 );
 ```
 
-The two overloads deliberately reflect the entry representation. A referenced
-entry requires caller-supplied `Uint8Array` bytes. They are hashed as the exact
+The two overloads deliberately reflect the entry representation. An entry with
+`url` requires caller-supplied `Uint8Array` bytes. They are hashed as the exact
 byte range supplied, without fetching, decoding, decompressing, parsing, or
-canonicalizing them. An inline entry takes no separate bytes; its `data` value
-is encoded with `canonicalizeJsonValueToBytes()` before hashing.
+canonicalizing them. An entry with `data` takes no separate bytes; its `data`
+value is the inline artifact and is encoded with
+`canonicalizeJsonValueToBytes()` before hashing.
 
 The check succeeds only when all of the following are true:
 
 - the caller-selected key and expected algorithm produce a `valid` Trust
   Manifest signature result;
 - the signed subject's `type` exactly equals the entry's `type`;
-- if the subject has a `url`, the entry is referenced and the URL exactly
-  equals the entry's `url`; and
+- if the subject has a `url`, the entry has `url` and the two values exactly
+  match; and
 - the artifact representation matches the subject's declared digest.
 
 The result preserves the lower-level diagnostic vocabulary:
@@ -197,26 +198,27 @@ subject cannot produce a successful or independently authoritative binding.
 Within the subject check, type is checked before URL and digest, and URL is
 checked before digest. Programmer-contract and runtime failures reject rather
 than being hidden by a protocol status; in particular, the call shape, options,
-and referenced byte view are validated before `missing_trust_manifest` can be
-returned.
+and byte view supplied for an entry with `url` are validated before
+`missing_trust_manifest` can be returned.
 
 Before its first asynchronous operation, the function captures all relevant
 own data properties, signature inputs, options, and subject fields. It
-canonicalizes inline data or hashes referenced bytes synchronously and retains
-the digest result. Caller mutation after invocation therefore cannot combine a
-signature result from one state with a subject or artifact result from another,
-and referenced artifacts do not need to be copied and retained while signature
-verification is pending.
+hashes caller-supplied bytes for an entry with `url` or canonicalizes the inline
+artifact in an entry with `data`, then retains the digest result. Caller
+mutation after invocation therefore cannot combine a signature result from one
+state with a subject or artifact result from another, and caller-supplied
+artifacts do not need to be copied and retained while signature verification is
+pending.
 
 The function expects a typed or previously parsed entry but does not perform
 schema validation. Wrong runtime types, malformed programmatic JSON, accessors,
-proxies, and shared or detached referenced byte views reject with `TypeError`.
+proxies, and shared or detached supplied byte views reject with `TypeError`.
 Canonicalization resource limits reject with `RangeError`; digest backend and
 unexpected signature-backend errors propagate with their existing causes.
 
 A `valid` binding remains narrower than a trust decision. The function does
-not authenticate the entry as a whole, prove that referenced bytes came from
-the entry's URL, establish who owns the public key, connect it with the
+not authenticate the entry as a whole, prove that caller-supplied bytes came
+from the entry's URL, establish who owns the public key, connect it with the
 manifest identity, fetch content, infer HTTP media types, normalize URLs,
 enforce timestamps, evaluate provenance or attestations, resolve keys, or
 perform network I/O.
@@ -241,8 +243,8 @@ if (result.status !== 'match') {
 
 The function hashes bytes verbatim. It does not fetch content, decode a
 representation, serialize JSON, or apply JCS canonicalization. In particular,
-callers must not pass an ordinary JSON serialization for an inline artifact
-whose digest is defined over JCS-canonicalized `data`.
+callers must not pass an ordinary JSON serialization for an entry with `data`,
+whose inline artifact digest is defined over JCS-canonicalized `data`.
 
 The result statuses have deliberately narrow meanings:
 

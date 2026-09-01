@@ -136,13 +136,14 @@ if ((await checkCatalogEntryArtifactBinding(signedEntry, artifactBytes, { public
     `import { createPublicKey } from 'node:crypto';
 import {
   type AICatalog,
-  type InlineCatalogEntry,
+  type CatalogEntryWithData,
+  type CatalogEntryWithUrl,
   type ParseResult,
-  type ReferencedCatalogEntry,
   type TrustManifest,
   entryTypes,
+  isCatalogEntryWithData,
+  isCatalogEntryWithUrl,
   isEntryType,
-  isInlineCatalogEntry,
   mediaTypes,
   safeParseCatalog,
 } from '${pkg.name}';
@@ -172,8 +173,14 @@ const pluginType:
   | typeof mediaTypes.agentPluginZip
   | typeof mediaTypes.agentPluginGzip
   | undefined = pluginEntries[0]?.type;
-authored.entries.filter(predicate).filter(isInlineCatalogEntry);
-authored.entries.filter(isInlineCatalogEntry).filter(predicate);
+authored.entries.filter(predicate).filter(isCatalogEntryWithData);
+authored.entries.filter(isCatalogEntryWithData).filter(predicate);
+authored.entries.filter(predicate).filter(isCatalogEntryWithUrl);
+authored.entries.filter(isCatalogEntryWithUrl).filter(predicate);
+const entriesWithData: CatalogEntryWithData[] =
+  authored.entries.filter(isCatalogEntryWithData);
+const entriesWithUrl: CatalogEntryWithUrl[] =
+  authored.entries.filter(isCatalogEntryWithUrl);
 aiCatalogSchema.parse(authored);
 const schema: JsonSchema = aiCatalogJsonSchema;
 const digestResult: DigestCheckResult = checkDigest(
@@ -207,40 +214,40 @@ const signatureOptions: TrustManifestSignatureCheckOptions = {
 };
 const signatureCheck: Promise<TrustManifestSignatureCheckResult> =
   checkTrustManifestSignature(trustManifest, signatureOptions);
-const inlineBindingEntry: InlineCatalogEntry = {
-  identifier: 'inline-binding',
+const entryWithDataForBinding: CatalogEntryWithData = {
+  identifier: 'binding-with-data',
   type: 'application/example',
   data: null,
   trustManifest,
 };
-const referencedBindingEntry: ReferencedCatalogEntry = {
-  identifier: 'referenced-binding',
+const entryWithUrlForBinding: CatalogEntryWithUrl = {
+  identifier: 'binding-with-url',
   type: 'application/example',
   url: 'https://example.com/artifact',
   trustManifest,
 };
-const inlineBindingCheck: Promise<CatalogEntryArtifactBindingCheckResult> =
-  checkCatalogEntryArtifactBinding(inlineBindingEntry, signatureOptions);
-const referencedBindingCheck: Promise<CatalogEntryArtifactBindingCheckResult> =
+const dataBindingCheck: Promise<CatalogEntryArtifactBindingCheckResult> =
+  checkCatalogEntryArtifactBinding(entryWithDataForBinding, signatureOptions);
+const urlBindingCheck: Promise<CatalogEntryArtifactBindingCheckResult> =
   checkCatalogEntryArtifactBinding(
-    referencedBindingEntry,
+    entryWithUrlForBinding,
     new Uint8Array(),
     signatureOptions,
   );
 const unionBindingEntry = authored.entries[0];
 const unionBindingCheck = unionBindingEntry === undefined
   ? undefined
-  : isInlineCatalogEntry(unionBindingEntry)
+  : isCatalogEntryWithData(unionBindingEntry)
     ? checkCatalogEntryArtifactBinding(unionBindingEntry, signatureOptions)
     : checkCatalogEntryArtifactBinding(
         unionBindingEntry,
         new Uint8Array(),
         signatureOptions,
       );
-// @ts-expect-error Referenced entries require explicit artifact bytes.
-checkCatalogEntryArtifactBinding(referencedBindingEntry, signatureOptions);
-// @ts-expect-error Inline entries do not accept separate artifact bytes.
-checkCatalogEntryArtifactBinding(inlineBindingEntry, new Uint8Array(), signatureOptions);
+// @ts-expect-error Entries with url require explicit artifact bytes.
+checkCatalogEntryArtifactBinding(entryWithUrlForBinding, signatureOptions);
+// @ts-expect-error Entries with data do not accept separate artifact bytes.
+checkCatalogEntryArtifactBinding(entryWithDataForBinding, new Uint8Array(), signatureOptions);
 const bindingResult = {} as CatalogEntryArtifactBindingCheckResult;
 if (
   bindingResult.status === 'subject_check_failed' &&
@@ -256,13 +263,15 @@ if (digestResult.status === 'algorithm_not_implemented') {
 const unavailable: Error = new DigestAlgorithmUnavailableError('sha256');
 void result;
 void pluginType;
+void entriesWithData;
+void entriesWithUrl;
 void schema;
 void unavailable;
 void canonicalBytes;
 void signaturePayload;
 void signatureCheck;
-void inlineBindingCheck;
-void referencedBindingCheck;
+void dataBindingCheck;
+void urlBindingCheck;
 void unionBindingCheck;
 void rawSchema;
 `,

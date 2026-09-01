@@ -299,7 +299,7 @@ function parseCatalogEntryValue(
             issue(
               'inconsistent_value',
               [...path, 'trustManifest', 'subject', 'url'],
-              'Trust Manifest subject.url must match a referenced entry URL.',
+              "Trust Manifest subject.url must match the containing entry's url.",
             ),
           );
         }

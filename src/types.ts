@@ -50,7 +50,7 @@ export interface HostInfo {
   trustManifest?: TrustManifest;
 }
 
-/** Fields shared by inline and referenced catalog entries. */
+/** Fields shared by catalog entries with `url` and catalog entries with `data`. */
 interface CatalogEntryFields {
   /**
    * Open-text identifier for the artifact; SDK validation does not interpret
@@ -94,26 +94,26 @@ interface CatalogEntryFields {
   extensions?: JsonObject;
 }
 
-/** A catalog entry that references an artifact by URL. */
-export interface ReferencedCatalogEntry extends CatalogEntryFields {
-  /** Location of the referenced artifact. */
+/** A catalog entry that provides its artifact through `url`. */
+export interface CatalogEntryWithUrl extends CatalogEntryFields {
+  /** Location from which to retrieve the complete artifact. */
   url: string;
 
-  /** Referenced entries cannot contain inline data. */
+  /** An entry with `url` cannot also contain `data`. */
   data?: never;
 }
 
 /** A catalog entry that embeds the complete artifact document in `data`. */
-export interface InlineCatalogEntry extends CatalogEntryFields {
+export interface CatalogEntryWithData extends CatalogEntryFields {
   /** The complete artifact document, embedded as a JSON value. */
   data: JsonValue;
 
-  /** Inline entries cannot reference an artifact URL. */
+  /** An entry with `data` cannot also contain `url`. */
   url?: never;
 }
 
-/** An AI Catalog entry that references an artifact by URL or embeds it as inline data. */
-export type CatalogEntry = ReferencedCatalogEntry | InlineCatalogEntry;
+/** An AI Catalog entry whose artifact is provided through `url` or inline `data`. */
+export type CatalogEntry = CatalogEntryWithUrl | CatalogEntryWithData;
 
 /** Identifies the entity responsible for a catalog entry's artifact. */
 export interface Publisher {
@@ -185,13 +185,14 @@ export interface TrustSubject {
   /**
    * Digest of the content in `algorithm:lowercase-hex` form.
    *
-   * For a referenced artifact, this covers the exact bytes served. For inline
-   * `data`, it covers the JCS-canonicalized JSON value. SDK validation checks
-   * syntax only, not algorithm strength or artifact content.
+   * For an artifact provided through an entry's `url`, this covers the exact
+   * bytes served. For inline `data`, it covers the JCS-canonicalized JSON
+   * value. SDK validation checks syntax only, not algorithm strength or
+   * artifact content.
    */
   digest: string;
 
-  /** Content URL; catalog-entry parsing requires it to match a referenced entry's `url`. */
+  /** Content URL; catalog-entry parsing requires it to match the containing entry's `url`. */
   url?: string;
 }
 

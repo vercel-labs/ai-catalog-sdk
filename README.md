@@ -48,7 +48,7 @@ digest checks from one coherent invocation snapshot:
 import { checkCatalogEntryArtifactBinding } from 'ai-catalog-sdk/verification';
 
 const result = await checkCatalogEntryArtifactBinding(
-  referencedEntry,
+  entryWithUrl,
   artifactBytes,
   { publicKey, expectedAlgorithm: 'ES256' },
 );
@@ -58,13 +58,14 @@ if (result.status !== 'valid') {
 }
 ```
 
-For an inline entry, omit `artifactBytes`; the function canonicalizes the
-entry's `data` with JCS. For a referenced entry, it hashes the exact supplied
-byte range without fetching or decoding it. A `valid` result means the
+For an entry with `url`, the function hashes the exact supplied byte range
+without fetching or decoding it. For an entry with `data`, omit
+`artifactBytes`; the function treats `data` as the inline artifact and
+canonicalizes it with JCS. A `valid` result means the
 caller-selected key signed the manifest, the subject digest matches the
 selected artifact representation, and the subject type and any URL are
 consistent with the entry. It does not authenticate the entry as a whole,
-prove that referenced bytes came from its URL, or establish key ownership,
+prove that caller-supplied bytes came from its URL, or establish key ownership,
 identity, freshness, or trust. See
 [Verification utilities](./docs/verification.md) for failure details and the
 complete boundary.
@@ -92,7 +93,7 @@ errors, security boundaries, and examples.
 | Catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
-| A catalog entry, trusted public key, and its inline or caller-supplied referenced artifact | `checkCatalogEntryArtifactBinding()` | `ai-catalog-sdk/verification` |
+| A catalog entry, trusted public key, and either artifact bytes for an entry with `url` or the inline artifact in an entry with `data` | `checkCatalogEntryArtifactBinding()` | `ai-catalog-sdk/verification` |
 | Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
 | JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
 | Raw JSON Schema for another validator or tool | `ai-catalog.schema.json` | `ai-catalog-sdk/schema/ai-catalog.schema.json` |

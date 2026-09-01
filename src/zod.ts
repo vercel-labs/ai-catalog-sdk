@@ -19,8 +19,8 @@ export const aiCatalogSchema: z.ZodType<AICatalog, AICatalog> =
   internalAICatalogSchema;
 
 /**
- * Zod schema for structural validation of one inline or referenced catalog
- * entry.
+ * Zod schema for structural validation of one catalog entry with `url` or
+ * inline `data`.
  *
  * Uses native Zod behavior and errors. Unlike `parseCatalogEntry()`, it does
  * not compare a Trust Manifest subject with its containing entry or apply
