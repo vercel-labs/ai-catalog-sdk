@@ -26,6 +26,10 @@ const emptySha256 =
   'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 const abcSha256 =
   'sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+const abcSha384 =
+  'sha384:cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7';
+const abcSha512 =
+  'sha512:ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f';
 
 afterEach(() => {
   backend.failure = undefined;
@@ -40,6 +44,18 @@ describe('checkDigest', () => {
       status: 'match',
     });
     expect(checkDigest(new TextEncoder().encode('abd'), abcSha256)).toEqual({
+      status: 'mismatch',
+    });
+  });
+
+  it.each([
+    ['SHA-384', abcSha384],
+    ['SHA-512', abcSha512],
+  ])('matches a fixed %s vector and detects different bytes', (_name, digest) => {
+    expect(checkDigest(new TextEncoder().encode('abc'), digest)).toEqual({
+      status: 'match',
+    });
+    expect(checkDigest(new TextEncoder().encode('abd'), digest)).toEqual({
       status: 'mismatch',
     });
   });
@@ -77,6 +93,10 @@ describe('checkDigest', () => {
     'sha256:abc',
     `sha256:${'a'.repeat(63)}`,
     `sha256:${'a'.repeat(65)}`,
+    `sha384:${'a'.repeat(95)}`,
+    `sha384:${'a'.repeat(97)}`,
+    `sha512:${'a'.repeat(127)}`,
+    `sha512:${'a'.repeat(129)}`,
   ])('reports malformed or incorrectly sized digest %j', (digest) => {
     expect(checkDigest(new Uint8Array(), digest)).toEqual({
       status: 'invalid_digest',
@@ -87,7 +107,7 @@ describe('checkDigest', () => {
     ['SHA256', 'abc'],
     ['sha-256', 'a'],
     ['md5', 'd41d8cd98f00b204e9800998ecf8427e'],
-    ['sha512', 'a'],
+    ['sha3-256', 'a'],
   ])(
     'reports syntactically valid %s as not implemented',
     (algorithm, hex) => {
@@ -120,13 +140,17 @@ describe('checkDigest', () => {
     );
   });
 
-  it('chains a registered backend failure', () => {
+  it.each([
+    ['sha256', emptySha256],
+    ['sha384', abcSha384],
+    ['sha512', abcSha512],
+  ])('chains a registered %s backend failure', (algorithm, digest) => {
     const cause = new Error('backend failure');
     backend.failure = cause;
 
     let thrown: unknown;
     try {
-      checkDigest(new Uint8Array(), emptySha256);
+      checkDigest(new TextEncoder().encode('abc'), digest);
     } catch (error) {
       thrown = error;
     }
@@ -134,7 +158,7 @@ describe('checkDigest', () => {
     expect(thrown).toBeInstanceOf(DigestAlgorithmUnavailableError);
     expect(thrown).toMatchObject({
       name: 'DigestAlgorithmUnavailableError',
-      algorithm: 'sha256',
+      algorithm,
       cause,
     });
   });
@@ -146,8 +170,11 @@ describe('checkDigest', () => {
       status: 'invalid_digest',
     });
     expect(checkDigest(new Uint8Array(), 'sha512:a')).toEqual({
+      status: 'invalid_digest',
+    });
+    expect(checkDigest(new Uint8Array(), 'sha3-256:a')).toEqual({
       status: 'algorithm_not_implemented',
-      algorithm: 'sha512',
+      algorithm: 'sha3-256',
     });
   });
 });

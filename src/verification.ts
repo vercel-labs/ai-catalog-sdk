@@ -46,6 +46,14 @@ const digestImplementations = {
     nodeName: 'sha256',
     hexLength: 64,
   },
+  sha384: {
+    nodeName: 'sha384',
+    hexLength: 96,
+  },
+  sha512: {
+    nodeName: 'sha512',
+    hexLength: 128,
+  },
 } as const;
 
 type ImplementedDigestAlgorithm = keyof typeof digestImplementations;
@@ -922,8 +930,8 @@ export async function checkCatalogEntryArtifactBinding(
  * only that those bytes match the declaration; it does not establish that the
  * declaration is authentic or that the content is trustworthy.
  *
- * This SDK currently implements only the exact, case-sensitive `sha256`
- * algorithm token. Other syntactically valid tokens produce an
+ * This SDK currently implements the exact, case-sensitive `sha256`, `sha384`,
+ * and `sha512` algorithm tokens. Other syntactically valid tokens produce an
  * `algorithm_not_implemented` result rather than a judgment about whether the
  * AI Catalog specification permits them.
  *

@@ -30,8 +30,11 @@ const otherKeys = generateKeyPairSync('ec', {
   namedCurve: 'prime256v1',
 });
 
-function digest(bytes: Uint8Array): string {
-  return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+function digest(
+  bytes: Uint8Array,
+  algorithm: 'sha256' | 'sha384' | 'sha512' = 'sha256',
+): string {
+  return `${algorithm}:${createHash(algorithm).update(bytes).digest('hex')}`;
 }
 
 function encodeHeader(header: unknown): string {
@@ -135,6 +138,20 @@ describe('checkCatalogEntryArtifactBinding', () => {
       ),
     ).resolves.toEqual({ status: 'valid' });
   });
+
+  it.each(['sha384', 'sha512'] as const)(
+    'supports the %s digest implementation compositionally',
+    async (algorithm) => {
+      const bytes = new TextEncoder().encode('test');
+      const entry = entryWithUrl(bytes, {
+        digest: digest(bytes, algorithm),
+      });
+
+      await expect(
+        checkCatalogEntryArtifactBinding(entry, bytes, optionsFor()),
+      ).resolves.toEqual({ status: 'valid' });
+    },
+  );
 
   it('canonicalizes JSON from an entry with `data` before checking its digest', async () => {
     const data = { b: 2, a: 1 };
@@ -281,8 +298,8 @@ describe('checkCatalogEntryArtifactBinding', () => {
     ['an invalid digest', 'sha256:abc', { status: 'invalid_digest' }],
     [
       'an unimplemented algorithm',
-      'sha512:a',
-      { status: 'algorithm_not_implemented', algorithm: 'sha512' },
+      'sha3-256:a',
+      { status: 'algorithm_not_implemented', algorithm: 'sha3-256' },
     ],
   ])('preserves the digest failure for %s', async (_label, value, result) => {
     const bytes = new TextEncoder().encode('test');
