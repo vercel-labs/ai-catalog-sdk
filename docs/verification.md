@@ -115,10 +115,41 @@ not the complete JWS signing input. The function does not create or verify a
 JWS, select or evaluate keys, algorithms, or key identifiers, check a subject
 digest, enforce timestamps, resolve an identity, or establish trust.
 
-## Check a Trust Manifest signature
+## Check signatures
 
-`checkTrustManifestSignature(manifest, options)` checks the manifest's
-detached JWS with one public key and expected algorithm selected by the caller:
+`checkCatalogSignature()` and `checkTrustManifestSignature()` check a detached
+JWS with one public key and expected algorithm selected by the caller. They
+share the `SignatureCheckOptions` and `SignatureCheckResult` types.
+
+### Check a catalog signature
+
+`checkCatalogSignature(catalog, options)` checks the top-level catalog
+signature over one captured catalog snapshot:
+
+```ts
+import { createPublicKey } from 'node:crypto';
+import { checkCatalogSignature } from 'ai-catalog-sdk/verification';
+
+const publicKey = createPublicKey(configuredCatalogPublicKeyPem);
+const result = await checkCatalogSignature(catalog, {
+  publicKey,
+  expectedAlgorithm: 'ES256',
+});
+```
+
+A `valid` result means the exact caller-selected key verified the signature
+over the exact canonical catalog snapshot captured by this invocation. That
+snapshot includes `host`, entry membership and ordering, metadata, URL strings,
+inline data, extensions, unknown fields, and nested Trust Manifest signatures.
+
+It does not authenticate the key as belonging to the catalog operator, fetch
+or authenticate artifacts referenced by URLs, verify entry Trust Manifests,
+establish freshness, or decide trust.
+
+### Check a Trust Manifest signature
+
+`checkTrustManifestSignature(manifest, options)` checks a Trust Manifest's
+signature over one captured manifest snapshot:
 
 ```ts
 import { createPublicKey } from 'node:crypto';
@@ -131,16 +162,25 @@ const result = await checkTrustManifestSignature(trustManifest, {
 });
 ```
 
-The SDK currently implements only the exact `ES256` algorithm token. Its key
+A `valid` result means the exact caller-selected key verified the signature
+over the exact canonical manifest snapshot captured by this invocation. It
+does not prove who owns the public key or connect it with the manifest's
+claimed identity. It also does not establish a trust anchor, check the subject
+digest or surrounding catalog, validate timestamps, or decide whether the
+manifest should be trusted.
+
+### Shared signature-checking behavior
+
+The SDK currently implements only the exact `ES256` algorithm token. A key
 must be a native public P-256 `KeyObject` or verification-capable `CryptoKey`.
 The expected algorithm and key are trusted caller inputs. The unverified `alg`
 header is compared with that expectation; it never selects an algorithm.
 Typed consumers of this Node-only subpath need compatible Node.js declarations,
 such as `@types/node`.
 
-The checker accepts the ordinary RFC 7515 detached compact form
-`protected..signature`. It reconstructs the signing input using the base64url
-encoding of `createTrustManifestSignaturePayload(manifest)`. Compact segments
+Each checker accepts the ordinary RFC 7515 detached compact form
+`protected..signature` and reconstructs the signing input using the base64url
+encoding of the corresponding payload creator's result. Compact segments
 must use canonical, unpadded base64url, and the protected header must be valid
 UTF-8 JSON. RFC 7797 unencoded payloads (`b64: false`) and other well-formed
 unknown critical extensions produce `jws_feature_not_implemented`; malformed
@@ -152,37 +192,35 @@ The result statuses have deliberately narrow meanings:
 
 | Status | Meaning |
 | --- | --- |
-| `valid` | The supplied public key verifies the signature over the exact canonical manifest snapshot. |
-| `missing_signature` | The manifest has no own `signature` member. |
+| `valid` | The supplied public key verifies the signature over the exact canonical catalog or manifest snapshot. |
+| `missing_signature` | The catalog or manifest has no own `signature` member. |
 | `invalid_jws` | The signature is not a supported, well-formed detached compact JWS. |
 | `algorithm_mismatch` | The protected header's untrusted `alg` string does not equal the caller's expected algorithm. The result includes that claimed string for diagnostics only. |
 | `jws_feature_not_implemented` | The JWS makes a well-formed critical request the SDK does not implement. |
 | `invalid_signature` | The signature has the wrong ES256 representation or does not verify under the supplied key and payload. |
 
-Before its first asynchronous operation, the function snapshots the signature,
+Before its first asynchronous operation, each function snapshots the signature,
 canonical payload bytes, options, and opaque key reference. A mutation made by
-caller code after invocation therefore cannot change which manifest state the
-eventual result describes. The function does not freeze the original manifest.
+caller code after invocation therefore cannot change which catalog or manifest
+state the eventual result describes. Neither function freezes the original
+value. The result describes the captured snapshot, not necessarily the input
+object's state when the promise settles; callers must not treat post-invocation
+mutations as authenticated.
 
 Wrong runtime argument types, options without own data properties, a non-public
 or incompatible key, and a non-string present `signature` reject with
 `TypeError`. The payload creator's programmatic I-JSON `TypeError` and
-resource-limit `RangeError` behavior is retained. The checker validates the
-complete materialized manifest before reporting `missing_signature`; it does
-not perform Trust Manifest schema validation. Backend failures surfaced
+resource-limit `RangeError` behavior is retained. Each checker validates the
+complete materialized value before reporting `missing_signature`; neither
+performs catalog or Trust Manifest schema validation. Backend failures surfaced
 distinctly by the JOSE implementation reject instead of being converted to an
 input-status result.
 
 JWS `kid`, `jwk`, `jku`, `x5u`, `x5c`, and similar noncritical header fields do
 not select or validate a key and never trigger I/O. A caller may use such a
 field as an untrusted hint in a separate trusted key-resolution layer, then
-pass the selected native key into this function. In particular, an embedded
-key is not trusted merely because it can verify its own signature.
-
-A `valid` result does not prove who owns the public key or connect it with the
-manifest's claimed identity. It also does not establish a trust anchor, check
-the subject digest or surrounding catalog, validate timestamps, or decide
-whether the manifest should be trusted.
+pass the selected native key into the appropriate checker. In particular, an
+embedded key is not trusted merely because it can verify its own signature.
 
 ## Check a catalog entry's artifact binding
 

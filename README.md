@@ -37,7 +37,26 @@ The parsed result is an ordinary mutable, JSON-shaped object. Parsing validates 
 
 ## Parsing does not verify trust
 
-Treat parsed Trust Manifest data as unverified input. Parsing does not verify signatures or digests, resolve identities, fetch attestations, evaluate provenance, or decide whether an artifact or publisher is trustworthy.
+Parsed catalogs and Trust Manifest data are structurally validated but unauthenticated. Parsing does not verify catalog or Trust Manifest signatures, check digests, resolve identities, fetch attestations, evaluate provenance, or decide whether an artifact, catalog operator, or publisher is trustworthy.
+
+## Check a catalog signature
+
+`checkCatalogSignature()` checks one catalog snapshot with a public key and expected algorithm selected by the caller:
+
+```ts
+import { checkCatalogSignature } from 'ai-catalog-sdk/verification';
+
+const result = await checkCatalogSignature(catalog, {
+  publicKey,
+  expectedAlgorithm: 'ES256',
+});
+
+if (result.status !== 'valid') {
+  throw new Error(`Catalog signature check failed: ${result.status}`);
+}
+```
+
+A `valid` result means the exact caller-selected key verified the signature over the exact canonical catalog snapshot captured by this invocation. It does not authenticate the key as belonging to the catalog operator, verify entry Trust Manifests or artifacts referenced by URLs, establish freshness, or decide trust. See [Verification utilities](./docs/verification.md) for failure details and the complete boundary.
 
 ## Check a catalog entry's artifact binding
 
@@ -83,9 +102,7 @@ your workflow:
 | `checkTrustManifestSignature()` | Checking a manifest snapshot with one caller-selected public key and expected algorithm | Currently supports ES256; does not check the subject digest, identity, freshness, or trust |
 | `checkDigest()` | Comparing exact caller-supplied bytes with a declared digest | Currently supports `sha256`; a match does not authenticate the digest declaration |
 
-These utilities do not fetch content or resolve keys. See
-[Verification utilities](./docs/verification.md) for their inputs, results,
-errors, security boundaries, and examples.
+These utilities do not fetch content or resolve keys. See [Verification utilities](./docs/verification.md) for their inputs, results, errors, security boundaries, and examples.
 
 ## Choose a validation API
 
@@ -94,6 +111,7 @@ errors, security boundaries, and examples.
 | Catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
+| A catalog, caller-selected public key, and expected algorithm | `checkCatalogSignature()` | `ai-catalog-sdk/verification` |
 | A catalog entry, trusted public key, and either artifact bytes for an entry with `url` or the inline artifact in an entry with `data` | `checkCatalogEntryArtifactBinding()` | `ai-catalog-sdk/verification` |
 | Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
 | JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |

@@ -19,7 +19,7 @@ import {
   canonicalizeJsonValueToBytes,
   checkCatalogEntryArtifactBinding,
   createTrustManifestSignaturePayload,
-  type TrustManifestSignatureCheckOptions,
+  type SignatureCheckOptions,
 } from '../src/verification.js';
 import { catalogEntrySchema } from '../src/zod.js';
 
@@ -58,7 +58,7 @@ function signManifest(
   };
 }
 
-function optionsFor(): TrustManifestSignatureCheckOptions {
+function optionsFor(): SignatureCheckOptions {
   return {
     publicKey: trustedKeys.publicKey,
     expectedAlgorithm: 'ES256',

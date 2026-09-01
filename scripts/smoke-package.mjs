@@ -85,11 +85,11 @@ try {
 
   await writeFile(
     join(consumerDirectory, 'smoke.mjs'),
-    `import { createPublicKey } from 'node:crypto';
+    `import { createPublicKey, generateKeyPairSync, sign } from 'node:crypto';
 import { implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
-import { canonicalizeJsonValueToBytes, checkCatalogEntryArtifactBinding, checkDigest, checkTrustManifestSignature, createCatalogSignaturePayload, createTrustManifestSignaturePayload } from ${JSON.stringify(`${pkg.name}/verification`)};
+import { canonicalizeJsonValueToBytes, checkCatalogEntryArtifactBinding, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createCatalogSignaturePayload, createTrustManifestSignaturePayload } from ${JSON.stringify(`${pkg.name}/verification`)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
 const value = { specVersion: '1.0', entries: [] };
@@ -120,6 +120,20 @@ const signaturePublicKey = createPublicKey({
   format: 'jwk',
 });
 if ((await checkTrustManifestSignature(signedManifest, { publicKey: signaturePublicKey, expectedAlgorithm: 'ES256' })).status !== 'valid') process.exit(1);
+const catalogSignatureKeys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const catalogForSignature = { specVersion: '1.0', entries: [] };
+const catalogProtectedSegment = Buffer.from(JSON.stringify({ alg: 'ES256' })).toString('base64url');
+const catalogPayloadSegment = Buffer.from(createCatalogSignaturePayload(catalogForSignature)).toString('base64url');
+const catalogSignatureSegment = sign(
+  'sha256',
+  Buffer.from(catalogProtectedSegment + '.' + catalogPayloadSegment),
+  { key: catalogSignatureKeys.privateKey, dsaEncoding: 'ieee-p1363' },
+).toString('base64url');
+const signedCatalog = {
+  ...catalogForSignature,
+  signature: catalogProtectedSegment + '..' + catalogSignatureSegment,
+};
+if ((await checkCatalogSignature(signedCatalog, { publicKey: catalogSignatureKeys.publicKey, expectedAlgorithm: 'ES256' })).status !== 'valid') process.exit(1);
 const artifactBytes = new TextEncoder().encode('test');
 const signedEntry = {
   identifier: 'signed-artifact',
@@ -153,6 +167,7 @@ import { aiCatalogJsonSchema, type JsonSchema } from '${pkg.name}/json-schema';
 import {
   canonicalizeJsonValueToBytes,
   checkCatalogEntryArtifactBinding,
+  checkCatalogSignature,
   checkDigest,
   checkTrustManifestSignature,
   createCatalogSignaturePayload,
@@ -160,8 +175,8 @@ import {
   DigestAlgorithmUnavailableError,
   type DigestCheckResult,
   type CatalogEntryArtifactBindingCheckResult,
-  type TrustManifestSignatureCheckOptions,
-  type TrustManifestSignatureCheckResult,
+  type SignatureCheckOptions,
+  type SignatureCheckResult,
 } from '${pkg.name}/verification';
 import rawSchema from '${pkg.name}/schema/ai-catalog.schema.json' with { type: 'json' };
 
@@ -212,12 +227,14 @@ const signaturePublicKey = createPublicKey({
   },
   format: 'jwk',
 });
-const signatureOptions: TrustManifestSignatureCheckOptions = {
+const signatureOptions: SignatureCheckOptions = {
   publicKey: signaturePublicKey,
   expectedAlgorithm: 'ES256',
 };
-const signatureCheck: Promise<TrustManifestSignatureCheckResult> =
+const signatureCheck: Promise<SignatureCheckResult> =
   checkTrustManifestSignature(trustManifest, signatureOptions);
+const catalogSignatureCheck: Promise<SignatureCheckResult> =
+  checkCatalogSignature(authored, signatureOptions);
 const entryWithDataForBinding: CatalogEntryWithData = {
   identifier: 'binding-with-data',
   type: 'application/example',
