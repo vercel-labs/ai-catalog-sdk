@@ -12,6 +12,7 @@ import * as joseErrors from 'jose/errors';
 import { DIGEST_PATTERN } from './internal/digest.js';
 import { preflightJsonValue } from './internal/json-value.js';
 import type {
+  AICatalog,
   CatalogEntry,
   CatalogEntryWithData,
   CatalogEntryWithUrl,
@@ -174,6 +175,7 @@ function assertCanonicalizableJsonValue(
 
 function assertCanonicalizableJsonObject(
   value: unknown,
+  name: string,
 ): asserts value is Record<string, JsonValue> {
   if (
     value === null ||
@@ -181,9 +183,25 @@ function assertCanonicalizableJsonObject(
     utilTypes.isProxy(value) ||
     Array.isArray(value)
   ) {
-    throw new TypeError('manifest must be a plain JSON object.');
+    throw new TypeError(`${name} must be a plain JSON object.`);
   }
   assertCanonicalizableJsonValue(value);
+}
+
+function createDetachedJwsPayload(
+  value: unknown,
+  name: string,
+): Uint8Array {
+  assertCanonicalizableJsonObject(value, name);
+
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  delete descriptors.signature;
+  const payload = Object.defineProperties(
+    Object.create(null),
+    descriptors,
+  ) as Record<string, JsonValue>;
+
+  return canonicalizeJsonValueToBytes(payload);
 }
 
 function readOwnDataProperty(
@@ -542,6 +560,32 @@ export function canonicalizeJsonValueToBytes(value: JsonValue): Uint8Array {
 }
 
 /**
+ * Creates the RFC 8785 payload covered by an AI Catalog's detached JWS.
+ *
+ * The input is an already-materialized catalog. The function omits exactly its
+ * own, top-level, case-sensitive `signature` member and preserves every other
+ * JSON member, including entry order, unknown members, inline data, and nested
+ * members named `signature`. It does not mutate the catalog or validate its
+ * schema. The entire input, including the omitted member, must be plain I-JSON
+ * data.
+ *
+ * The returned bytes are the detached JWS payload, not a base64url encoding or
+ * complete JWS signing input. This function does not parse, create, or verify a
+ * JWS, select keys or algorithms, or establish trust.
+ *
+ * @throws {TypeError} If `catalog` is not a plain I-JSON object, including when
+ * it contains non-finite numbers, forbidden Unicode code points, cycles,
+ * sparse arrays, accessors, proxies, or exotic objects.
+ * @throws {RangeError} If `catalog` exceeds the SDK's supported node or nesting
+ * depth limit.
+ */
+export function createCatalogSignaturePayload(
+  catalog: AICatalog,
+): Uint8Array {
+  return createDetachedJwsPayload(catalog, 'catalog');
+}
+
+/**
  * Creates the RFC 8785 payload covered by a Trust Manifest's detached JWS.
  *
  * The input is an already-materialized Trust Manifest. The function omits
@@ -563,16 +607,7 @@ export function canonicalizeJsonValueToBytes(value: JsonValue): Uint8Array {
 export function createTrustManifestSignaturePayload(
   manifest: TrustManifest,
 ): Uint8Array {
-  assertCanonicalizableJsonObject(manifest);
-
-  const descriptors = Object.getOwnPropertyDescriptors(manifest);
-  delete descriptors.signature;
-  const payload = Object.defineProperties(
-    Object.create(null),
-    descriptors,
-  ) as Record<string, JsonValue>;
-
-  return canonicalizeJsonValueToBytes(payload);
+  return createDetachedJwsPayload(manifest, 'manifest');
 }
 
 function snapshotTrustManifestSignatureCheck(
