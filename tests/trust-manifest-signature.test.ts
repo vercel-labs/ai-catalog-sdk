@@ -13,7 +13,7 @@ import type { JsonValue, TrustManifest } from '../src/index.js';
 import {
   checkTrustManifestSignature,
   createTrustManifestSignaturePayload,
-  type TrustManifestSignatureCheckOptions,
+  type SignatureCheckOptions,
 } from '../src/verification.js';
 
 // The public key is from RFC 7515 Appendix A.3. The detached signature below
@@ -38,7 +38,7 @@ const fixedManifest: TrustManifest = {
   signature: fixedSignature,
 };
 const fixedPublicKey = createPublicKey({ key: fixedPublicJwk, format: 'jwk' });
-const fixedOptions: TrustManifestSignatureCheckOptions = {
+const fixedOptions: SignatureCheckOptions = {
   publicKey: fixedPublicKey,
   expectedAlgorithm: 'ES256',
 };
@@ -71,9 +71,9 @@ function signManifest(
 }
 
 function optionsFor(
-  publicKey: TrustManifestSignatureCheckOptions['publicKey'] =
+  publicKey: SignatureCheckOptions['publicKey'] =
     trustedKeys.publicKey,
-): TrustManifestSignatureCheckOptions {
+): SignatureCheckOptions {
   return { publicKey, expectedAlgorithm: 'ES256' };
 }
 
@@ -369,7 +369,7 @@ describe('checkTrustManifestSignature', () => {
         checkTrustManifestSignature(fixedManifest, {
           publicKey,
           expectedAlgorithm: 'ES256',
-        } as TrustManifestSignatureCheckOptions),
+        } as SignatureCheckOptions),
       ).rejects.toThrow(TypeError);
     }
 
@@ -380,7 +380,7 @@ describe('checkTrustManifestSignature', () => {
       checkTrustManifestSignature(fixedManifest, {
         publicKey: fixedPublicKey,
         expectedAlgorithm: 'ES384',
-      } as unknown as TrustManifestSignatureCheckOptions),
+      } as unknown as SignatureCheckOptions),
     ).rejects.toThrow(TypeError);
 
     let getterReads = 0;
@@ -394,7 +394,7 @@ describe('checkTrustManifestSignature', () => {
     await expect(
       checkTrustManifestSignature(
         fixedManifest,
-        accessorOptions as TrustManifestSignatureCheckOptions,
+        accessorOptions as SignatureCheckOptions,
       ),
     ).rejects.toThrow(TypeError);
     expect(getterReads).toBe(0);

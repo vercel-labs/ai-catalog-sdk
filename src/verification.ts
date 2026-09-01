@@ -55,7 +55,7 @@ interface ParsedDetachedJws {
   signatureSegment: string;
 }
 
-interface TrustManifestSignatureCheckSnapshot {
+interface SignatureCheckSnapshot {
   payload: Uint8Array;
   publicKey: webcrypto.CryptoKey | KeyObject;
   jws: ParsedDetachedJws;
@@ -317,7 +317,7 @@ function assertEs256PublicKey(
 
 function snapshotSignatureCheckOptions(
   options: unknown,
-): TrustManifestSignatureCheckOptions {
+): SignatureCheckOptions {
   if (
     options === null ||
     typeof options !== 'object' ||
@@ -368,7 +368,7 @@ function hasCanonicalBase64UrlSyntax(
 function inspectDetachedJws(
   value: string,
   expectedAlgorithm: 'ES256',
-): ParsedDetachedJws | TrustManifestSignatureCheckResult {
+): ParsedDetachedJws | SignatureCheckResult {
   const firstSeparator = value.indexOf('.');
   const secondSeparator = value.indexOf('.', firstSeparator + 1);
   if (
@@ -469,8 +469,11 @@ export type DigestCheckResult =
   | { status: 'invalid_digest' }
   | { status: 'algorithm_not_implemented'; algorithm: string };
 
-/** Trusted caller policy and key material for a Trust Manifest signature check. */
-export interface TrustManifestSignatureCheckOptions {
+/**
+ * Trusted caller policy and key material shared by AI Catalog and Trust
+ * Manifest detached-JWS signature checks.
+ */
+export interface SignatureCheckOptions {
   /** The exact public key selected by the caller's trust policy. */
   publicKey: webcrypto.CryptoKey | KeyObject;
 
@@ -478,8 +481,11 @@ export interface TrustManifestSignatureCheckOptions {
   expectedAlgorithm: 'ES256';
 }
 
-/** The outcome of checking a Trust Manifest's detached JWS. */
-export type TrustManifestSignatureCheckResult =
+/**
+ * The result shared by AI Catalog and Trust Manifest detached-JWS signature
+ * checks.
+ */
+export type SignatureCheckResult =
   | { status: 'valid' }
   | { status: 'missing_signature' }
   | { status: 'invalid_jws' }
@@ -494,7 +500,7 @@ export type CatalogEntryArtifactBindingCheckResult =
   | {
       status: 'signature_check_failed';
       signatureResult: Exclude<
-        TrustManifestSignatureCheckResult,
+        SignatureCheckResult,
         { status: 'valid' }
       >;
     }
@@ -610,18 +616,19 @@ export function createTrustManifestSignaturePayload(
   return createDetachedJwsPayload(manifest, 'manifest');
 }
 
-function snapshotTrustManifestSignatureCheck(
-  manifest: TrustManifest,
-  options: TrustManifestSignatureCheckOptions,
-):
-  | TrustManifestSignatureCheckSnapshot
-  | TrustManifestSignatureCheckResult {
-  const payload = createTrustManifestSignaturePayload(manifest);
-  const signature = readOwnDataProperty(manifest, 'signature');
+function snapshotSignatureCheck(
+  value: object,
+  valueName: 'catalog' | 'manifest',
+  options: SignatureCheckOptions,
+): SignatureCheckSnapshot | SignatureCheckResult {
+  const payload = createDetachedJwsPayload(value, valueName);
+  const signature = readOwnDataProperty(value, 'signature');
 
   if (signature === undefined) return { status: 'missing_signature' };
   if (typeof signature !== 'string') {
-    throw new TypeError('manifest.signature must be a string when present.');
+    throw new TypeError(
+      `${valueName}.signature must be a string when present.`,
+    );
   }
 
   const jws = inspectDetachedJws(signature, options.expectedAlgorithm);
@@ -630,11 +637,31 @@ function snapshotTrustManifestSignatureCheck(
   return { payload, publicKey: options.publicKey, jws };
 }
 
-async function executeTrustManifestSignatureCheck(
-  snapshot:
-    | TrustManifestSignatureCheckSnapshot
-    | TrustManifestSignatureCheckResult,
-): Promise<TrustManifestSignatureCheckResult> {
+function snapshotCatalogSignatureCheck(
+  catalog: AICatalog,
+  options: SignatureCheckOptions,
+): SignatureCheckSnapshot | SignatureCheckResult {
+  return snapshotSignatureCheck(
+    catalog,
+    'catalog',
+    options,
+  );
+}
+
+function snapshotTrustManifestSignatureCheck(
+  manifest: TrustManifest,
+  options: SignatureCheckOptions,
+): SignatureCheckSnapshot | SignatureCheckResult {
+  return snapshotSignatureCheck(
+    manifest,
+    'manifest',
+    options,
+  );
+}
+
+async function executeSignatureCheck(
+  snapshot: SignatureCheckSnapshot | SignatureCheckResult,
+): Promise<SignatureCheckResult> {
   if ('status' in snapshot) return snapshot;
 
   try {
@@ -666,6 +693,36 @@ async function executeTrustManifestSignatureCheck(
 }
 
 /**
+ * Checks an AI Catalog's detached JWS using caller-selected public key material
+ * and algorithm policy.
+ *
+ * The function snapshots the catalog payload, signature, options, and key
+ * before its first asynchronous operation. It accepts only the ordinary
+ * RFC 7515 detached compact form and currently implements only ES256. Header
+ * fields never select or resolve a key, and this function performs no I/O.
+ *
+ * A `valid` result establishes only that the supplied key signed the exact
+ * canonical catalog snapshot. It does not establish that the key belongs to
+ * the catalog operator, evaluate trust, check referenced artifact bytes or
+ * Trust Manifests, validate the catalog schema, or enforce timestamps.
+ *
+ * @throws {TypeError} If an argument, option, signature value, or public key
+ * has the wrong runtime type, or if the key is not a public P-256 key usable
+ * for ES256 verification.
+ * @throws {TypeError} If `catalog` is not a plain I-JSON object.
+ * @throws {RangeError} If `catalog` exceeds the SDK's supported node or nesting
+ * depth limit.
+ */
+export async function checkCatalogSignature(
+  catalog: AICatalog,
+  options: SignatureCheckOptions,
+): Promise<SignatureCheckResult> {
+  const optionsSnapshot = snapshotSignatureCheckOptions(options);
+  const snapshot = snapshotCatalogSignatureCheck(catalog, optionsSnapshot);
+  return executeSignatureCheck(snapshot);
+}
+
+/**
  * Checks a Trust Manifest's detached JWS using caller-selected public key
  * material and algorithm policy.
  *
@@ -688,14 +745,14 @@ async function executeTrustManifestSignatureCheck(
  */
 export async function checkTrustManifestSignature(
   manifest: TrustManifest,
-  options: TrustManifestSignatureCheckOptions,
-): Promise<TrustManifestSignatureCheckResult> {
+  options: SignatureCheckOptions,
+): Promise<SignatureCheckResult> {
   const optionsSnapshot = snapshotSignatureCheckOptions(options);
   const snapshot = snapshotTrustManifestSignatureCheck(
     manifest,
     optionsSnapshot,
   );
-  return executeTrustManifestSignatureCheck(snapshot);
+  return executeSignatureCheck(snapshot);
 }
 
 /**
@@ -723,20 +780,20 @@ export async function checkTrustManifestSignature(
  */
 export function checkCatalogEntryArtifactBinding(
   entry: CatalogEntryWithData,
-  options: TrustManifestSignatureCheckOptions,
+  options: SignatureCheckOptions,
 ): Promise<CatalogEntryArtifactBindingCheckResult>;
 /** @inheritdoc */
 export function checkCatalogEntryArtifactBinding(
   entry: CatalogEntryWithUrl,
   artifactBytes: Uint8Array,
-  options: TrustManifestSignatureCheckOptions,
+  options: SignatureCheckOptions,
 ): Promise<CatalogEntryArtifactBindingCheckResult>;
 export async function checkCatalogEntryArtifactBinding(
   entry: CatalogEntry,
   artifactBytesOrOptions:
     | Uint8Array
-    | TrustManifestSignatureCheckOptions,
-  maybeOptions?: TrustManifestSignatureCheckOptions,
+    | SignatureCheckOptions,
+  maybeOptions?: SignatureCheckOptions,
 ): Promise<CatalogEntryArtifactBindingCheckResult> {
   const isDataCall = maybeOptions === undefined;
   const options = snapshotSignatureCheckOptions(
@@ -843,7 +900,7 @@ export async function checkCatalogEntryArtifactBinding(
     }
   }
 
-  const signatureResult = await executeTrustManifestSignatureCheck(
+  const signatureResult = await executeSignatureCheck(
     signatureSnapshot,
   );
   if (signatureResult.status !== 'valid') {
