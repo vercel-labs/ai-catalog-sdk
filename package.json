@@ -57,7 +57,8 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "canonicalize": "4.0.0"
+    "canonicalize": "4.0.0",
+    "jose": "~6.2.10"
   },
   "peerDependencies": {
     "zod": "^4.4.0"
