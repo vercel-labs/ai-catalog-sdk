@@ -43,8 +43,44 @@ hooks or overridden array methods.
 
 Canonicalization does not remove or reinterpret any member. In particular,
 this function does not remove a `signature` member. Use
-`createTrustManifestSignaturePayload()` for the AI Catalog Trust Manifest
-rule described below.
+`createCatalogSignaturePayload()` or
+`createTrustManifestSignaturePayload()` for the corresponding AI Catalog
+signature-payload rule described below.
+
+## Create a catalog signature payload
+
+`createCatalogSignaturePayload(catalog)` returns the exact RFC 8785 UTF-8
+payload covered by an AI Catalog's top-level detached JWS:
+
+```ts
+import { createCatalogSignaturePayload } from 'ai-catalog-sdk/verification';
+
+const payload = createCatalogSignaturePayload(catalog);
+```
+
+The function omits exactly an own, top-level member whose name is the
+case-sensitive string `signature`. It preserves every other member, including
+unknown future fields, extensions, the `entries` array and its order, inline
+`data`, a differently cased top-level name such as `Signature`, and nested
+fields named `signature`. It does not mutate the input, and signed and
+otherwise-identical unsigned catalogs produce the same bytes.
+
+The input is an already-materialized AI Catalog value. This function does not
+parse or structurally validate it, so validate untrusted catalog input at the
+appropriate boundary first. It cannot recover source-level information already
+lost during parsing, such as duplicate member names or original number
+spellings. The same programmatic I-JSON restrictions and fixed resource limits
+as `canonicalizeJsonValueToBytes()` apply, producing `TypeError` or `RangeError`
+respectively. Those restrictions apply to the entire input, including the
+omitted `signature` member. Accessors and proxies are rejected without invoking
+them; non-enumerable and non-JSON `signature` values are rejected rather than
+silently ignored.
+
+The result is only the detached JWS payload. It is not base64url-encoded and is
+not the complete JWS signing input. The function does not create or verify a
+JWS, select or evaluate keys, algorithms, or key identifiers, fetch artifacts,
+or establish trust. The payload covers an entry's URL string but not the
+artifact bytes retrieved from that URL.
 
 ## Create a Trust Manifest signature payload
 
