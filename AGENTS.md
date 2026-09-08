@@ -1,10 +1,9 @@
 # Repository instructions
 
-- Use pnpm; keep the exact root `packageManager` pin and lockfile synchronized.
-- Keep authored code in `src/`, generated JavaScript and declarations in `dist/`, and the generated JSON Schema in `schema/`; do not edit generated artifacts manually.
-- Treat `package.json` exports, wire types, parser diagnostics, schemas, engines, and files as the public compatibility contract.
-- Keep root parsing defensive and bounded. Direct `/zod` schema use intentionally retains native Zod behavior.
+- Use pnpm and run `pnpm check` before handing off package changes.
+- Before changing specification behavior, read `docs/spec-interpretation.md`. `src/spec-revision.ts` identifies the exact upstream snapshot this SDK interprets; keep the interpretation and affected fixtures aligned when updating it.
+- Root parsers intentionally perform bounded, defensive validation; standalone Zod schemas retain native Zod behavior. See `README.md#what-gets-validated` for the validation boundaries.
 - Preserve unknown JSON-valued properties for supported specification majors, while keeping authoring types closed.
-- Keep `src/spec-revision.ts`, generated schema metadata, fixtures, and changelog entries aligned to one exact AI Catalog specification commit.
-- Add output formats or runtime conditions only with a packed-consumer test for that condition.
-- Run `pnpm check` before handing off changes that affect the package.
+- Before changing verification utilities, read `docs/verification.md`, especially the meaning of successful results and invocation snapshots. Parsing validates structure; successful cryptographic checks do not by themselves establish identity or trust.
+- Regenerate schema artifacts with `pnpm generate:schema`; do not manually edit `schema/ai-catalog.schema.json` or `src/generated/ai-catalog-json-schema.ts`.
+- Cover new output formats or runtime conditions with packed-consumer tests in `scripts/smoke-package.mjs`.
