@@ -232,4 +232,4 @@ pnpm check
 pnpm generate:schema
 ```
 
-`pnpm package:check` creates and tests a tarball locally. It does not publish the package. The inactive release workflow template is retained only as a graduation aid; activating it requires explicit authorization.
+`pnpm package:check` creates and tests a tarball locally. It does not publish the package.
