@@ -94,6 +94,12 @@ import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.jso
 
 const value = { specVersion: '1.0', entries: [] };
 if (parseCatalog(value).entries.length !== 0) process.exit(1);
+const opaqueHostManifest = { formerField: ['opaque', 1, null] };
+const catalogWithOpaqueHost = parseCatalog({
+  ...value,
+  host: { displayName: 'Example', trustManifest: opaqueHostManifest },
+});
+if (JSON.stringify(catalogWithOpaqueHost.host.trustManifest) !== JSON.stringify(opaqueHostManifest)) process.exit(1);
 if (!aiCatalogSchema.safeParse(value).success) process.exit(1);
 if (aiCatalogJsonSchema.$id !== rawSchema.$id) process.exit(1);
 if (implementedSpecRevision.commit.length !== 40) process.exit(1);
@@ -101,6 +107,8 @@ if (new TextDecoder().decode(canonicalizeJsonValueToBytes({ b: 2, a: 1 })) !== '
 if (new TextDecoder().decode(createCatalogSignaturePayload({ specVersion: '1.0', entries: [], signature: 'detached-jws' })) !== '{"entries":[],"specVersion":"1.0"}') process.exit(1);
 if (new TextDecoder().decode(createTrustManifestSignaturePayload({ identity: 'did:example:alice', signature: 'detached-jws' })) !== '{"identity":"did:example:alice"}') process.exit(1);
 if (checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855').status !== 'match') process.exit(1);
+// This cryptographic vector deliberately lacks subject.identifier. The
+// low-level signature checker verifies bytes without parsing catalog structure.
 const signedManifest = {
   identity: 'did:example:alice',
   issuedAt: '2026-03-15T10:00:00Z',
@@ -135,13 +143,40 @@ const signedCatalog = {
 };
 if ((await checkCatalogSignature(signedCatalog, { publicKey: catalogSignatureKeys.publicKey, expectedAlgorithm: 'ES256' })).status !== 'valid') process.exit(1);
 const artifactBytes = new TextEncoder().encode('test');
+function signBindingManifest(subject) {
+  const manifest = { identity: 'did:example:alice', issuedAt: '2026-08-31T00:00:00Z', subject };
+  const payloadSegment = Buffer.from(createTrustManifestSignaturePayload(manifest)).toString('base64url');
+  const signatureSegment = sign(
+    'sha256',
+    Buffer.from(catalogProtectedSegment + '.' + payloadSegment),
+    { key: catalogSignatureKeys.privateKey, dsaEncoding: 'ieee-p1363' },
+  ).toString('base64url');
+  return { ...manifest, signature: catalogProtectedSegment + '..' + signatureSegment };
+}
+const bindingSubject = {
+  identifier: 'signed-artifact',
+  version: '1.0',
+  type: 'application/json',
+  digest: signedManifest.subject.digest,
+};
 const signedEntry = {
   identifier: 'signed-artifact',
+  version: '1.0',
   type: 'application/json',
   url: 'https://example.com/artifact.json',
-  trustManifest: signedManifest,
+  trustManifest: signBindingManifest(bindingSubject),
 };
-if ((await checkCatalogEntryArtifactBinding(signedEntry, artifactBytes, { publicKey: signaturePublicKey, expectedAlgorithm: 'ES256' })).status !== 'valid') process.exit(1);
+const bindingOptions = { publicKey: catalogSignatureKeys.publicKey, expectedAlgorithm: 'ES256' };
+parseCatalog({ ...value, entries: [signedEntry] });
+if ((await checkCatalogEntryArtifactBinding(signedEntry, artifactBytes, bindingOptions)).status !== 'valid') process.exit(1);
+for (const [property, status] of [['identifier', 'identifier_mismatch'], ['version', 'version_mismatch']]) {
+  const entry = { ...signedEntry, [property]: 'different' };
+  const result = await checkCatalogEntryArtifactBinding(entry, artifactBytes, bindingOptions);
+  if (result.status !== 'subject_check_failed' || result.subjectResult.status !== status) process.exit(1);
+}
+const { version: omittedVersion, ...entryWithoutVersion } = signedEntry;
+const versionPresenceResult = await checkCatalogEntryArtifactBinding(entryWithoutVersion, artifactBytes, bindingOptions);
+if (versionPresenceResult.status !== 'subject_check_failed' || versionPresenceResult.subjectResult.status !== 'version_mismatch') process.exit(1);
 `,
   );
   run(node, ['smoke.mjs'], { cwd: consumerDirectory });
@@ -153,8 +188,10 @@ import {
   type AICatalog,
   type CatalogEntryWithData,
   type CatalogEntryWithUrl,
+  type HostInfo,
   type ParseResult,
   type TrustManifest,
+  type TrustSubject,
   entryTypes,
   isCatalogEntryWithData,
   isCatalogEntryWithUrl,
@@ -181,6 +218,20 @@ import {
 import rawSchema from '${pkg.name}/schema/ai-catalog.schema.json' with { type: 'json' };
 
 const authored: AICatalog = { specVersion: '1.0', entries: [] };
+const authoredHost: HostInfo = {
+  displayName: 'Example',
+  // @ts-expect-error Host Trust Manifests are not a recognized authoring field.
+  trustManifest: {},
+};
+const subject: TrustSubject = {
+  identifier: 'example-artifact',
+  version: '1.0',
+  type: 'application/example',
+  digest: 'sha256:${'a'.repeat(64)}',
+};
+// @ts-expect-error A Trust Subject requires its artifact identifier.
+const subjectWithoutIdentifier: TrustSubject = { type: subject.type, digest: subject.digest };
+const subjectWithoutVersion: TrustSubject = { identifier: subject.identifier, type: subject.type, digest: subject.digest };
 const result: ParseResult<AICatalog> = safeParseCatalog(authored);
 const predicate = isEntryType(mediaTypes.a2aAgentCard);
 const pluginPredicate = isEntryType(entryTypes.agentPlugin);
@@ -211,6 +262,7 @@ const trustManifest: TrustManifest = {
   identity: 'did:example:alice',
   issuedAt: '2026-08-31T00:00:00Z',
   subject: {
+    identifier: 'binding-with-data',
     type: 'application/example',
     digest: 'sha256:${'a'.repeat(64)}',
   },
@@ -243,9 +295,10 @@ const entryWithDataForBinding: CatalogEntryWithData = {
 };
 const entryWithUrlForBinding: CatalogEntryWithUrl = {
   identifier: 'binding-with-url',
+  version: '1.0',
   type: 'application/example',
   url: 'https://example.com/artifact',
-  trustManifest,
+  trustManifest: { ...trustManifest, subject: { ...subject, identifier: 'binding-with-url' } },
 };
 const dataBindingCheck: Promise<CatalogEntryArtifactBindingCheckResult> =
   checkCatalogEntryArtifactBinding(entryWithDataForBinding, signatureOptions);
@@ -272,6 +325,14 @@ checkCatalogEntryArtifactBinding(entryWithDataForBinding, new Uint8Array(), sign
 const bindingResult = {} as CatalogEntryArtifactBindingCheckResult;
 if (
   bindingResult.status === 'subject_check_failed' &&
+  (bindingResult.subjectResult.status === 'identifier_mismatch' ||
+    bindingResult.subjectResult.status === 'version_mismatch')
+) {
+  const status: 'identifier_mismatch' | 'version_mismatch' = bindingResult.subjectResult.status;
+  void status;
+}
+if (
+  bindingResult.status === 'subject_check_failed' &&
   bindingResult.subjectResult.status === 'algorithm_not_implemented'
 ) {
   const algorithm: string = bindingResult.subjectResult.algorithm;
@@ -283,6 +344,9 @@ if (digestResult.status === 'algorithm_not_implemented') {
 }
 const unavailable: Error = new DigestAlgorithmUnavailableError('sha256');
 void result;
+void authoredHost;
+void subjectWithoutIdentifier;
+void subjectWithoutVersion;
 void pluginType;
 void entriesWithData;
 void entriesWithUrl;

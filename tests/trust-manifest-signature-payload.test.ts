@@ -48,6 +48,7 @@ describe('createTrustManifestSignaturePayload', () => {
       identity: 'did:example:alice',
       issuedAt: '2026-08-31T00:00:00Z',
       subject: {
+        identifier: 'example-artifact',
         type: 'application/example',
         digest: `sha256:${'a'.repeat(64)}`,
       },

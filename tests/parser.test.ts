@@ -12,6 +12,7 @@ import {
   parseCatalogEntry,
   parseCatalogJson,
   safeParseCatalog,
+  safeParseCatalogEntry,
   safeParseCatalogJson,
 } from '../src/index.js';
 import { structurallyInvalidFixtures, validFixtures } from './fixtures.js';
@@ -161,6 +162,7 @@ describe('root parsing', () => {
           trustManifest: {
             identity: 'did:web:example.com',
             subject: {
+              identifier: 'x',
               type: 'application/other+json',
               url: 'https://example.com/other',
               digest: sha256,
@@ -178,6 +180,177 @@ describe('root parsing', () => {
         'inconsistent_value',
         'inconsistent_value',
       ]);
+    }
+  });
+
+  it.each([false, true])(
+    'requires exact subject identifier equality with signed=%s',
+    (signed) => {
+      const entry = {
+        identifier: 'urn:air:example.com:artifact:one',
+        type: 'custom',
+        data: null,
+        trustManifest: {
+          identity: 'did:web:example.com',
+          trustSchema: { identifier: 'urn:trust:example', version: '1' },
+          attestations: [],
+          subject: {
+            identifier: 'urn:air:EXAMPLE.com:artifact:one',
+            type: 'custom',
+            digest: sha256,
+          },
+          ...(signed
+            ? { signature: 'signed', issuedAt: '2026-08-20T00:00:00Z' }
+            : {}),
+        },
+      };
+      const standalone = safeParseCatalogEntry(entry);
+      const catalog = safeParseCatalog({ specVersion: '1.0', entries: [entry] });
+      expect(standalone.success).toBe(false);
+      expect(catalog.success).toBe(false);
+      if (!standalone.success && !catalog.success) {
+        expect(standalone.error.issues).toMatchObject([
+          {
+            code: 'inconsistent_value',
+            path: ['trustManifest', 'subject', 'identifier'],
+          },
+        ]);
+        expect(catalog.error.issues).toMatchObject([
+          {
+            code: 'inconsistent_value',
+            path: ['entries', 0, 'trustManifest', 'subject', 'identifier'],
+          },
+        ]);
+      }
+    },
+  );
+
+  it.each([
+    ['both absent', undefined, undefined, true],
+    ['exact match', '1.0.0', '1.0.0', true],
+    ['empty strings match', '', '', true],
+    ['subject absent', '1.0.0', undefined, false],
+    ['entry absent', undefined, '1.0.0', false],
+    ['different values', '1.0.0', '2.0.0', false],
+    ['no version normalization', '1.0.0', '1.0', false],
+    ['empty subject is present', undefined, '', false],
+    ['empty entry is present', '', undefined, false],
+  ] as const)(
+    'checks signed release versions: %s',
+    (_name, entryVersion, subjectVersion, accepted) => {
+      const entry = {
+        identifier: 'x',
+        type: 'custom',
+        data: null,
+        ...(entryVersion === undefined ? {} : { version: entryVersion }),
+        trustManifest: {
+          identity: 'did:web:example.com',
+          signature: 'signed',
+          issuedAt: '2026-08-20T00:00:00Z',
+          subject: {
+            identifier: 'x',
+            type: 'custom',
+            digest: sha256,
+            ...(subjectVersion === undefined ? {} : { version: subjectVersion }),
+          },
+        },
+      };
+      const standalone = safeParseCatalogEntry(entry);
+      const catalog = safeParseCatalog({ specVersion: '1.0', entries: [entry] });
+      expect(standalone.success).toBe(accepted);
+      expect(catalog.success).toBe(accepted);
+      if (!standalone.success && !catalog.success) {
+        expect(standalone.error.issues).toMatchObject([
+          {
+            code: 'inconsistent_value',
+            path: ['trustManifest', 'subject', 'version'],
+          },
+        ]);
+        expect(catalog.error.issues).toMatchObject([
+          {
+            code: 'inconsistent_value',
+            path: ['entries', 0, 'trustManifest', 'subject', 'version'],
+          },
+        ]);
+      }
+    },
+  );
+
+  it.each([
+    ['1.0.0', '2.0.0'],
+    ['1.0.0', undefined],
+    [undefined, '1.0.0'],
+  ] as const)(
+    'accepts unsigned version differences: entry=%s subject=%s',
+    (entryVersion, subjectVersion) => {
+      const entry = {
+        identifier: 'x',
+        type: 'custom',
+        data: null,
+        ...(entryVersion === undefined ? {} : { version: entryVersion }),
+        trustManifest: {
+          identity: 'did:web:example.com',
+          trustSchema: { identifier: 'urn:trust:example', version: '1' },
+          attestations: [],
+          subject: {
+            identifier: 'x',
+            type: 'custom',
+            digest: sha256,
+            ...(subjectVersion === undefined ? {} : { version: subjectVersion }),
+          },
+        },
+      };
+      expect(safeParseCatalogEntry(entry).success).toBe(true);
+      expect(safeParseCatalog({ specVersion: '1.0', entries: [entry] }).success)
+        .toBe(true);
+    },
+  );
+
+  it('keeps empty identifiers as structural strings', () => {
+    expect(
+      safeParseCatalogEntry({
+        identifier: '',
+        type: 'custom',
+        data: null,
+        trustManifest: {
+          identity: 'did:web:example.com',
+          signature: '',
+          issuedAt: '2026-08-20T00:00:00Z',
+          subject: { identifier: '', type: 'custom', digest: sha256 },
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it.each(
+    [null, false, 42, 'opaque', [], { subject: 'uninterpreted' }].map(
+      (value) => [value] as const,
+    ),
+  )(
+    'preserves host.trustManifest as any unknown JSON property: %j',
+    (value) => {
+      const parsed = parseCatalog({
+        specVersion: '1.0',
+        entries: [],
+        host: { displayName: 'Host', trustManifest: value, arbitrary: value },
+      });
+      expect(parsed.host).toEqual({
+        displayName: 'Host',
+        trustManifest: value,
+        arbitrary: value,
+      });
+    },
+  );
+
+  it('rejects non-JSON host.trustManifest through generic unknown-field validation', () => {
+    for (const value of [undefined, () => null, new Date()]) {
+      expect(
+        safeParseCatalog({
+          specVersion: '1.0',
+          entries: [],
+          host: { displayName: 'Host', trustManifest: value },
+        }).success,
+      ).toBe(false);
     }
   });
 

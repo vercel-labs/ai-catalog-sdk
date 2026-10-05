@@ -1,14 +1,14 @@
 # Specification snapshot interpretation
 
-AI Catalog is still prerelease, so this SDK targets one exact [upstream specification snapshot](https://github.com/Agent-Card/ai-catalog/blob/63909bfd267fae992ec042c4e0865f28bdbac6c9/specification/ai-catalog.md) rather than a moving branch. The authoritative revision metadata lives in [`src/spec-revision.ts`](https://github.com/vercel-labs/ai-catalog-sdk/blob/main/src/spec-revision.ts); the generated [JSON Schema](../schema/ai-catalog.schema.json) copies it under `x-ai-catalog-specification`.
+AI Catalog is still prerelease, so this SDK targets one exact [upstream specification snapshot](https://github.com/Agent-Card/ai-catalog/blob/8d05e7f9086d0483d9fb30fa96b528e8e7ade53d/specification/ai-catalog.md) rather than a moving branch. The authoritative revision metadata lives in [`src/spec-revision.ts`](https://github.com/vercel-labs/ai-catalog-sdk/blob/main/src/spec-revision.ts); the generated [JSON Schema](../schema/ai-catalog.schema.json) copies it under `x-ai-catalog-specification`.
 
 The upstream specification and documentation are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); this SDK is an independent implementation, and this document records where its interpretation differs from the pinned snapshot.
 
 ## Where the snapshot disagrees
 
-The snapshot's normative CDDL lags its accepted prose and ADRs: it omits the top-level catalog `signature`, Trust Manifest `subject`, `issuedAt`, and `expiresAt`, the Subject object, and the substantive-manifest and signed-manifest conditional rules. The SDK follows the newer prose plus accepted ADR-0019 and ADR-0020 because that interpretation preserves signed artifact binding and rejects misleading empty manifests.
+The snapshot's normative CDDL omits the top-level catalog `signature` and does not express the substantive-manifest and signed-manifest conditional rules. The SDK follows the prose plus ADR-0019 and ADR-0020 because that interpretation preserves signed artifact binding and rejects misleading empty manifests.
 
-The specification says that a Trust Manifest's identity domain must match the publisher domain in its entry identifier, but it does not define how to compare arbitrary identifier schemes. The SDK therefore leaves that check to applications. It does enforce the clearly defined rule that a manifest subject's type and URL match its catalog entry. A host manifest has no corresponding artifact type or URL, so the SDK does not add a host-specific rule.
+The specification says that a Trust Manifest's identity domain must match the publisher domain in its entry identifier, but it does not define how to compare arbitrary identifier schemes. The SDK therefore leaves that check to applications. Entry parsers require a manifest subject's identifier, type, and optional URL to match its catalog entry. For signed manifests, entry and subject versions must either both be absent or both be present and exactly equal.
 
 ## Forward compatibility
 

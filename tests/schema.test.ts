@@ -59,6 +59,59 @@ describe('shared structural fixtures', () => {
     expect(withFormats(invalidCalendar)).toBe(false);
     expect(withoutFormats(invalidCalendar)).toBe(true);
   });
+
+  it.each([
+    ['identifier mismatch', 'other', '1.0.0'],
+    ['version mismatch', 'x', '2.0.0'],
+    ['version absent', 'x', undefined],
+  ] as const)(
+    'leaves contextual %s checks to root parsers',
+    (_name, identifier, version) => {
+      const entry = {
+        identifier: 'x',
+        version: '1.0.0',
+        type: 'custom',
+        data: null,
+        trustManifest: {
+          identity: 'did:web:example.com',
+          issuedAt: '2026-08-20T00:00:00Z',
+          signature: 'signed',
+          subject: {
+            identifier,
+            ...(version === undefined ? {} : { version }),
+            type: 'custom',
+            digest: `sha256:${'a'.repeat(64)}`,
+          },
+        },
+      };
+      const value = { specVersion: '1.0', entries: [entry] };
+      expect(safeParseCatalog(value).success).toBe(false);
+      expect(aiCatalogSchema.safeParse(value).success).toBe(true);
+      expect(catalogEntrySchema.safeParse(entry).success).toBe(true);
+      expect(trustManifestSchema.safeParse(entry.trustManifest).success)
+        .toBe(true);
+      expect(withFormats(value)).toBe(true);
+      expect(withoutFormats(value)).toBe(true);
+    },
+  );
+
+  it.each(
+    [null, false, 42, 'opaque', [], { subject: 'uninterpreted' }].map(
+      (value) => [value] as const,
+    ),
+  )(
+    'treats host.trustManifest as generic JSON across schemas: %j',
+    (trustManifest) => {
+      const value = {
+        specVersion: '1.0',
+        entries: [],
+        host: { displayName: 'Host', trustManifest },
+      };
+      expect(aiCatalogSchema.parse(value)).toEqual(value);
+      expect(withFormats(value)).toBe(true);
+      expect(withoutFormats(value)).toBe(true);
+    },
+  );
 });
 
 describe('public schemas and generated artifact', () => {

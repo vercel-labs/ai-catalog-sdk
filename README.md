@@ -77,17 +77,7 @@ if (result.status !== 'valid') {
 }
 ```
 
-For an entry with `url`, the function hashes the exact supplied byte range
-without fetching or decoding it. For an entry with `data`, omit
-`artifactBytes`; the function treats `data` as the inline artifact and
-canonicalizes it with JCS. A `valid` result means the
-caller-selected key signed the manifest, the subject digest matches the
-selected artifact representation, and the subject type and any URL are
-consistent with the entry. It does not authenticate the entry as a whole,
-prove that caller-supplied bytes came from its URL, or establish key ownership,
-identity, freshness, or trust. See
-[Verification utilities](./docs/verification.md) for failure details and the
-complete boundary.
+For an entry with `url`, the function hashes the exact supplied byte range without fetching or decoding it. For an entry with `data`, omit `artifactBytes`; the function treats `data` as the inline artifact and canonicalizes it with JCS. A `valid` result means the caller-selected key signed the manifest, the subject digest matches the selected artifact representation, and the subject identifier, version, type, and any URL are consistent with the entry. It does not authenticate the entry as a whole, prove that caller-supplied bytes came from its URL, or establish key ownership, identity, freshness, or trust. See [Verification utilities](./docs/verification.md) for failure details and the complete boundary.
 
 ## Use lower-level verification utilities
 
@@ -211,7 +201,7 @@ TypeScript NodeNext consumers also need `compilerOptions.resolveJsonModule: true
 
 ## What gets validated
 
-- `parseCatalog()` and `parseCatalogJson()` validate catalog structure, require an AI Catalog `1.x` version, and enforce entry uniqueness. The catalog and entry parsers also check that a Trust Manifest subject's type and URL match its entry. When validating JSON values, they reject circular or non-JSON data and limit work on unusually large or deeply nested inputs.
+- `parseCatalog()` and `parseCatalogJson()` validate catalog structure, require an AI Catalog `1.x` version, and enforce entry uniqueness. The catalog and entry parsers also check that a Trust Manifest subject's identifier, type, and optional URL match its entry. For signed manifests, entry and subject versions must either both be absent or both be present and exactly equal. When validating JSON values, they reject circular or non-JSON data and limit work on unusually large or deeply nested inputs.
 - The Zod schemas validate document structure with native Zod errors and behavior. They do not include the parser-specific resource limits or catalog-wide checks.
 - The JSON Schema validates portable document structure. Some format details depend on the JSON Schema validator being used, and catalog-wide checks require `parseCatalog()` or `parseCatalogJson()`.
 

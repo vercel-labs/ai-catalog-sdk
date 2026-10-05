@@ -74,6 +74,9 @@ type TrustSubjectSnapshot =
   | { kind: 'invalid' }
   | {
       kind: 'present';
+      identifier: unknown;
+      hasVersion: boolean;
+      version: unknown;
       type: unknown;
       digest: unknown;
       hasUrl: boolean;
@@ -278,9 +281,15 @@ function snapshotTrustSubject(manifest: TrustManifest): TrustSubjectSnapshot {
     return { kind: 'invalid' };
   }
 
+  const versionDescriptor = Object.getOwnPropertyDescriptor(subject, 'version');
   const urlDescriptor = Object.getOwnPropertyDescriptor(subject, 'url');
   return {
     kind: 'present',
+    identifier: readOwnDataProperty(subject, 'identifier'),
+    hasVersion: versionDescriptor !== undefined,
+    version: versionDescriptor && 'value' in versionDescriptor
+      ? versionDescriptor.value
+      : undefined,
     type: readOwnDataProperty(subject, 'type'),
     digest: readOwnDataProperty(subject, 'digest'),
     hasUrl: urlDescriptor !== undefined,
@@ -516,6 +525,8 @@ export type CatalogEntryArtifactBindingCheckResult =
       status: 'subject_check_failed';
       subjectResult:
         | { status: 'missing_subject' }
+        | { status: 'identifier_mismatch' }
+        | { status: 'version_mismatch' }
         | { status: 'type_mismatch' }
         | { status: 'url_mismatch' }
         | Exclude<DigestCheckResult, { status: 'match' }>;
@@ -774,8 +785,8 @@ export async function checkTrustManifestSignature(
  *
  * A `valid` result establishes only that the caller-selected key signed the
  * manifest, its subject digest matches the selected artifact representation,
- * and its type and any URL are consistent with the entry. It does not
- * authenticate the entry as a whole or establish where caller-supplied bytes
+ * and its identifier, version, type, and any URL are consistent with the entry.
+ * It does not authenticate the entry as a whole or establish where supplied bytes
  * came from, key ownership, or trust.
  *
  * @throws {TypeError} If an argument or relevant entry or subject field has the
@@ -808,6 +819,15 @@ export async function checkCatalogEntryArtifactBinding(
     isDataCall ? artifactBytesOrOptions : maybeOptions,
   );
   assertCatalogEntryObject(entry);
+
+  const entryIdentifier = readRequiredEntryProperty(entry, 'identifier');
+  if (typeof entryIdentifier !== 'string') {
+    throw new TypeError('entry.identifier must be a string.');
+  }
+  const entryVersion = readOptionalEntryProperty(entry, 'version');
+  if (entryVersion.present && typeof entryVersion.value !== 'string') {
+    throw new TypeError('entry.version must be a string when present.');
+  }
 
   const entryType = readRequiredEntryProperty(entry, 'type');
   if (typeof entryType !== 'string') {
@@ -863,6 +883,8 @@ export async function checkCatalogEntryArtifactBinding(
   let subjectResult:
     | { status: 'match' }
     | { status: 'missing_subject' }
+    | { status: 'identifier_mismatch' }
+    | { status: 'version_mismatch' }
     | { status: 'type_mismatch' }
     | { status: 'url_mismatch' }
     | Exclude<DigestCheckResult, { status: 'match' }>;
@@ -871,6 +893,17 @@ export async function checkCatalogEntryArtifactBinding(
   } else {
     if (subjectSnapshot.kind === 'invalid') {
       throw new TypeError('manifest.subject must be an object when present.');
+    }
+    if (typeof subjectSnapshot.identifier !== 'string') {
+      throw new TypeError('manifest.subject.identifier must be a string.');
+    }
+    if (
+      subjectSnapshot.hasVersion &&
+      typeof subjectSnapshot.version !== 'string'
+    ) {
+      throw new TypeError(
+        'manifest.subject.version must be a string when present.',
+      );
     }
     if (typeof subjectSnapshot.type !== 'string') {
       throw new TypeError('manifest.subject.type must be a string.');
@@ -887,7 +920,14 @@ export async function checkCatalogEntryArtifactBinding(
       );
     }
 
-    if (subjectSnapshot.type !== entryType) {
+    if (subjectSnapshot.identifier !== entryIdentifier) {
+      subjectResult = { status: 'identifier_mismatch' };
+    } else if (
+      subjectSnapshot.hasVersion !== entryVersion.present ||
+      subjectSnapshot.version !== entryVersion.value
+    ) {
+      subjectResult = { status: 'version_mismatch' };
+    } else if (subjectSnapshot.type !== entryType) {
       subjectResult = { status: 'type_mismatch' };
     } else if (
       subjectSnapshot.hasUrl &&
