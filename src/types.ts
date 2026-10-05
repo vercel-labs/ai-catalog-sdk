@@ -45,9 +45,6 @@ export interface HostInfo {
   identifier?: string;
   documentationUrl?: string;
   logoUrl?: string;
-
-  /** Trust metadata for the catalog operator. SDK validation does not verify its claims. */
-  trustManifest?: TrustManifest;
 }
 
 /** Fields shared by catalog entries with `url` and catalog entries with `data`. */
@@ -126,7 +123,7 @@ export interface Publisher {
 }
 
 /**
- * Structured but unverified identity and trust metadata for a catalog operator or artifact.
+ * Structured but unverified identity and trust metadata for an artifact.
  *
  * SDK validation requires `identity` plus at least one of `signature`,
  * `trustSchema`, non-empty `attestations`, or non-empty `provenance`. A
@@ -136,7 +133,7 @@ export interface Publisher {
  * attestations, provenance, expiration policy, or artifact content.
  */
 export interface TrustManifest {
-  /** Claimed globally unique URI identifying the catalog operator or artifact. */
+  /** Claimed globally unique URI identifying the artifact. */
   identity: string;
 
   /** Type hint for `identity`, such as `did`, `spiffe`, or `dns`. */
@@ -179,6 +176,12 @@ export interface TrustManifest {
  * payload when a signature is present.
  */
 export interface TrustSubject {
+  /** Logical artifact identifier; catalog-entry parsing requires it to match the containing entry's `identifier`. */
+  identifier: string;
+
+  /** Release version; signed manifests require it to be present and equal exactly when the containing entry has `version`. */
+  version?: string;
+
   /** Type identifier for the content; catalog-entry parsing requires it to match the containing entry's `type`. */
   type: string;
 

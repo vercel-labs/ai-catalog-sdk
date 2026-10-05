@@ -237,17 +237,7 @@ function parseHostInfo(
     collector.addZod(result.error, path);
     return undefined;
   }
-  const output = result.data as HostInfo;
-  if (hasOwn(result.data, 'trustManifest')) {
-    const manifest = parseTrustManifest(
-      result.data.trustManifest,
-      [...path, 'trustManifest'],
-      collector,
-    );
-    if (!manifest) return undefined;
-    output.trustManifest = manifest;
-  }
-  return output;
+  return result.data as HostInfo;
 }
 
 function parseCatalogEntryValue(
@@ -282,6 +272,31 @@ function parseCatalogEntryValue(
     if (manifest) {
       output.trustManifest = manifest;
       const { subject } = manifest;
+      if (subject && subject.identifier !== output.identifier) {
+        valid = false;
+        collector.add(
+          issue(
+            'inconsistent_value',
+            [...path, 'trustManifest', 'subject', 'identifier'],
+            'Trust Manifest subject.identifier must match the catalog entry identifier.',
+          ),
+        );
+      }
+      if (
+        subject &&
+        hasOwn(manifest, 'signature') &&
+        (hasOwn(subject, 'version') !== hasOwn(output, 'version') ||
+          subject.version !== output.version)
+      ) {
+        valid = false;
+        collector.add(
+          issue(
+            'inconsistent_value',
+            [...path, 'trustManifest', 'subject', 'version'],
+            'Signed Trust Manifest subject.version and entry version must both be absent or both be present and exactly equal.',
+          ),
+        );
+      }
       if (subject && subject.type !== output.type) {
         valid = false;
         collector.add(

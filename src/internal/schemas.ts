@@ -15,6 +15,8 @@ export const rfc3339DateTimeSchema = z
 
 export const concreteTrustSubjectSchema = z
   .object({
+    identifier: z.string(),
+    version: z.string().exactOptional(),
     type: z.string(),
     digest: digestSchema,
     url: z.string().exactOptional(),
@@ -152,7 +154,6 @@ export const concreteHostInfoSchema = z
     identifier: z.string().exactOptional(),
     documentationUrl: z.string().exactOptional(),
     logoUrl: z.string().exactOptional(),
-    trustManifest: concreteTrustManifestSchema.exactOptional(),
   })
   .catchall(z.json());
 
@@ -225,7 +226,6 @@ export const hostInfoEnvelopeSchema = z
     identifier: z.string().exactOptional(),
     documentationUrl: z.string().exactOptional(),
     logoUrl: z.string().exactOptional(),
-    trustManifest: z.unknown().exactOptional(),
   })
   .catchall(z.json());
 

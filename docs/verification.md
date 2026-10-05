@@ -253,6 +253,9 @@ The check succeeds only when all of the following are true:
 
 - the caller-selected key and expected algorithm produce a `valid` Trust
   Manifest signature result;
+- the signed subject's `identifier` exactly equals the entry's `identifier`;
+- subject and entry versions are either both absent or both present and exactly
+  equal;
 - the signed subject's `type` exactly equals the entry's `type`;
 - if the subject has a `url`, the entry has `url` and the two values exactly
   match; and
@@ -262,22 +265,21 @@ The result preserves the lower-level diagnostic vocabulary:
 
 | Status | Meaning |
 | --- | --- |
-| `valid` | The caller-selected key signed the manifest, its subject digest matches the selected artifact representation, and its type and any URL are consistent with the entry. |
+| `valid` | The caller-selected key signed the manifest, its subject digest matches the selected artifact representation, and its identifier, version, type, and any URL are consistent with the entry. |
 | `missing_trust_manifest` | The entry has no own `trustManifest` member. |
 | `signature_check_failed` | Signature checking did not produce `valid`; `signatureResult` contains the complete lower-level result. |
-| `subject_check_failed` | The authenticated subject is absent or does not match the entry or artifact; `subjectResult` is `missing_subject`, `type_mismatch`, `url_mismatch`, or the lower-level digest failure. |
+| `subject_check_failed` | The authenticated subject is absent or does not match the entry or artifact; `subjectResult` is `missing_subject`, `identifier_mismatch`, `version_mismatch`, `type_mismatch`, `url_mismatch`, or the lower-level digest failure. `version_mismatch` covers presence on only one side as well as unequal values. |
 
 Signature failure takes precedence over subject failure, so an unauthenticated
 subject cannot produce a successful or independently authoritative binding.
-Within the subject check, type is checked before URL and digest, and URL is
-checked before digest. Programmer-contract and runtime failures reject rather
-than being hidden by a protocol status; in particular, the call shape, options,
-and byte view supplied for an entry with `url` are validated before
+Programmer-contract and runtime failures reject rather than being hidden by a
+protocol status; in particular, the call shape, options, entry identifier and
+version, and byte view supplied for an entry with `url` are validated before
 `missing_trust_manifest` can be returned.
 
 Before its first asynchronous operation, the function captures all relevant
-own data properties, signature inputs, options, and subject fields. It
-hashes caller-supplied bytes for an entry with `url` or canonicalizes the inline
+own data properties, signature inputs, options, and subject fields. It hashes
+caller-supplied bytes for an entry with `url` or canonicalizes the inline
 artifact in an entry with `data`, then retains the digest result. Caller
 mutation after invocation therefore cannot combine a signature result from one
 state with a subject or artifact result from another, and caller-supplied

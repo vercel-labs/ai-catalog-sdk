@@ -55,6 +55,7 @@ const unsignedCatalog = {
         identity: 'did:example:publisher',
         issuedAt: '2026-09-01T00:00:00Z',
         subject: {
+          identifier: 'remote',
           type: 'application/example',
           digest: `sha256:${'a'.repeat(64)}`,
         },

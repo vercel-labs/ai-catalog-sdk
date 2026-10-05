@@ -86,6 +86,7 @@ function entryWithUrl(
     type: 'application/example',
     url,
     trustManifest: manifestFor({
+      identifier: 'example-artifact',
       type: 'application/example',
       url,
       digest: digest(bytes),
@@ -103,6 +104,7 @@ function entryWithData(
     type: 'application/example+json',
     data,
     trustManifest: manifestFor({
+      identifier: 'example-artifact-with-data',
       type: 'application/example+json',
       digest: digest(canonicalizeJsonValueToBytes(data)),
       ...subject,
@@ -217,6 +219,8 @@ describe('checkCatalogEntryArtifactBinding', () => {
   it('reports a signature failure before a subject failure', async () => {
     const bytes = new TextEncoder().encode('test');
     const entry = entryWithUrl(bytes, {
+      identifier: 'wrong-artifact',
+      version: 'wrong-version',
       type: 'application/wrong',
       digest: 'sha256:abc',
     });
@@ -245,6 +249,47 @@ describe('checkCatalogEntryArtifactBinding', () => {
       subjectResult: { status: 'missing_subject' },
     });
   });
+
+  it('requires the subject identifier to match exactly', async () => {
+    const bytes = new TextEncoder().encode('test');
+    const entry = entryWithUrl(bytes, { identifier: 'EXAMPLE-artifact' });
+
+    await expect(
+      checkCatalogEntryArtifactBinding(entry, bytes, optionsFor()),
+    ).resolves.toEqual({
+      status: 'subject_check_failed',
+      subjectResult: { status: 'identifier_mismatch' },
+    });
+  });
+
+  it.each([
+    ['1.0', '1.0', 'valid'],
+    ['1.0', '1.0.0', 'version_mismatch'],
+    ['1.0', undefined, 'version_mismatch'],
+    [undefined, '1.0', 'version_mismatch'],
+    ['', '', 'valid'],
+    ['', undefined, 'version_mismatch'],
+    [undefined, '', 'version_mismatch'],
+  ] as const)(
+    'checks entry version %j against subject version %j',
+    async (entryVersion, subjectVersion, expectedStatus) => {
+      const entry = entryWithData(null, {
+        ...(subjectVersion === undefined ? {} : { version: subjectVersion }),
+      });
+      if (entryVersion !== undefined) entry.version = entryVersion;
+
+      await expect(
+        checkCatalogEntryArtifactBinding(entry, optionsFor()),
+      ).resolves.toEqual(
+        expectedStatus === 'valid'
+          ? { status: 'valid' }
+          : {
+              status: 'subject_check_failed',
+              subjectResult: { status: expectedStatus },
+            },
+      );
+    },
+  );
 
   it('checks subject type before its URL or digest', async () => {
     const bytes = new TextEncoder().encode('test');
@@ -318,12 +363,38 @@ describe('checkCatalogEntryArtifactBinding', () => {
     const typeMismatch = catalogEntrySchema.parse(
       entryWithUrl(bytes, { type: 'application/wrong' }),
     );
+    const identifierMismatch = catalogEntrySchema.parse(
+      entryWithUrl(bytes, { identifier: 'another-artifact' }),
+    );
+    const versionMismatch = catalogEntrySchema.parse(
+      entryWithUrl(bytes, { version: '1.0' }),
+    );
     const urlMismatch = catalogEntrySchema.parse(
       entryWithUrl(bytes, {
         url: 'https://example.com/other.bin',
       }),
     );
 
+    await expect(
+      checkCatalogEntryArtifactBinding(
+        identifierMismatch as CatalogEntryWithUrl,
+        bytes,
+        optionsFor(),
+      ),
+    ).resolves.toEqual({
+      status: 'subject_check_failed',
+      subjectResult: { status: 'identifier_mismatch' },
+    });
+    await expect(
+      checkCatalogEntryArtifactBinding(
+        versionMismatch as CatalogEntryWithUrl,
+        bytes,
+        optionsFor(),
+      ),
+    ).resolves.toEqual({
+      status: 'subject_check_failed',
+      subjectResult: { status: 'version_mismatch' },
+    });
     await expect(
       checkCatalogEntryArtifactBinding(
         typeMismatch as CatalogEntryWithUrl,
@@ -360,12 +431,17 @@ describe('checkCatalogEntryArtifactBinding', () => {
     const pending = checkCatalogEntryArtifactBinding(entry, options);
     data.nested.value = 'mutated';
     entry.type = 'application/mutated';
+    entry.identifier = 'mutated-entry';
+    entry.version = 'added-after-invocation';
     entry.data = { replacement: true };
     entry.trustManifest = manifestFor({
+      identifier: entry.identifier,
       type: entry.type,
       digest: digest(canonicalizeJsonValueToBytes(entry.data)),
     });
     if (signedManifest?.subject) {
+      signedManifest.subject.identifier = 'mutated-subject';
+      signedManifest.subject.version = 'added-after-invocation';
       signedManifest.subject.type = 'application/mutated';
       signedManifest.subject.digest = `sha256:${'0'.repeat(64)}`;
     }
@@ -378,20 +454,26 @@ describe('checkCatalogEntryArtifactBinding', () => {
   it('checks supplied bytes and entry-with-`url` context before yielding', async () => {
     const backing = new Uint8Array([255, 116, 101, 115, 116, 0]);
     const bytes = backing.subarray(1, 5);
-    const entry = entryWithUrl(bytes);
+    const entry = entryWithUrl(bytes, { version: 'original-version' });
+    entry.version = 'original-version';
     const manifest = entry.trustManifest as TrustManifest;
     const options = optionsFor();
 
     const pending = checkCatalogEntryArtifactBinding(entry, bytes, options);
     backing.fill(0);
     entry.type = 'application/mutated';
+    entry.identifier = 'mutated-entry';
+    delete entry.version;
     entry.url = 'https://example.com/mutated';
     entry.trustManifest = manifestFor({
+      identifier: entry.identifier,
       type: entry.type,
       url: entry.url,
       digest: digest(bytes),
     });
     if (manifest.subject) {
+      manifest.subject.identifier = 'mutated-subject';
+      delete manifest.subject.version;
       manifest.subject.type = entry.type;
       manifest.subject.url = entry.url;
       manifest.subject.digest = digest(bytes);
@@ -443,6 +525,7 @@ describe('checkCatalogEntryArtifactBinding', () => {
       get() {
         reads += 1;
         entry.trustManifest = manifestFor({
+          identifier: entry.identifier,
           type: 'application/wrong',
           digest: digest(bytes),
         });
@@ -473,6 +556,101 @@ describe('checkCatalogEntryArtifactBinding', () => {
     expect(reads).toBe(0);
   });
 
+  it.each(['entry', 'subject'] as const)(
+    'rejects missing or malformed %s release coordinates',
+    async (location) => {
+      for (const [property, value] of [
+        ['identifier', undefined],
+        ['identifier', null],
+        ['identifier', 1],
+        ['version', undefined],
+        ['version', null],
+        ['version', 1],
+      ] as const) {
+        const entry = entryWithData(null);
+        const target = location === 'entry'
+          ? entry
+          : (entry.trustManifest as TrustManifest).subject as TrustSubject;
+        Object.defineProperty(target, property, {
+          configurable: true,
+          enumerable: true,
+          writable: true,
+          value,
+        });
+        await expect(
+          checkCatalogEntryArtifactBinding(entry, optionsFor()),
+        ).rejects.toThrow(TypeError);
+      }
+
+      const entry = entryWithData(null);
+      const target = location === 'entry'
+        ? entry
+        : (entry.trustManifest as TrustManifest).subject as TrustSubject;
+      Reflect.deleteProperty(target, 'identifier');
+      await expect(
+        checkCatalogEntryArtifactBinding(entry, optionsFor()),
+      ).rejects.toThrow(TypeError);
+    },
+  );
+
+  it.each([
+    ['entry', 'identifier'],
+    ['entry', 'version'],
+    ['subject', 'identifier'],
+    ['subject', 'version'],
+  ] as const)(
+    'rejects %s.%s accessors without invoking them',
+    async (location, property) => {
+      const entry = entryWithData(null);
+      const target = location === 'entry'
+        ? entry
+        : (entry.trustManifest as TrustManifest).subject as TrustSubject;
+      let reads = 0;
+      Object.defineProperty(target, property, {
+        enumerable: true,
+        get() {
+          reads += 1;
+          return 'value';
+        },
+      });
+
+      await expect(
+        checkCatalogEntryArtifactBinding(entry, optionsFor()),
+      ).rejects.toThrow(TypeError);
+      expect(reads).toBe(0);
+    },
+  );
+
+  it.each(['entry', 'subject'] as const)(
+    'rejects a proxied %s without invoking traps',
+    async (location) => {
+      let reads = 0;
+      const entry = entryWithData(null);
+      const handler = {
+        getOwnPropertyDescriptor() {
+          reads += 1;
+          throw new Error('must not inspect proxy');
+        },
+        get() {
+          reads += 1;
+          throw new Error('must not read proxy');
+        },
+      };
+      const input = location === 'entry'
+        ? new Proxy(entry, handler)
+        : entry;
+      if (location === 'subject') {
+        const manifest = entry.trustManifest as TrustManifest;
+        manifest.subject = new Proxy(manifest.subject as TrustSubject, handler);
+      }
+
+      await expect(
+        checkCatalogEntryArtifactBinding(input, optionsFor()),
+      ).rejects.toThrow(TypeError);
+      expect(reads).toBe(0);
+    },
+  );
+
   it('rejects shared and detached byte views for an entry with `url`', async () => {
     const bytes = new TextEncoder().encode('test');
     const entry = entryWithUrl(bytes);
@@ -501,6 +679,7 @@ describe('checkCatalogEntryArtifactBinding', () => {
         identity: 'did:example:publisher',
         issuedAt: '2026-08-31T00:00:00Z',
         subject: {
+          identifier: 'deep-entry-with-data',
           type: 'application/example+json',
           digest: `sha256:${'0'.repeat(64)}`,
         },

@@ -27,7 +27,9 @@ const fixedPublicJwk = {
 const fixedSignature =
   'eyJhbGciOiJFUzI1NiJ9..' +
   'NKmmKrtfVExTyrPwimVozLDtLRAZP0r29iJYkrBRAR7rFsM3UqsXFFH3htDDVUKWPJ-UjvgFQqOWDT97iDzT0A';
-const fixedManifest: TrustManifest = {
+// This cryptographic vector intentionally lacks subject.identifier; signature
+// checking does not validate the manifest schema.
+const fixedManifest = {
   identity: 'did:example:alice',
   issuedAt: '2026-03-15T10:00:00Z',
   subject: {
@@ -36,7 +38,7 @@ const fixedManifest: TrustManifest = {
     type: 'application/json',
   },
   signature: fixedSignature,
-};
+} as TrustManifest;
 const fixedPublicKey = createPublicKey({ key: fixedPublicJwk, format: 'jwk' });
 const fixedOptions: SignatureCheckOptions = {
   publicKey: fixedPublicKey,

@@ -22,6 +22,7 @@ const manifest: TrustManifest = {
   identity: 'did:example:alice',
   issuedAt: '2026-03-15T10:00:00Z',
   subject: {
+    identifier: 'example-artifact',
     digest:
       'sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
     type: 'application/json',

@@ -23,7 +23,6 @@ const inventory = {
       'documentationUrl',
       'identifier',
       'logoUrl',
-      'trustManifest',
     ],
     requiredBranches: [['displayName']],
   },
@@ -74,8 +73,8 @@ const inventory = {
     ],
   },
   TrustSubject: {
-    properties: ['digest', 'type', 'url'],
-    requiredBranches: [['digest', 'type']],
+    properties: ['digest', 'identifier', 'type', 'url', 'version'],
+    requiredBranches: [['digest', 'identifier', 'type']],
   },
   TrustSchema: {
     properties: [
@@ -182,6 +181,7 @@ describe('pinned specification field inventory', () => {
               },
             ],
             subject: {
+              identifier: 'urn:air:example.com:artifact:one',
               type: 'custom',
               url: 'https://example.com/one',
               digest,

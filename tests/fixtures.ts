@@ -8,17 +8,7 @@ export const validFixtures: readonly unknown[] = [
     host: {
       displayName: 'Example Host',
       futureHostField: ['preserved'],
-      trustManifest: {
-        identity: 'did:web:example.com',
-        attestations: [
-          {
-            type: 'SOC2-Type2',
-            uri: 'https://example.com/soc2.pdf',
-            digest: sha256,
-            size: 42,
-          },
-        ],
-      },
+      trustManifest: ['opaque', null, { arbitrary: true }],
     },
     entries: [
       {
@@ -35,6 +25,8 @@ export const validFixtures: readonly unknown[] = [
         trustManifest: {
           identity: 'did:web:example.com',
           subject: {
+            identifier: 'urn:air:example.com:agent:weather',
+            version: '1.0.0',
             type: 'application/a2a-agent-card+json',
             url: 'https://example.com/weather.json',
             digest: sha256,
@@ -138,4 +130,25 @@ export const structurallyInvalidFixtures: readonly unknown[] = [
       },
     ],
   },
+  ...[
+    { type: 'custom', digest: sha256 },
+    { identifier: 42, type: 'custom', digest: sha256 },
+    { identifier: 'x', version: null, type: 'custom', digest: sha256 },
+    { identifier: 'x', version: 42, type: 'custom', digest: sha256 },
+  ].map((subject) => ({
+    specVersion: '1.0',
+    entries: [
+      {
+        identifier: 'x',
+        type: 'custom',
+        data: null,
+        trustManifest: {
+          identity: 'did:web:example.com',
+          trustSchema: { identifier: 'urn:trust:example', version: '1' },
+          attestations: [],
+          subject,
+        },
+      },
+    ],
+  })),
 ];
