@@ -199,14 +199,6 @@ The result statuses have deliberately narrow meanings:
 | `jws_feature_not_implemented` | The JWS makes a well-formed critical request the SDK does not implement. |
 | `invalid_signature` | The signature has the wrong ES256 representation or does not verify under the supplied key and payload. |
 
-Before its first asynchronous operation, each function snapshots the signature,
-canonical payload bytes, options, and opaque key reference. A mutation made by
-caller code after invocation therefore cannot change which catalog or manifest
-state the eventual result describes. Neither function freezes the original
-value. The result describes the captured snapshot, not necessarily the input
-object's state when the promise settles; callers must not treat post-invocation
-mutations as authenticated.
-
 Wrong runtime argument types, options without own data properties, a non-public
 or incompatible key, and a non-string present `signature` reject with
 `TypeError`. The payload creator's programmatic I-JSON `TypeError` and
@@ -221,6 +213,111 @@ not select or validate a key and never trigger I/O. A caller may use such a
 field as an untrusted hint in a separate trusted key-resolution layer, then
 pass the selected native key into the appropriate checker. In particular, an
 embedded key is not trusted merely because it can verify its own signature.
+
+## Check a catalog entry's Trust Manifest
+
+`checkCatalogEntryTrustManifest()` applies the `did:web` Publisher Profile to
+one entry, its signed Trust Manifest, and its artifact representation:
+
+```ts
+import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/verification';
+
+const resultForEntryWithUrl = await checkCatalogEntryTrustManifest(
+  entryWithUrl,
+  artifactBytes,
+);
+
+const resultForEntryWithData = await checkCatalogEntryTrustManifest(
+  entryWithData,
+);
+```
+
+An entry with `url` requires caller-supplied `Uint8Array` bytes. The SDK hashes
+the exact supplied byte range without downloading, decoding, or parsing the
+artifact. An entry with `data` takes no separate bytes: its inline JSON value
+is JCS-canonicalized before hashing. Both forms resolve the issuer's current
+DID document; even an inline artifact requires network access for a successful
+check. The SDK does not cache DID documents between calls.
+
+The function accepts typed or previously parsed entries without rerunning
+whole-entry schema validation. It independently enforces every condition
+needed for the Publisher Profile, including required signed fields and valid
+timestamps.
+
+The function requires a standard `urn:air` entry identifier whose publisher
+domain is lowercase ASCII, including IDNA A-labels when needed. The manifest's
+`identity` must exactly equal `did:web:` followed by that domain, and a present
+`identityType` must be `did`. The profile supports root DIDs without ports or
+paths. It requires a detached ES256 signature whose protected `kid` names one
+method in that issuer's current DID document. The method must be authorized
+by `assertionMethod`, controlled by the issuer, and contain a suitable public
+P-256 JWK. Keys named by the signature through `jku`, `jwk`, `x5u`, or `x5c`
+are rejected, as is any protected `b64` parameter.
+
+A `valid` result means the publisher namespace currently authorized the key
+that signed the captured manifest, the signed subject matches the captured
+entry context and artifact representation, and the manifest had not expired
+when checked. It contains only `{ status: 'valid' }`. The function composes
+the same subject and digest checks as `checkCatalogEntryArtifactBinding()`;
+applications do not need to call that function separately.
+
+The result type is `CatalogEntryTrustManifestCheckResult`:
+
+| Status | Meaning |
+| --- | --- |
+| `valid` | Publisher authorization, signature, subject binding, artifact digest, and current expiration checks passed. |
+| `missing_trust_manifest` | The entry has no own `trustManifest` member. |
+| `signature_check_failed` | `signatureResult` contains the lower-level signature failure. |
+| `subject_check_failed` | `subjectResult` contains the lower-level subject or digest failure described below. |
+| `profile_check_failed` | The entry or manifest does not satisfy the Publisher Profile's requirements. `error` explains the failure. |
+| `issuer_check_failed` | DID resolution, document validation, or key authorization did not succeed. `error` explains the failure. |
+| `expired` | The authenticated manifest's `expiresAt` was in the past when expiration was checked. |
+
+Branch on `status` and the nested result discriminators. The
+`error` fields provide explanatory diagnostics and an underlying `cause`
+where available; their message text is not a stable classification API.
+A failure result does not authenticate the subject or any other claim.
+Expected profile, protocol, and resolution failures return results. Wrong
+runtime argument types, invalid call shapes or options, hostile programmatic
+values, canonicalization resource limits, and unexpected runtime or
+cryptographic backend failures reject the promise.
+
+### Network controls
+
+Ordinary calls need no options. `CatalogEntryTrustManifestCheckOptions`
+provides cancellation and configurable DID-resolution limits:
+
+```ts
+const result = await checkCatalogEntryTrustManifest(entryWithUrl, artifactBytes, {
+  signal: abortController.signal,
+  timeoutMs: 60_000,
+  maxResponseBytes: 16 * 1024 * 1024,
+});
+```
+
+The defaults are a 60-second total DID-resolution deadline and a 16 MiB
+decoded document-body limit. The deadline includes DNS resolution, redirects,
+and body reading; the body limit is enforced while reading. Requests use
+HTTPS, reject disallowed resolved addresses, and repeat address checks for
+redirects. A timeout or response-size failure returns `issuer_check_failed`.
+Explicit cancellation rejects with the signal's reason.
+
+### Time
+
+`issuedAt` must be a valid RFC 3339 timestamp, but it is an issuer claim rather
+than a trusted timestamp. A present `expiresAt` must also be valid and is
+compared with the machine's UTC clock near completion. Expiration is strict:
+an instant before the sampled current time produces `expired`, with no grace
+period or clock-skew allowance.
+Applications are responsible for maintaining an accurate clock; clock errors
+can affect expiration decisions.
+
+This function checks the entry's Trust Manifest in context. It does not verify
+the entry as a whole, its unsigned publisher or display metadata, a surrounding
+catalog signature, or the artifact's format-specific schema. It does not prove
+that supplied bytes came from an entry's URL, evaluate attestations or
+provenance, establish claim accuracy or publisher reputation, or decide
+whether an artifact is safe to use. Applications retain those policy decisions.
 
 ## Check a catalog entry's artifact binding
 
@@ -276,15 +373,6 @@ Programmer-contract and runtime failures reject rather than being hidden by a
 protocol status; in particular, the call shape, options, entry identifier and
 version, and byte view supplied for an entry with `url` are validated before
 `missing_trust_manifest` can be returned.
-
-Before its first asynchronous operation, the function captures all relevant
-own data properties, signature inputs, options, and subject fields. It hashes
-caller-supplied bytes for an entry with `url` or canonicalizes the inline
-artifact in an entry with `data`, then retains the digest result. Caller
-mutation after invocation therefore cannot combine a signature result from one
-state with a subject or artifact result from another, and caller-supplied
-artifacts do not need to be copied and retained while signature verification is
-pending.
 
 The function expects a typed or previously parsed entry but does not perform
 schema validation. Wrong runtime types, malformed programmatic JSON, accessors,

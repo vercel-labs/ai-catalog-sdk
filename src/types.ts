@@ -133,10 +133,10 @@ export interface Publisher {
  * attestations, provenance, expiration policy, or artifact content.
  */
 export interface TrustManifest {
-  /** Claimed globally unique URI identifying the artifact. */
+  /** Claimed globally unique URI identifying the manifest issuer. */
   identity: string;
 
-  /** Type hint for `identity`, such as `did`, `spiffe`, or `dns`. */
+  /** Descriptive type hint for `identity`; the identity URI determines the mechanism. */
   identityType?: string;
   trustSchema?: TrustSchema;
   attestations?: Attestation[];
@@ -150,7 +150,7 @@ export interface TrustManifest {
   /** RFC 3339 issuance timestamp; required with `signature`. */
   issuedAt?: string;
 
-  /** RFC 3339 timestamp after which the manifest is stale; validation does not enforce expiration. */
+  /** RFC 3339 timestamp after which the manifest is stale; parsing does not enforce expiration. */
   expiresAt?: string;
 
   /**

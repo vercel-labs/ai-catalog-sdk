@@ -11,6 +11,13 @@ import * as joseErrors from 'jose/errors';
 
 import { DIGEST_PATTERN } from './internal/digest.js';
 import { preflightJsonValue } from './internal/json-value.js';
+import { resolveDidWeb } from './internal/did-web.js';
+import {
+  inspectPublisherProfile,
+  authorizePublisherKey,
+  isManifestExpired,
+  IssuerCheckError,
+} from './internal/publisher-profile.js';
 import type {
   AICatalog,
   CatalogEntry,
@@ -59,14 +66,20 @@ const digestImplementations = {
 type ImplementedDigestAlgorithm = keyof typeof digestImplementations;
 
 interface ParsedDetachedJws {
+  protectedHeader: Record<string, unknown>;
   protectedSegment: string;
   signatureSegment: string;
 }
 
-interface SignatureCheckSnapshot {
+type SignatureCheckFailure = Exclude<SignatureCheckResult, { status: 'valid' }>;
+
+interface SignaturePayloadSnapshot {
   payload: Uint8Array;
-  publicKey: webcrypto.CryptoKey | KeyObject;
   jws: ParsedDetachedJws;
+}
+
+interface SignatureCheckSnapshot extends SignaturePayloadSnapshot {
+  publicKey: webcrypto.CryptoKey | KeyObject;
 }
 
 type TrustSubjectSnapshot =
@@ -382,10 +395,36 @@ function hasCanonicalBase64UrlSyntax(
   return true;
 }
 
+function decodeProtectedHeader(
+  value: string,
+): Record<string, unknown> | undefined {
+  const separator = value.indexOf('.');
+  if (separator < 0 || !hasCanonicalBase64UrlSyntax(value, 0, separator)) {
+    return undefined;
+  }
+  try {
+    const header: unknown = JSON.parse(
+      strictUtf8Decoder.decode(
+        Buffer.from(value.slice(0, separator), 'base64url'),
+      ),
+    );
+    if (
+      header === null ||
+      typeof header !== 'object' ||
+      Array.isArray(header)
+    ) {
+      return undefined;
+    }
+    return header as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
 function inspectDetachedJws(
   value: string,
   expectedAlgorithm: 'ES256',
-): ParsedDetachedJws | SignatureCheckResult {
+): ParsedDetachedJws | SignatureCheckFailure {
   const firstSeparator = value.indexOf('.');
   const secondSeparator = value.indexOf('.', firstSeparator + 1);
   if (
@@ -405,21 +444,8 @@ function inspectDetachedJws(
   }
 
   const protectedSegment = value.slice(0, firstSeparator);
-  const protectedBytes = Buffer.from(protectedSegment, 'base64url');
-
-  let protectedHeader: unknown;
-  try {
-    protectedHeader = JSON.parse(strictUtf8Decoder.decode(protectedBytes));
-  } catch {
-    return { status: 'invalid_jws' };
-  }
-  if (
-    protectedHeader === null ||
-    typeof protectedHeader !== 'object' ||
-    Array.isArray(protectedHeader)
-  ) {
-    return { status: 'invalid_jws' };
-  }
+  const protectedHeader = decodeProtectedHeader(value);
+  if (!protectedHeader) return { status: 'invalid_jws' };
 
   const critical = readOwnDataProperty(protectedHeader, 'crit');
   let unsupportedCriticalFeature = false;
@@ -476,7 +502,7 @@ function inspectDetachedJws(
     return { status: 'invalid_signature' };
   }
 
-  return { protectedSegment, signatureSegment };
+  return { protectedHeader, protectedSegment, signatureSegment };
 }
 
 /** The outcome of comparing bytes with a declared AI Catalog digest. */
@@ -531,6 +557,23 @@ export type CatalogEntryArtifactBindingCheckResult =
         | { status: 'url_mismatch' }
         | Exclude<DigestCheckResult, { status: 'match' }>;
     };
+
+/** Optional controls for resolving the publisher's current DID document. */
+export interface CatalogEntryTrustManifestCheckOptions {
+  /** Cancels the operation; cancellation rejects with this signal's reason. */
+  signal?: AbortSignal;
+  /** Total DID-resolution deadline in milliseconds. Defaults to 60,000. */
+  timeoutMs?: number;
+  /** Maximum decoded DID-document body size. Defaults to 16 MiB. */
+  maxResponseBytes?: number;
+}
+
+/** The outcome of a complete did:web Publisher Profile check. */
+export type CatalogEntryTrustManifestCheckResult =
+  | CatalogEntryArtifactBindingCheckResult
+  | { status: 'profile_check_failed'; error: Error }
+  | { status: 'issuer_check_failed'; error: Error }
+  | { status: 'expired' };
 
 /**
  * Indicates that the runtime could not execute a digest algorithm implemented
@@ -635,11 +678,10 @@ export function createTrustManifestSignaturePayload(
   return createDetachedJwsPayload(manifest, 'manifest');
 }
 
-function snapshotSignatureCheck(
+function snapshotSignaturePayload(
   value: object,
   valueName: 'catalog' | 'manifest',
-  options: SignatureCheckOptions,
-): SignatureCheckSnapshot | SignatureCheckResult {
+): SignaturePayloadSnapshot | SignatureCheckFailure {
   const payload = createDetachedJwsPayload(value, valueName);
   const signature = readOwnDataProperty(value, 'signature');
 
@@ -649,11 +691,19 @@ function snapshotSignatureCheck(
       `${valueName}.signature must be a string when present.`,
     );
   }
-
-  const jws = inspectDetachedJws(signature, options.expectedAlgorithm);
+  const jws = inspectDetachedJws(signature, 'ES256');
   if ('status' in jws) return jws;
+  return { payload, jws };
+}
 
-  return { payload, publicKey: options.publicKey, jws };
+function snapshotSignatureCheck(
+  value: object,
+  valueName: 'catalog' | 'manifest',
+  options: SignatureCheckOptions,
+): SignatureCheckSnapshot | SignatureCheckResult {
+  const snapshot = snapshotSignaturePayload(value, valueName);
+  if ('status' in snapshot) return snapshot;
+  return { ...snapshot, publicKey: options.publicKey };
 }
 
 function snapshotCatalogSignatureCheck(
@@ -818,6 +868,32 @@ export async function checkCatalogEntryArtifactBinding(
   const options = snapshotSignatureCheckOptions(
     isDataCall ? artifactBytesOrOptions : maybeOptions,
   );
+  const snapshot = prepareCatalogEntryBinding(
+    entry,
+    artifactBytesOrOptions,
+    isDataCall,
+  );
+  if ('status' in snapshot) return snapshot;
+  return executeCatalogEntryBinding(snapshot, options.publicKey);
+}
+
+type SubjectCheckOutcome = { status: 'match' } | Extract<
+  CatalogEntryArtifactBindingCheckResult,
+  { status: 'subject_check_failed' }
+>['subjectResult'];
+
+interface CatalogEntryBindingSnapshot {
+  identifier: string;
+  manifest: TrustManifest;
+  signature: SignaturePayloadSnapshot | SignatureCheckFailure;
+  subjectResult: SubjectCheckOutcome;
+}
+
+function prepareCatalogEntryBinding(
+  entry: CatalogEntry,
+  artifactBytesOrOptions: unknown,
+  isDataCall: boolean,
+): CatalogEntryBindingSnapshot | { status: 'missing_trust_manifest' } {
   assertCatalogEntryObject(entry);
 
   const entryIdentifier = readRequiredEntryProperty(entry, 'identifier');
@@ -874,11 +950,11 @@ export async function checkCatalogEntryArtifactBinding(
   }
 
   const manifest = manifestProperty.value as TrustManifest;
-  const signatureSnapshot = snapshotTrustManifestSignatureCheck(
-    manifest,
-    options,
-  );
-  const subjectSnapshot = snapshotTrustSubject(manifest);
+  const signatureSnapshot = snapshotSignaturePayload(manifest, 'manifest');
+  const manifestSnapshot = createCanonicalizationSnapshot(
+    manifest as unknown as JsonValue,
+  ) as unknown as TrustManifest;
+  const subjectSnapshot = snapshotTrustSubject(manifestSnapshot);
 
   let subjectResult:
     | { status: 'match' }
@@ -948,17 +1024,213 @@ export async function checkCatalogEntryArtifactBinding(
     }
   }
 
+  return {
+    identifier: entryIdentifier,
+    manifest: manifestSnapshot,
+    signature: signatureSnapshot,
+    subjectResult,
+  };
+}
+
+async function executeCatalogEntryBinding(
+  snapshot: CatalogEntryBindingSnapshot,
+  publicKey: webcrypto.CryptoKey | KeyObject,
+): Promise<CatalogEntryArtifactBindingCheckResult> {
   const signatureResult = await executeSignatureCheck(
-    signatureSnapshot,
+    'status' in snapshot.signature
+      ? snapshot.signature
+      : { ...snapshot.signature, publicKey },
   );
   if (signatureResult.status !== 'valid') {
     return { status: 'signature_check_failed', signatureResult };
   }
-
-  if (subjectResult.status !== 'match') {
-    return { status: 'subject_check_failed', subjectResult };
+  if (snapshot.subjectResult.status !== 'match') {
+    return {
+      status: 'subject_check_failed',
+      subjectResult: snapshot.subjectResult,
+    };
   }
+  return { status: 'valid' };
+}
 
+function throwIfPublisherCheckCanceled(signal: AbortSignal | undefined): void {
+  if (signal !== undefined) AbortSignal.prototype.throwIfAborted.call(signal);
+}
+
+function snapshotPublisherCheckOptions(value: unknown): {
+  signal?: AbortSignal;
+  timeoutMs: number;
+  maxResponseBytes: number;
+} {
+  if (value === undefined)
+    return { timeoutMs: 60_000, maxResponseBytes: 16 * 1024 * 1024 };
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    utilTypes.isProxy(value) ||
+    Array.isArray(value)
+  ) {
+    throw new TypeError('options must be an object.');
+  }
+  const options: Record<string, unknown> = Object.create(null);
+  for (const name of ['signal', 'timeoutMs', 'maxResponseBytes']) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, name);
+    if (!descriptor) continue;
+    if (!('value' in descriptor)) {
+      throw new TypeError(`options.${name} must be an own data property.`);
+    }
+    options[name] = descriptor.value;
+  }
+  const timeoutMs =
+    options.timeoutMs === undefined ? 60_000 : options.timeoutMs;
+  const maxResponseBytes =
+    options.maxResponseBytes === undefined
+      ? 16 * 1024 * 1024
+      : options.maxResponseBytes;
+  if (
+    typeof timeoutMs !== 'number' ||
+    !Number.isFinite(timeoutMs) ||
+    timeoutMs <= 0
+  ) {
+    throw new TypeError('timeoutMs must be a positive finite number.');
+  }
+  if (
+    typeof maxResponseBytes !== 'number' ||
+    !Number.isSafeInteger(maxResponseBytes) ||
+    maxResponseBytes <= 0
+  ) {
+    throw new TypeError('maxResponseBytes must be a positive safe integer.');
+  }
+  const signal = options.signal;
+  if (signal !== undefined) {
+    if (
+      signal === null ||
+      typeof signal !== 'object' ||
+      utilTypes.isProxy(signal)
+    ) {
+      throw new TypeError('signal must be an AbortSignal.');
+    }
+    try {
+      const abortedGetter = Object.getOwnPropertyDescriptor(
+        AbortSignal.prototype,
+        'aborted',
+      )?.get;
+      if (!abortedGetter) throw new Error('AbortSignal is unavailable.');
+      abortedGetter.call(signal);
+    } catch {
+      throw new TypeError('signal must be an AbortSignal.');
+    }
+    return { signal: signal as AbortSignal, timeoutMs, maxResponseBytes };
+  }
+  return { timeoutMs, maxResponseBytes };
+}
+
+/**
+ * Checks a signed Trust Manifest under the did:web Publisher Profile.
+ *
+ * The publisher's current DID document authorizes the ES256 verification key.
+ * URL entries use caller-supplied artifact bytes; inline entries use JCS bytes.
+ * Inputs are captured before I/O.
+ * Success establishes publisher namespace authorization, signature validity,
+ * subject binding and non-expiration at the sampled system-clock time. It does
+ * not authenticate the catalog as a whole or establish the truth of claims.
+ *
+ * Expected profile and issuer failures are returned with explanatory errors.
+ * Invalid runtime arguments and unexpected backend failures reject. Caller
+ * cancellation rejects with the signal's reason.
+ */
+export function checkCatalogEntryTrustManifest(
+  entry: CatalogEntryWithData,
+  options?: CatalogEntryTrustManifestCheckOptions,
+): Promise<CatalogEntryTrustManifestCheckResult>;
+/** @inheritdoc */
+export function checkCatalogEntryTrustManifest(
+  entry: CatalogEntryWithUrl,
+  artifactBytes: Uint8Array,
+  options?: CatalogEntryTrustManifestCheckOptions,
+): Promise<CatalogEntryTrustManifestCheckResult>;
+export async function checkCatalogEntryTrustManifest(
+  entry: CatalogEntry,
+  artifactBytesOrOptions?: Uint8Array | CatalogEntryTrustManifestCheckOptions,
+  maybeOptions?: CatalogEntryTrustManifestCheckOptions,
+): Promise<CatalogEntryTrustManifestCheckResult> {
+  const isDataCall = !utilTypes.isUint8Array(artifactBytesOrOptions);
+  if (isDataCall && maybeOptions !== undefined) {
+    throw new TypeError(
+      'entries with data accept options as the second argument.',
+    );
+  }
+  const options = snapshotPublisherCheckOptions(
+    isDataCall ? artifactBytesOrOptions : maybeOptions,
+  );
+  throwIfPublisherCheckCanceled(options.signal);
+  const snapshot = prepareCatalogEntryBinding(
+    entry,
+    artifactBytesOrOptions,
+    isDataCall,
+  );
+  if ('status' in snapshot) return snapshot;
+  const rawSignature = snapshot.manifest.signature;
+  const header = 'status' in snapshot.signature
+    ? (typeof rawSignature === 'string'
+      ? decodeProtectedHeader(rawSignature)
+      : undefined)
+    : snapshot.signature.jws.protectedHeader;
+  // Profile-specific forbidden headers must be rejected even when the generic
+  // JWS checker would report an unsupported critical feature.
+  if (
+    header &&
+    ['b64', 'jku', 'jwk', 'x5u', 'x5c'].some((name) =>
+      Object.hasOwn(header, name),
+    )
+  ) {
+    const profile = inspectPublisherProfile(
+      snapshot.identifier,
+      snapshot.manifest,
+      header,
+    );
+    if (profile instanceof Error)
+      return { status: 'profile_check_failed', error: profile };
+  }
+  if ('status' in snapshot.signature) {
+    return {
+      status: 'signature_check_failed',
+      signatureResult: snapshot.signature,
+    };
+  }
+  if (snapshot.subjectResult.status !== 'match') {
+    return {
+      status: 'subject_check_failed',
+      subjectResult: snapshot.subjectResult,
+    };
+  }
+  const profile = inspectPublisherProfile(
+    snapshot.identifier,
+    snapshot.manifest,
+    snapshot.signature.jws.protectedHeader,
+  );
+  if (profile instanceof Error)
+    return { status: 'profile_check_failed', error: profile };
+  let publicKey: KeyObject;
+  try {
+    const document = await resolveDidWeb(profile.identity, options);
+    throwIfPublisherCheckCanceled(options.signal);
+    publicKey = authorizePublisherKey(document, profile.identity, profile.kid);
+  } catch (error) {
+    throwIfPublisherCheckCanceled(options.signal);
+    if (error instanceof IssuerCheckError)
+      return { status: 'issuer_check_failed', error };
+    throw error;
+  }
+  const result = await executeCatalogEntryBinding(snapshot, publicKey);
+  throwIfPublisherCheckCanceled(options.signal);
+  if (result.status !== 'valid') return result;
+  if (
+    snapshot.manifest.expiresAt !== undefined &&
+    isManifestExpired(snapshot.manifest.expiresAt, Date.now())
+  ) {
+    return { status: 'expired' };
+  }
   return { status: 'valid' };
 }
 

@@ -58,7 +58,25 @@ if (result.status !== 'valid') {
 
 A `valid` result means the exact caller-selected key verified the signature over the exact canonical catalog snapshot captured by this invocation. It does not authenticate the key as belonging to the catalog operator, verify entry Trust Manifests or artifacts referenced by URLs, establish freshness, or decide trust. See [Verification utilities](./docs/verification.md) for failure details and the complete boundary.
 
-## Check a catalog entry's artifact binding
+## Check a catalog entry's Trust Manifest
+
+`checkCatalogEntryTrustManifest()` implements the `did:web` Publisher Profile. It resolves the publisher's current DID document and selects an authorized assertion key automatically:
+
+```ts
+import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/verification';
+
+const result = await checkCatalogEntryTrustManifest(entryWithUrl, artifactBytes);
+
+if (result.status !== 'valid') {
+  throw new Error(`Trust Manifest check failed: ${result.status}`);
+}
+```
+
+For an entry with `url`, supply the artifact bytes obtained by your application. For an entry with `data`, call `checkCatalogEntryTrustManifest(entryWithData)`; the SDK canonicalizes the inline artifact with JCS. Both forms resolve the current root `did:web` DID corresponding to the publisher domain in the entry's `urn:air` identifier.
+
+A `valid` result means the publisher namespace authorized the manifest's signer, the signature and artifact binding passed, and the manifest had not expired according to the machine's UTC clock when checked. It does not authenticate the entire entry or establish publisher reputation, claim accuracy, or artifact safety. See [Verification utilities](./docs/verification.md#check-a-catalog-entrys-trust-manifest) for results, network controls, and the complete boundary.
+
+## Check a catalog entry's artifact binding with a supplied key
 
 `checkCatalogEntryArtifactBinding()` composes signature, subject-context, and
 digest checks from one coherent invocation snapshot:
@@ -102,6 +120,7 @@ These utilities do not fetch content or resolve keys. See [Verification utilitie
 | An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
 | A catalog, caller-selected public key, and expected algorithm | `checkCatalogSignature()` | `ai-catalog-sdk/verification` |
+| A catalog entry's Trust Manifest under the `did:web` Publisher Profile, with supplied artifact bytes for an entry with `url` | `checkCatalogEntryTrustManifest()` | `ai-catalog-sdk/verification` |
 | A catalog entry, trusted public key, and either artifact bytes for an entry with `url` or the inline artifact in an entry with `data` | `checkCatalogEntryArtifactBinding()` | `ai-catalog-sdk/verification` |
 | Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
 | JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
