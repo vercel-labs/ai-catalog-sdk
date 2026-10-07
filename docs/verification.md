@@ -1,13 +1,10 @@
 # Verification utilities
 
-Verification utilities are available from the `ai-catalog-sdk/verification`
-subpath. They are separate from parsing so applications can distinguish
-structural validation from checks performed against external content.
+Verification utilities are available from the `ai-catalog-sdk/verification` subpath. They are separate from parsing so applications can distinguish structural validation from checks performed against external content.
 
 ## Canonicalize a logical JSON value
 
-`canonicalizeJsonValueToBytes(value)` encodes an already-materialized logical
-JSON value as fresh RFC 8785 JSON Canonicalization Scheme (JCS) UTF-8 bytes:
+`canonicalizeJsonValueToBytes(value)` encodes an already-materialized logical JSON value as fresh RFC 8785 JSON Canonicalization Scheme (JCS) UTF-8 bytes:
 
 ```ts
 import {
@@ -21,36 +18,17 @@ const result = checkDigest(
 );
 ```
 
-The function sorts object property names by UTF-16 code units, recursively,
-while preserving array order and Unicode normalization form. It uses the JCS
-ECMAScript number representation; for example, the JavaScript value `-0`
-canonicalizes as `0`.
+The function sorts object property names by UTF-16 code units, recursively, while preserving array order and Unicode normalization form. It uses the JCS ECMAScript number representation; for example, the JavaScript value `-0` canonicalizes as `0`.
 
-The input is a value, not source text. Passing `'{"x":1}'` canonicalizes a JSON
-string value; it does not parse an object. By the time a normal JSON parser has
-produced a value, duplicate member names, original number spelling and
-precision, invalid source UTF-8, and a source spelling of negative zero can no
-longer be recovered. Callers that need to authenticate those source-level
-properties need a separate I-JSON-aware parsing boundary.
+The input is a value, not source text. Passing `'{"x":1}'` canonicalizes a JSON string value; it does not parse an object. By the time a normal JSON parser has produced a value, duplicate member names, original number spelling and precision, invalid source UTF-8, and a source spelling of negative zero can no longer be recovered. Callers that need to authenticate those source-level properties need a separate I-JSON-aware parsing boundary.
 
-Programmatic input must consist of plain JSON objects, arrays, and JSON
-primitives. The function rejects non-finite numbers, lone Unicode surrogates,
-noncharacters, cycles, sparse or decorated arrays, accessors, proxies, exotic
-objects, and other non-JSON values with `TypeError`. Inputs beyond the SDK's
-fixed node or nesting-depth limits throw `RangeError`. Canonicalization uses
-only the accepted own data properties; it does not invoke inherited `toJSON`
-hooks or overridden array methods.
+Programmatic input must consist of plain JSON objects, arrays, and JSON primitives. The function rejects non-finite numbers, lone Unicode surrogates, noncharacters, cycles, sparse or decorated arrays, accessors, proxies, exotic objects, and other non-JSON values with `TypeError`. Inputs beyond the SDK's fixed node or nesting-depth limits throw `RangeError`. Canonicalization uses only the accepted own data properties; it does not invoke inherited `toJSON` hooks or overridden array methods.
 
-Canonicalization does not remove or reinterpret any member. In particular,
-this function does not remove a `signature` member. Use
-`createCatalogSignaturePayload()` or
-`createTrustManifestSignaturePayload()` for the corresponding AI Catalog
-signature-payload rule described below.
+Canonicalization does not remove or reinterpret any member. In particular, this function does not remove a `signature` member. Use `createCatalogSignaturePayload()` or `createTrustManifestSignaturePayload()` for the corresponding AI Catalog signature-payload rule described below.
 
 ## Create a catalog signature payload
 
-`createCatalogSignaturePayload(catalog)` returns the exact RFC 8785 UTF-8
-payload covered by an AI Catalog's top-level detached JWS:
+`createCatalogSignaturePayload(catalog)` returns the exact RFC 8785 UTF-8 payload covered by an AI Catalog's top-level detached JWS:
 
 ```ts
 import { createCatalogSignaturePayload } from 'ai-catalog-sdk/verification';
@@ -58,34 +36,15 @@ import { createCatalogSignaturePayload } from 'ai-catalog-sdk/verification';
 const payload = createCatalogSignaturePayload(catalog);
 ```
 
-The function omits exactly an own, top-level member whose name is the
-case-sensitive string `signature`. It preserves every other member, including
-unknown future fields, extensions, the `entries` array and its order, inline
-`data`, a differently cased top-level name such as `Signature`, and nested
-fields named `signature`. It does not mutate the input, and signed and
-otherwise-identical unsigned catalogs produce the same bytes.
+The function omits exactly an own, top-level member whose name is the case-sensitive string `signature`. It preserves every other member, including unknown future fields, extensions, the `entries` array and its order, inline `data`, a differently cased top-level name such as `Signature`, and nested fields named `signature`. It does not mutate the input, and signed and otherwise-identical unsigned catalogs produce the same bytes.
 
-The input is an already-materialized AI Catalog value. This function does not
-parse or structurally validate it, so validate untrusted catalog input at the
-appropriate boundary first. It cannot recover source-level information already
-lost during parsing, such as duplicate member names or original number
-spellings. The same programmatic I-JSON restrictions and fixed resource limits
-as `canonicalizeJsonValueToBytes()` apply, producing `TypeError` or `RangeError`
-respectively. Those restrictions apply to the entire input, including the
-omitted `signature` member. Accessors and proxies are rejected without invoking
-them; non-enumerable and non-JSON `signature` values are rejected rather than
-silently ignored.
+The input is an already-materialized AI Catalog value. This function does not parse or structurally validate it, so validate untrusted catalog input at the appropriate boundary first. It cannot recover source-level information already lost during parsing, such as duplicate member names or original number spellings. The same programmatic I-JSON restrictions and fixed resource limits as `canonicalizeJsonValueToBytes()` apply, producing `TypeError` or `RangeError` respectively. Those restrictions apply to the entire input, including the omitted `signature` member. Accessors and proxies are rejected without invoking them; non-enumerable and non-JSON `signature` values are rejected rather than silently ignored.
 
-The result is only the detached JWS payload. It is not base64url-encoded and is
-not the complete JWS signing input. The function does not create or verify a
-JWS, select or evaluate keys, algorithms, or key identifiers, fetch artifacts,
-or establish trust. The payload covers an entry's URL string but not the
-artifact bytes retrieved from that URL.
+The result is only the detached JWS payload. It is not base64url-encoded and is not the complete JWS signing input. The function does not create or verify a JWS, select or evaluate keys, algorithms, or key identifiers, fetch artifacts, or establish trust. The payload covers an entry's URL string but not the artifact bytes retrieved from that URL.
 
 ## Create a Trust Manifest signature payload
 
-`createTrustManifestSignaturePayload(manifest)` returns the exact RFC 8785
-UTF-8 payload covered by a Trust Manifest's detached JWS:
+`createTrustManifestSignaturePayload(manifest)` returns the exact RFC 8785 UTF-8 payload covered by a Trust Manifest's detached JWS:
 
 ```ts
 import { createTrustManifestSignaturePayload } from 'ai-catalog-sdk/verification';
@@ -93,38 +52,19 @@ import { createTrustManifestSignaturePayload } from 'ai-catalog-sdk/verification
 const payload = createTrustManifestSignaturePayload(trustManifest);
 ```
 
-The function omits exactly an own, top-level member whose name is the
-case-sensitive string `signature`. It preserves every other member, including
-unknown future fields, extensions, a differently cased top-level name such as
-`Signature`, and nested fields named `signature`. It does not mutate the input,
-and signed and otherwise-identical unsigned manifests produce the same bytes.
+The function omits exactly an own, top-level member whose name is the case-sensitive string `signature`. It preserves every other member, including unknown future fields, extensions, a differently cased top-level name such as `Signature`, and nested fields named `signature`. It does not mutate the input, and signed and otherwise-identical unsigned manifests produce the same bytes.
 
-The input is an already-materialized Trust Manifest value. This function does
-not parse or structurally validate it, so validate untrusted catalog input at
-the appropriate boundary first. It cannot recover source-level information
-already lost during parsing, such as duplicate member names or original number
-spellings. The same programmatic I-JSON restrictions and fixed resource limits
-as `canonicalizeJsonValueToBytes()` apply, producing `TypeError` or `RangeError`
-respectively. Those restrictions apply to the entire input, including the
-omitted `signature` member. Accessors and proxies are rejected without invoking
-them; non-enumerable and non-JSON `signature` values are rejected rather than
-silently ignored.
+The input is an already-materialized Trust Manifest value. This function does not parse or structurally validate it, so validate untrusted catalog input at the appropriate boundary first. It cannot recover source-level information already lost during parsing, such as duplicate member names or original number spellings. The same programmatic I-JSON restrictions and fixed resource limits as `canonicalizeJsonValueToBytes()` apply, producing `TypeError` or `RangeError` respectively. Those restrictions apply to the entire input, including the omitted `signature` member. Accessors and proxies are rejected without invoking them; non-enumerable and non-JSON `signature` values are rejected rather than silently ignored.
 
-The result is only the detached JWS payload. It is not base64url-encoded and is
-not the complete JWS signing input. The function does not create or verify a
-JWS, select or evaluate keys, algorithms, or key identifiers, check a subject
-digest, enforce timestamps, resolve an identity, or establish trust.
+The result is only the detached JWS payload. It is not base64url-encoded and is not the complete JWS signing input. The function does not create or verify a JWS, select or evaluate keys, algorithms, or key identifiers, check a subject digest, enforce timestamps, resolve an identity, or establish trust.
 
 ## Check signatures
 
-`checkCatalogSignature()` and `checkTrustManifestSignature()` check a detached
-JWS with one public key and expected algorithm selected by the caller. They
-share the `SignatureCheckOptions` and `SignatureCheckResult` types.
+`checkCatalogSignature()` and `checkTrustManifestSignature()` check a detached JWS with one public key and expected algorithm selected by the caller. They share the `SignatureCheckOptions` and `SignatureCheckResult` types.
 
 ### Check a catalog signature
 
-`checkCatalogSignature(catalog, options)` checks the top-level catalog
-signature over one captured catalog snapshot:
+`checkCatalogSignature(catalog, options)` checks the top-level catalog signature over one captured catalog snapshot:
 
 ```ts
 import { createPublicKey } from 'node:crypto';
@@ -137,19 +77,13 @@ const result = await checkCatalogSignature(catalog, {
 });
 ```
 
-A `valid` result means the exact caller-selected key verified the signature
-over the exact canonical catalog snapshot captured by this invocation. That
-snapshot includes `host`, entry membership and ordering, metadata, URL strings,
-inline data, extensions, unknown fields, and nested Trust Manifest signatures.
+A `valid` result means the exact caller-selected key verified the signature over the exact canonical catalog snapshot captured by this invocation. That snapshot includes `host`, entry membership and ordering, metadata, URL strings, inline data, extensions, unknown fields, and nested Trust Manifest signatures.
 
-It does not authenticate the key as belonging to the catalog operator, fetch
-or authenticate artifacts referenced by URLs, verify entry Trust Manifests,
-establish freshness, or decide trust.
+It does not authenticate the key as belonging to the catalog operator, fetch or authenticate artifacts referenced by URLs, verify entry Trust Manifests, establish freshness, or decide trust.
 
 ### Check a Trust Manifest signature
 
-`checkTrustManifestSignature(manifest, options)` checks a Trust Manifest's
-signature over one captured manifest snapshot:
+`checkTrustManifestSignature(manifest, options)` checks a Trust Manifest's signature over one captured manifest snapshot:
 
 ```ts
 import { createPublicKey } from 'node:crypto';
@@ -162,31 +96,13 @@ const result = await checkTrustManifestSignature(trustManifest, {
 });
 ```
 
-A `valid` result means the exact caller-selected key verified the signature
-over the exact canonical manifest snapshot captured by this invocation. It
-does not prove who owns the public key or connect it with the manifest's
-claimed identity. It also does not establish a trust anchor, check the subject
-digest or surrounding catalog, validate timestamps, or decide whether the
-manifest should be trusted.
+A `valid` result means the exact caller-selected key verified the signature over the exact canonical manifest snapshot captured by this invocation. It does not prove who owns the public key or connect it with the manifest's claimed identity. It also does not establish a trust anchor, check the subject digest or surrounding catalog, validate timestamps, or decide whether the manifest should be trusted.
 
 ### Shared signature-checking behavior
 
-The SDK currently implements only the exact `ES256` algorithm token. A key
-must be a native public P-256 `KeyObject` or verification-capable `CryptoKey`.
-The expected algorithm and key are trusted caller inputs. The unverified `alg`
-header is compared with that expectation; it never selects an algorithm.
-Typed consumers of this Node-only subpath need compatible Node.js declarations,
-such as `@types/node`.
+The SDK currently implements only the exact `ES256` algorithm token. A key must be a native public P-256 `KeyObject` or verification-capable `CryptoKey`. The expected algorithm and key are trusted caller inputs. The unverified `alg` header is compared with that expectation; it never selects an algorithm. Typed consumers of this Node-only subpath need compatible Node.js declarations, such as `@types/node`.
 
-Each checker accepts the ordinary RFC 7515 detached compact form
-`protected..signature` and reconstructs the signing input using the base64url
-encoding of the corresponding payload creator's result. Compact segments
-must use canonical, unpadded base64url, and the protected header must be valid
-UTF-8 JSON. RFC 7797 unencoded payloads (`b64: false`) and other well-formed
-unknown critical extensions produce `jws_feature_not_implemented`; malformed
-critical declarations produce `invalid_jws`. An explicit `b64` parameter must
-be protected and named by `crit`; `b64: true` then retains the ordinary encoded
-payload behavior.
+Each checker accepts the ordinary RFC 7515 detached compact form `protected..signature` and reconstructs the signing input using the base64url encoding of the corresponding payload creator's result. Compact segments must use canonical, unpadded base64url, and the protected header must be valid UTF-8 JSON. RFC 7797 unencoded payloads (`b64: false`) and other well-formed unknown critical extensions produce `jws_feature_not_implemented`; malformed critical declarations produce `invalid_jws`. An explicit `b64` parameter must be protected and named by `crit`; `b64: true` then retains the ordinary encoded payload behavior.
 
 The result statuses have deliberately narrow meanings:
 
@@ -199,25 +115,13 @@ The result statuses have deliberately narrow meanings:
 | `jws_feature_not_implemented` | The JWS makes a well-formed critical request the SDK does not implement. |
 | `invalid_signature` | The signature has the wrong ES256 representation or does not verify under the supplied key and payload. |
 
-Wrong runtime argument types, options without own data properties, a non-public
-or incompatible key, and a non-string present `signature` reject with
-`TypeError`. The payload creator's programmatic I-JSON `TypeError` and
-resource-limit `RangeError` behavior is retained. Each checker validates the
-complete materialized value before reporting `missing_signature`; neither
-performs catalog or Trust Manifest schema validation. Backend failures surfaced
-distinctly by the JOSE implementation reject instead of being converted to an
-input-status result.
+Wrong runtime argument types, options without own data properties, a non-public or incompatible key, and a non-string present `signature` reject with `TypeError`. The payload creator's programmatic I-JSON `TypeError` and resource-limit `RangeError` behavior is retained. Each checker validates the complete materialized value before reporting `missing_signature`; neither performs catalog or Trust Manifest schema validation. Backend failures surfaced distinctly by the JOSE implementation reject instead of being converted to an input-status result.
 
-JWS `kid`, `jwk`, `jku`, `x5u`, `x5c`, and similar noncritical header fields do
-not select or validate a key and never trigger I/O. A caller may use such a
-field as an untrusted hint in a separate trusted key-resolution layer, then
-pass the selected native key into the appropriate checker. In particular, an
-embedded key is not trusted merely because it can verify its own signature.
+JWS `kid`, `jwk`, `jku`, `x5u`, `x5c`, and similar noncritical header fields do not select or validate a key and never trigger I/O. A caller may use such a field as an untrusted hint in a separate trusted key-resolution layer, then pass the selected native key into the appropriate checker. In particular, an embedded key is not trusted merely because it can verify its own signature.
 
 ## Check a catalog entry's Trust Manifest
 
-`checkCatalogEntryTrustManifest()` applies the `did:web` Publisher Profile to
-one entry, its signed Trust Manifest, and its artifact representation:
+`checkCatalogEntryTrustManifest()` applies the `did:web` Publisher Profile to one entry, its signed Trust Manifest, and its artifact representation:
 
 ```ts
 import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/verification';
@@ -232,34 +136,13 @@ const resultForEntryWithData = await checkCatalogEntryTrustManifest(
 );
 ```
 
-An entry with `url` requires caller-supplied `Uint8Array` bytes. The SDK hashes
-the exact supplied byte range without downloading, decoding, or parsing the
-artifact. An entry with `data` takes no separate bytes: its inline JSON value
-is JCS-canonicalized before hashing. Both forms resolve the issuer's current
-DID document; even an inline artifact requires network access for a successful
-check. The SDK does not cache DID documents between calls.
+An entry with `url` requires caller-supplied `Uint8Array` bytes. The SDK hashes the exact supplied byte range without downloading, decoding, or parsing the artifact. An entry with `data` takes no separate bytes: its inline JSON value is JCS-canonicalized before hashing. Both forms resolve the issuer's current DID document; even an inline artifact requires network access for a successful check. The SDK does not cache DID documents between calls.
 
-The function accepts typed or previously parsed entries without rerunning
-whole-entry schema validation. It independently enforces every condition
-needed for the Publisher Profile, including required signed fields and valid
-timestamps.
+The function accepts typed or previously parsed entries without rerunning whole-entry schema validation. It independently enforces every condition needed for the Publisher Profile, including required signed fields and valid timestamps.
 
-The function requires a standard `urn:air` entry identifier whose publisher
-domain is lowercase ASCII, including IDNA A-labels when needed. The manifest's
-`identity` must exactly equal `did:web:` followed by that domain, and a present
-`identityType` must be `did`. The profile supports root DIDs without ports or
-paths. It requires a detached ES256 signature whose protected `kid` names one
-method in that issuer's current DID document. The method must be authorized
-by `assertionMethod`, controlled by the issuer, and contain a suitable public
-P-256 JWK. Keys named by the signature through `jku`, `jwk`, `x5u`, or `x5c`
-are rejected, as is any protected `b64` parameter.
+The function requires a standard `urn:air` entry identifier whose publisher domain is lowercase ASCII, including IDNA A-labels when needed. The manifest's `identity` must exactly equal `did:web:` followed by that domain, and a present `identityType` must be `did`. The profile supports root DIDs without ports or paths. It requires a detached ES256 signature whose protected `kid` names one method in that issuer's current DID document. The method must be authorized by `assertionMethod`, controlled by the issuer, and contain a suitable public P-256 JWK. Keys named by the signature through `jku`, `jwk`, `x5u`, or `x5c` are rejected, as is any protected `b64` parameter.
 
-A `valid` result means the publisher namespace currently authorized the key
-that signed the captured manifest, the signed subject matches the captured
-entry context and artifact representation, and the manifest had not expired
-when checked. It contains only `{ status: 'valid' }`. The function composes
-the same subject and digest checks as `checkCatalogEntryArtifactBinding()`;
-applications do not need to call that function separately.
+A `valid` result means the publisher namespace currently authorized the key that signed the captured manifest, the signed subject matches the captured entry context and artifact representation, and the manifest had not expired when checked. It contains only `{ status: 'valid' }`. The function composes the same subject and digest checks as `checkCatalogEntryArtifactBinding()`; applications do not need to call that function separately.
 
 The result type is `CatalogEntryTrustManifestCheckResult`:
 
@@ -273,19 +156,11 @@ The result type is `CatalogEntryTrustManifestCheckResult`:
 | `issuer_check_failed` | DID resolution, document validation, or key authorization did not succeed. `error` explains the failure. |
 | `expired` | The authenticated manifest's `expiresAt` was in the past when expiration was checked. |
 
-Branch on `status` and the nested result discriminators. The
-`error` fields provide explanatory diagnostics and an underlying `cause`
-where available; their message text is not a stable classification API.
-A failure result does not authenticate the subject or any other claim.
-Expected profile, protocol, and resolution failures return results. Wrong
-runtime argument types, invalid call shapes or options, hostile programmatic
-values, canonicalization resource limits, and unexpected runtime or
-cryptographic backend failures reject the promise.
+Branch on `status` and the nested result discriminators. The `error` fields provide explanatory diagnostics and an underlying `cause` where available; their message text is not a stable classification API. A failure result does not authenticate the subject or any other claim. Expected profile, protocol, and resolution failures return results. Wrong runtime argument types, invalid call shapes or options, hostile programmatic values, canonicalization resource limits, and unexpected runtime or cryptographic backend failures reject the promise.
 
 ### Network controls
 
-Ordinary calls need no options. `CatalogEntryTrustManifestCheckOptions`
-provides cancellation and configurable DID-resolution limits:
+Ordinary calls need no options. `CatalogEntryTrustManifestCheckOptions` provides cancellation and configurable DID-resolution limits:
 
 ```ts
 const result = await checkCatalogEntryTrustManifest(entryWithUrl, artifactBytes, {
@@ -295,34 +170,17 @@ const result = await checkCatalogEntryTrustManifest(entryWithUrl, artifactBytes,
 });
 ```
 
-The defaults are a 60-second total DID-resolution deadline and a 16 MiB
-decoded document-body limit. The deadline includes DNS resolution, redirects,
-and body reading; the body limit is enforced while reading. Requests use
-HTTPS, reject disallowed resolved addresses, and repeat address checks for
-redirects. A timeout or response-size failure returns `issuer_check_failed`.
-Explicit cancellation rejects with the signal's reason.
+The defaults are a 60-second total DID-resolution deadline and a 16 MiB decoded document-body limit. The deadline includes DNS resolution, redirects, and body reading; the body limit is enforced while reading. Requests use HTTPS, reject disallowed resolved addresses, and repeat address checks for redirects. A timeout or response-size failure returns `issuer_check_failed`. Explicit cancellation rejects with the signal's reason.
 
 ### Time
 
-`issuedAt` must be a valid RFC 3339 timestamp, but it is an issuer claim rather
-than a trusted timestamp. A present `expiresAt` must also be valid and is
-compared with the machine's UTC clock near completion. Expiration is strict:
-an instant before the sampled current time produces `expired`, with no grace
-period or clock-skew allowance.
-Applications are responsible for maintaining an accurate clock; clock errors
-can affect expiration decisions.
+`issuedAt` must be a valid RFC 3339 timestamp, but it is an issuer claim rather than a trusted timestamp. A present `expiresAt` must also be valid and is compared with the machine's UTC clock near completion. Expiration is strict: an instant before the sampled current time produces `expired`, with no grace period or clock-skew allowance. Applications are responsible for maintaining an accurate clock; clock errors can affect expiration decisions.
 
-This function checks the entry's Trust Manifest in context. It does not verify
-the entry as a whole, its unsigned publisher or display metadata, a surrounding
-catalog signature, or the artifact's format-specific schema. It does not prove
-that supplied bytes came from an entry's URL, evaluate attestations or
-provenance, establish claim accuracy or publisher reputation, or decide
-whether an artifact is safe to use. Applications retain those policy decisions.
+This function checks the entry's Trust Manifest in context. It does not verify the entry as a whole, its unsigned publisher or display metadata, a surrounding catalog signature, or the artifact's format-specific schema. It does not prove that supplied bytes came from an entry's URL, evaluate attestations or provenance, establish claim accuracy or publisher reputation, or decide whether an artifact is safe to use. Applications retain those policy decisions.
 
 ## Check a catalog entry's artifact binding
 
-`checkCatalogEntryArtifactBinding()` checks a signed Trust Manifest subject
-against one catalog-entry context and selected artifact representation:
+`checkCatalogEntryArtifactBinding()` checks a signed Trust Manifest subject against one catalog-entry context and selected artifact representation:
 
 ```ts
 import { checkCatalogEntryArtifactBinding } from 'ai-catalog-sdk/verification';
@@ -339,23 +197,15 @@ const resultForEntryWithData = await checkCatalogEntryArtifactBinding(
 );
 ```
 
-The two overloads deliberately reflect the entry representation. An entry with
-`url` requires caller-supplied `Uint8Array` bytes. They are hashed as the exact
-byte range supplied, without fetching, decoding, decompressing, parsing, or
-canonicalizing them. An entry with `data` takes no separate bytes; its `data`
-value is the inline artifact and is encoded with
-`canonicalizeJsonValueToBytes()` before hashing.
+The two overloads deliberately reflect the entry representation. An entry with `url` requires caller-supplied `Uint8Array` bytes. They are hashed as the exact byte range supplied, without fetching, decoding, decompressing, parsing, or canonicalizing them. An entry with `data` takes no separate bytes; its `data` value is the inline artifact and is encoded with `canonicalizeJsonValueToBytes()` before hashing.
 
 The check succeeds only when all of the following are true:
 
-- the caller-selected key and expected algorithm produce a `valid` Trust
-  Manifest signature result;
+- the caller-selected key and expected algorithm produce a `valid` Trust Manifest signature result;
 - the signed subject's `identifier` exactly equals the entry's `identifier`;
-- subject and entry versions are either both absent or both present and exactly
-  equal;
+- subject and entry versions are either both absent or both present and exactly equal;
 - the signed subject's `type` exactly equals the entry's `type`;
-- if the subject has a `url`, the entry has `url` and the two values exactly
-  match; and
+- if the subject has a `url`, the entry has `url` and the two values exactly match; and
 - the artifact representation matches the subject's declared digest.
 
 The result preserves the lower-level diagnostic vocabulary:
@@ -367,30 +217,15 @@ The result preserves the lower-level diagnostic vocabulary:
 | `signature_check_failed` | Signature checking did not produce `valid`; `signatureResult` contains the complete lower-level result. |
 | `subject_check_failed` | The authenticated subject is absent or does not match the entry or artifact; `subjectResult` is `missing_subject`, `identifier_mismatch`, `version_mismatch`, `type_mismatch`, `url_mismatch`, or the lower-level digest failure. `version_mismatch` covers presence on only one side as well as unequal values. |
 
-Signature failure takes precedence over subject failure, so an unauthenticated
-subject cannot produce a successful or independently authoritative binding.
-Programmer-contract and runtime failures reject rather than being hidden by a
-protocol status; in particular, the call shape, options, entry identifier and
-version, and byte view supplied for an entry with `url` are validated before
-`missing_trust_manifest` can be returned.
+Signature failure takes precedence over subject failure, so an unauthenticated subject cannot produce a successful or independently authoritative binding. Programmer-contract and runtime failures reject rather than being hidden by a protocol status; in particular, the call shape, options, entry identifier and version, and byte view supplied for an entry with `url` are validated before `missing_trust_manifest` can be returned.
 
-The function expects a typed or previously parsed entry but does not perform
-schema validation. Wrong runtime types, malformed programmatic JSON, accessors,
-proxies, and shared or detached supplied byte views reject with `TypeError`.
-Canonicalization resource limits reject with `RangeError`; digest backend and
-unexpected signature-backend errors propagate with their existing causes.
+The function expects a typed or previously parsed entry but does not perform schema validation. Wrong runtime types, malformed programmatic JSON, accessors, proxies, and shared or detached supplied byte views reject with `TypeError`. Canonicalization resource limits reject with `RangeError`; digest backend and unexpected signature-backend errors propagate with their existing causes.
 
-A `valid` binding remains narrower than a trust decision. The function does
-not authenticate the entry as a whole, prove that caller-supplied bytes came
-from the entry's URL, establish who owns the public key, connect it with the
-manifest identity, fetch content, infer HTTP media types, normalize URLs,
-enforce timestamps, evaluate provenance or attestations, resolve keys, or
-perform network I/O.
+A `valid` binding remains narrower than a trust decision. The function does not authenticate the entry as a whole, prove that caller-supplied bytes came from the entry's URL, establish who owns the public key, connect it with the manifest identity, fetch content, infer HTTP media types, normalize URLs, enforce timestamps, evaluate provenance or attestations, resolve keys, or perform network I/O.
 
 ## Check a digest
 
-`checkDigest(bytes, expectedDigest)` compares the exact byte range supplied by
-the caller with an AI Catalog digest:
+`checkDigest(bytes, expectedDigest)` compares the exact byte range supplied by the caller with an AI Catalog digest:
 
 ```ts
 import { checkDigest } from 'ai-catalog-sdk/verification';
@@ -405,10 +240,7 @@ if (result.status !== 'match') {
 }
 ```
 
-The function hashes bytes verbatim. It does not fetch content, decode a
-representation, serialize JSON, or apply JCS canonicalization. In particular,
-callers must not pass an ordinary JSON serialization for an entry with `data`,
-whose inline artifact digest is defined over JCS-canonicalized `data`.
+The function hashes bytes verbatim. It does not fetch content, decode a representation, serialize JSON, or apply JCS canonicalization. In particular, callers must not pass an ordinary JSON serialization for an entry with `data`, whose inline artifact digest is defined over JCS-canonicalized `data`.
 
 The result statuses have deliberately narrow meanings:
 
@@ -419,19 +251,8 @@ The result statuses have deliberately narrow meanings:
 | `invalid_digest` | The declaration is malformed, or a known algorithm has an invalid output length. |
 | `algorithm_not_implemented` | The declaration is syntactically valid, but the SDK does not implement its exact algorithm token. |
 
-The SDK currently implements the exact, case-sensitive `sha256`, `sha384`, and
-`sha512` tokens with 64, 96, and 128 lowercase hexadecimal characters,
-respectively. This is an SDK capability boundary, not a claim that other
-algorithms are forbidden or insecure. If the runtime cannot execute a
-registered implementation, the function throws
-`DigestAlgorithmUnavailableError` and preserves the underlying error as
-`cause`.
+The SDK currently implements the exact, case-sensitive `sha256`, `sha384`, and `sha512` tokens with 64, 96, and 128 lowercase hexadecimal characters, respectively. This is an SDK capability boundary, not a claim that other algorithms are forbidden or insecure. If the runtime cannot execute a registered implementation, the function throws `DigestAlgorithmUnavailableError` and preserves the underlying error as `cause`.
 
-`Buffer` values and `Uint8Array` subviews are accepted. Shared or detached
-backing buffers are rejected because they cannot provide a stable byte view for
-the check. Wrong JavaScript argument types and shared or detached byte views
-throw `TypeError`.
+`Buffer` values and `Uint8Array` subviews are accepted. Shared or detached backing buffers are rejected because they cannot provide a stable byte view for the check. Wrong JavaScript argument types and shared or detached byte views throw `TypeError`.
 
-A `match` result establishes only equality between caller-supplied bytes and a
-declared digest. It does not establish who made the declaration, whether the
-digest is authoritative, or whether the content is trustworthy.
+A `match` result establishes only equality between caller-supplied bytes and a declared digest. It does not establish who made the declaration, whether the digest is authoritative, or whether the content is trustworthy.
