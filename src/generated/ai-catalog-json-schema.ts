@@ -16,14 +16,14 @@ import type { JsonSchema } from '../json-schema-types.js';
  */
 export const aiCatalogJsonSchema: JsonSchema = {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:ai-catalog-sdk:schema:ai-catalog:8d05e7f9086d0483d9fb30fa96b528e8e7ade53d",
+  "$id": "urn:ai-catalog-sdk:schema:ai-catalog:769b17461dbc74ee2d7efc8461f0238b8aa39987",
   "title": "AI Catalog",
   "description": "An SDK-maintained structural schema for an AI Catalog.",
   "x-ai-catalog-specification": {
     "specVersion": "1.0",
     "status": "editor's-draft",
     "source": "specification/ai-catalog.md",
-    "commit": "8d05e7f9086d0483d9fb30fa96b528e8e7ade53d"
+    "commit": "769b17461dbc74ee2d7efc8461f0238b8aa39987"
   },
   "type": "object",
   "properties": {

@@ -89,7 +89,7 @@ try {
 import { implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
-import { canonicalizeJsonValueToBytes, checkCatalogEntryArtifactBinding, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createCatalogSignaturePayload, createTrustManifestSignaturePayload } from ${JSON.stringify(`${pkg.name}/verification`)};
+import { canonicalizeJsonValueToBytes, checkCatalogEntryArtifactBinding, checkCatalogEntryTrustManifest, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createCatalogSignaturePayload, createTrustManifestSignaturePayload } from ${JSON.stringify(`${pkg.name}/verification`)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
 const value = { specVersion: '1.0', entries: [] };
@@ -177,6 +177,41 @@ for (const [property, status] of [['identifier', 'identifier_mismatch'], ['versi
 const { version: omittedVersion, ...entryWithoutVersion } = signedEntry;
 const versionPresenceResult = await checkCatalogEntryArtifactBinding(entryWithoutVersion, artifactBytes, bindingOptions);
 if (versionPresenceResult.status !== 'subject_check_failed' || versionPresenceResult.subjectResult.status !== 'version_mismatch') process.exit(1);
+const profileFailure = await checkCatalogEntryTrustManifest(signedEntry, artifactBytes);
+if (profileFailure.status !== 'profile_check_failed' || !(profileFailure.error instanceof Error)) process.exit(1);
+const publisherIdentifier = 'urn:air:example.com:artifact:one';
+const publisherManifest = {
+  identity: 'did:web:example.com',
+  issuedAt: '2026-08-31T00:00:00Z',
+  subject: { ...bindingSubject, identifier: publisherIdentifier },
+};
+const publisherProtectedSegment = Buffer.from(JSON.stringify({
+  alg: 'ES256',
+  kid: 'did:web:example.com#release-key',
+})).toString('base64url');
+const publisherPayloadSegment = Buffer.from(createTrustManifestSignaturePayload(publisherManifest)).toString('base64url');
+const publisherSignatureSegment = sign(
+  'sha256',
+  Buffer.from(publisherProtectedSegment + '.' + publisherPayloadSegment),
+  { key: catalogSignatureKeys.privateKey, dsaEncoding: 'ieee-p1363' },
+).toString('base64url');
+const publisherEntry = {
+  ...signedEntry,
+  identifier: publisherIdentifier,
+  trustManifest: {
+    ...publisherManifest,
+    signature: publisherProtectedSegment + '..' + publisherSignatureSegment,
+  },
+};
+const abortController = new AbortController();
+const cancellationReason = new Error('Packed consumer cancellation');
+abortController.abort(cancellationReason);
+try {
+  await checkCatalogEntryTrustManifest(publisherEntry, artifactBytes, { signal: abortController.signal });
+  process.exit(1);
+} catch (error) {
+  if (error !== cancellationReason) throw error;
+}
 `,
   );
   run(node, ['smoke.mjs'], { cwd: consumerDirectory });
@@ -204,6 +239,7 @@ import { aiCatalogJsonSchema, type JsonSchema } from '${pkg.name}/json-schema';
 import {
   canonicalizeJsonValueToBytes,
   checkCatalogEntryArtifactBinding,
+  checkCatalogEntryTrustManifest,
   checkCatalogSignature,
   checkDigest,
   checkTrustManifestSignature,
@@ -212,6 +248,8 @@ import {
   DigestAlgorithmUnavailableError,
   type DigestCheckResult,
   type CatalogEntryArtifactBindingCheckResult,
+  type CatalogEntryTrustManifestCheckOptions,
+  type CatalogEntryTrustManifestCheckResult,
   type SignatureCheckOptions,
   type SignatureCheckResult,
 } from '${pkg.name}/verification';
@@ -322,6 +360,38 @@ const unionBindingCheck = unionBindingEntry === undefined
 checkCatalogEntryArtifactBinding(entryWithUrlForBinding, signatureOptions);
 // @ts-expect-error Entries with data do not accept separate artifact bytes.
 checkCatalogEntryArtifactBinding(entryWithDataForBinding, new Uint8Array(), signatureOptions);
+const publisherOptions: CatalogEntryTrustManifestCheckOptions = {
+  signal: new AbortController().signal,
+  timeoutMs: 60_000,
+  maxResponseBytes: 16 * 1024 * 1024,
+};
+const dataPublisherCheck: Promise<CatalogEntryTrustManifestCheckResult> =
+  checkCatalogEntryTrustManifest(entryWithDataForBinding);
+const configuredDataPublisherCheck: Promise<CatalogEntryTrustManifestCheckResult> =
+  checkCatalogEntryTrustManifest(entryWithDataForBinding, publisherOptions);
+const urlPublisherCheck: Promise<CatalogEntryTrustManifestCheckResult> =
+  checkCatalogEntryTrustManifest(entryWithUrlForBinding, new Uint8Array());
+const configuredUrlPublisherCheck: Promise<CatalogEntryTrustManifestCheckResult> =
+  checkCatalogEntryTrustManifest(entryWithUrlForBinding, new Uint8Array(), publisherOptions);
+// @ts-expect-error Entries with url require explicit artifact bytes.
+checkCatalogEntryTrustManifest(entryWithUrlForBinding, publisherOptions);
+// @ts-expect-error Entries with data do not accept separate artifact bytes.
+checkCatalogEntryTrustManifest(entryWithDataForBinding, new Uint8Array(), publisherOptions);
+// @ts-expect-error Publisher verification selects its own key and algorithm.
+checkCatalogEntryTrustManifest(entryWithDataForBinding, { publicKey: signaturePublicKey });
+const publisherResult = {} as CatalogEntryTrustManifestCheckResult;
+if (publisherResult.status === 'profile_check_failed' || publisherResult.status === 'issuer_check_failed') {
+  const diagnostic: Error = publisherResult.error;
+  void diagnostic;
+}
+if (publisherResult.status === 'valid' || publisherResult.status === 'expired') {
+  const status: 'valid' | 'expired' = publisherResult.status;
+  // @ts-expect-error Results do not return artifact bytes.
+  publisherResult.artifactBytes;
+  // @ts-expect-error Results do not return a copied manifest.
+  publisherResult.trustManifest;
+  void status;
+}
 const bindingResult = {} as CatalogEntryArtifactBindingCheckResult;
 if (
   bindingResult.status === 'subject_check_failed' &&
@@ -359,6 +429,10 @@ void signatureCheck;
 void dataBindingCheck;
 void urlBindingCheck;
 void unionBindingCheck;
+void dataPublisherCheck;
+void configuredDataPublisherCheck;
+void urlPublisherCheck;
+void configuredUrlPublisherCheck;
 void rawSchema;
 `,
   );
