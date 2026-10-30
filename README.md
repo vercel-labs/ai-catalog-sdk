@@ -235,10 +235,4 @@ The SDK targets an exact prerelease specification snapshot. See [Specification s
 
 ## Development
 
-```sh
-pnpm install
-pnpm check
-pnpm generate:schema
-```
-
-`pnpm package:check` creates and tests a tarball locally. It does not publish the package.
+See [Contributing](CONTRIBUTING.md) for development setup, checks, schema generation, and documentation guidance.
