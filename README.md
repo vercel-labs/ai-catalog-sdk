@@ -58,28 +58,31 @@ if (result.status !== 'valid') {
 
 A `valid` result means the exact caller-selected key verified the signature over the exact canonical catalog snapshot captured by this invocation. It does not authenticate the key as belonging to the catalog operator, verify entry Trust Manifests or artifacts referenced by URLs, establish freshness, or decide trust. See [Verification utilities](./docs/verification.md) for failure details and the complete boundary.
 
-## Check a catalog entry's Trust Manifest
+## Check a catalog entry
 
-`checkCatalogEntryTrustManifest()` implements the `did:web` Publisher Profile. It resolves the publisher's current DID document and selects an authorized assertion key automatically:
+`checkCatalogEntry()` checks an entry's structure, its declared artifact digest, and each selected Trust Manifest. For the `did-web-v1` profile, it resolves the contributor's current DID document and selects an authorized assertion key:
 
 ```ts
-import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/verification';
+import { checkCatalogEntry } from 'ai-catalog-sdk/verification';
 
-const result = await checkCatalogEntryTrustManifest(entryWithUrl, artifactBytes);
+const report = await checkCatalogEntry(entryWithUrl, artifactBytes);
 
-if (result.status !== 'valid') {
-  throw new Error(`Trust Manifest check failed: ${result.status}`);
+if (report.status !== 'checked') {
+  throw new Error(`Entry check failed: ${report.status}`);
 }
+
+const publisherEndorsements = report.manifests.filter(
+  result => result.status === 'valid' && result.isPublisherEndorsement,
+);
 ```
 
-For an entry with `url`, supply the artifact bytes obtained by your application. For an entry with `data`, call `checkCatalogEntryTrustManifest(entryWithData)`; the SDK canonicalizes the inline artifact with JCS. Both forms resolve the current root `did:web` DID corresponding to the publisher domain in the entry's `urn:air` identifier.
+For an entry with `url`, supply the artifact bytes obtained by your application. For an entry with `data`, call `checkCatalogEntry(entryWithData)`; the SDK canonicalizes the inline artifact with JCS.
 
-A `valid` result means the publisher namespace authorized the manifest's signer, the signature and artifact binding passed, and the manifest had not expired according to the machine's UTC clock when checked. It does not authenticate the entire entry or establish publisher reputation, claim accuracy, or artifact safety. See [Verification utilities](./docs/verification.md#check-a-catalog-entrys-trust-manifest) for results, network controls, and the complete boundary.
+`checked` means the requested checks completed. Each selected manifest has its own result, and the report can contain no manifests or no valid endorsements. A valid manifest result authenticates its contributor, binds its claims to the entry and artifact, and checks its time window. `isPublisherEndorsement: true` additionally establishes the `did:web` Publisher Profile's exact relationship to the entry's `urn:air` namespace. Applications choose which contributors and endorsements they require. See [Verification utilities](./docs/verification.md#check-a-catalog-entry) for filtering, results, and network controls.
 
-## Check a catalog entry's artifact binding with a supplied key
+## Check artifact binding with a supplied key
 
-`checkCatalogEntryArtifactBinding()` composes signature, subject-context, and
-digest checks from one coherent invocation snapshot:
+Use `checkCatalogEntryArtifactBinding()` when your application supplies the verification key, such as when implementing a different signer profile:
 
 ```ts
 import { checkCatalogEntryArtifactBinding } from 'ai-catalog-sdk/verification';
@@ -87,15 +90,32 @@ import { checkCatalogEntryArtifactBinding } from 'ai-catalog-sdk/verification';
 const result = await checkCatalogEntryArtifactBinding(
   entryWithUrl,
   artifactBytes,
+  manifest,
   { publicKey, expectedAlgorithm: 'ES256' },
 );
-
-if (result.status !== 'valid') {
-  throw new Error(`Artifact binding check failed: ${result.status}`);
-}
 ```
 
-For an entry with `url`, the function hashes the exact supplied byte range without fetching or decoding it. For an entry with `data`, omit `artifactBytes`; the function treats `data` as the inline artifact and canonicalizes it with JCS. A `valid` result means the caller-selected key signed the manifest, the subject digest matches the selected artifact representation, and the subject identifier, version, type, and any URL are consistent with the entry. It does not authenticate the entry as a whole, prove that caller-supplied bytes came from its URL, or establish key ownership, identity, freshness, or trust. See [Verification utilities](./docs/verification.md) for failure details and the complete boundary.
+For an entry with `data`, omit `artifactBytes`. A `valid` result means the caller-selected key signed the manifest and its subject matches the entry and artifact. The function performs no network requests, contributor authentication, or time-window checks. See [Verification utilities](./docs/verification.md#check-artifact-binding-with-a-supplied-key) for details.
+
+## Sign a Trust Manifest
+
+`signTrustManifest()` constructs the signed payload and completes the manifest using your signing callback. This example uses `jose`, which your application installs separately:
+
+```ts
+import { CompactSign } from 'jose';
+import { signTrustManifest } from 'ai-catalog-sdk/verification';
+
+const manifest = await signTrustManifest(
+  entry,
+  { contributor: 'did:web:example.com' },
+  { profile: 'did-web-v1', issuedAt: new Date().toISOString() },
+  ({ payload, typ }) => new CompactSign(payload)
+    .setProtectedHeader({ alg: 'ES256', typ, kid: 'did:web:example.com#release-key' })
+    .sign(privateKey),
+);
+```
+
+The entry must already declare its artifact `digest`. The helper derives the subject from the entry, sets the signer to the contributor, and converts the callback's JWS to the required detached compact form. It does not fetch or hash the artifact or attach the returned manifest to the entry. You can also supply a manifest with an explicit subject. See [Signing](./docs/verification.md#sign-a-trust-manifest) for callback formats and guarantees.
 
 ## Use lower-level verification utilities
 
@@ -120,8 +140,8 @@ These utilities do not fetch content or resolve keys. See [Verification utilitie
 | An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
 | A catalog, caller-selected public key, and expected algorithm | `checkCatalogSignature()` | `ai-catalog-sdk/verification` |
-| A catalog entry's Trust Manifest under the `did:web` Publisher Profile, with supplied artifact bytes for an entry with `url` | `checkCatalogEntryTrustManifest()` | `ai-catalog-sdk/verification` |
-| A catalog entry, trusted public key, and either artifact bytes for an entry with `url` or the inline artifact in an entry with `data` | `checkCatalogEntryArtifactBinding()` | `ai-catalog-sdk/verification` |
+| An entry and its selected contributors' endorsements, with supplied artifact bytes for an entry with `url` | `checkCatalogEntry()` | `ai-catalog-sdk/verification` |
+| An entry, explicit manifest, caller-selected public key, and the artifact representation | `checkCatalogEntryArtifactBinding()` | `ai-catalog-sdk/verification` |
 | Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
 | JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
 | Raw JSON Schema for another validator or tool | `ai-catalog.schema.json` | `ai-catalog-sdk/schema/ai-catalog.schema.json` |
@@ -220,9 +240,9 @@ TypeScript NodeNext consumers also need `compilerOptions.resolveJsonModule: true
 
 ## What gets validated
 
-- `parseCatalog()` and `parseCatalogJson()` validate catalog structure, require an AI Catalog `1.x` version, and enforce entry uniqueness. The catalog and entry parsers also check that a Trust Manifest subject's identifier, type, and optional URL match its entry. For signed manifests, entry and subject versions must either both be absent or both be present and exactly equal. When validating JSON values, they reject circular or non-JSON data and limit work on unusually large or deeply nested inputs.
+- `parseCatalog()` and `parseCatalogJson()` validate catalog structure, require an AI Catalog `1.x` version, and enforce entry uniqueness. The catalog and entry parsers check each Trust Manifest subject against its entry, including identifier, type, digest, and the presence and value of version. A signed manifest requires an entry digest. Parsers also enforce matching contributor and signer values and require expiration to follow issuance. When validating JSON values, they reject circular or non-JSON data and limit work on unusually large or deeply nested inputs.
 - The Zod schemas validate document structure with native Zod errors and behavior. They do not include the parser-specific resource limits or catalog-wide checks.
-- The JSON Schema validates portable document structure. Some format details depend on the JSON Schema validator being used, and catalog-wide checks require `parseCatalog()` or `parseCatalogJson()`.
+- The JSON Schema validates portable document structure. Some format details depend on the validator being used. Cross-field equality, timestamp ordering, and catalog-wide checks require the SDK parsers.
 
 The SDK targets an exact prerelease specification snapshot. See [Specification snapshot interpretation](./docs/spec-interpretation.md) for the pinned revision and how conflicts in that snapshot are handled.
 

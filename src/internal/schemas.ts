@@ -2,7 +2,11 @@ import * as z from 'zod';
 
 import type { AICatalog, CatalogEntry, TrustManifest } from '../types.js';
 import { DIGEST_PATTERN } from './digest.js';
-import { isRfc3339DateTime, RFC3339_PATTERN_SOURCE } from './rfc3339.js';
+import {
+  compareRfc3339DateTimes,
+  isRfc3339DateTime,
+  RFC3339_PATTERN_SOURCE,
+} from './rfc3339.js';
 
 const jsonObjectSchema = z.object({}).catchall(z.json());
 const digestSchema = z.string().regex(DIGEST_PATTERN);
@@ -19,7 +23,6 @@ export const concreteTrustSubjectSchema = z
     version: z.string().exactOptional(),
     type: z.string(),
     digest: digestSchema,
-    url: z.string().exactOptional(),
   })
   .catchall(z.json());
 
@@ -53,34 +56,68 @@ export const concreteProvenanceLinkSchema = z
   })
   .catchall(z.json());
 
+// RFC 3986 Appendix A grammar, allowing one fragment on a URI with a scheme.
+const uriToken = "(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2}|[!$&'()*+,;=])";
+const uriPchar = `(?:${uriToken}|[:@])`;
+const decimalOctet = '(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])';
+const ipv4 = `${decimalOctet}(?:\\.${decimalOctet}){3}`;
+const hex16 = '[A-Fa-f0-9]{1,4}';
+const last32 = `(?:${hex16}:${hex16}|${ipv4})`;
+const ipv6 = [
+  `(?:${hex16}:){6}${last32}`,
+  `::(?:${hex16}:){5}${last32}`,
+  `(?:${hex16})?::(?:${hex16}:){4}${last32}`,
+  `(?:(?:${hex16}:){0,1}${hex16})?::(?:${hex16}:){3}${last32}`,
+  `(?:(?:${hex16}:){0,2}${hex16})?::(?:${hex16}:){2}${last32}`,
+  `(?:(?:${hex16}:){0,3}${hex16})?::${hex16}:${last32}`,
+  `(?:(?:${hex16}:){0,4}${hex16})?::${last32}`,
+  `(?:(?:${hex16}:){0,5}${hex16})?::${hex16}`,
+  `(?:(?:${hex16}:){0,6}${hex16})?::`,
+].join('|');
+const ipvFuture = `[vV][A-Fa-f0-9]+\\.(?:[A-Za-z0-9._~-]|[!$&'()*+,;=:])+`;
+const uriHost = `(?:\\[(?:${ipv6}|${ipvFuture})\\]|${uriToken}*)`;
+const uriAuthority = `(?:(?:${uriToken}|:)*@)?${uriHost}(?::[0-9]*)?`;
+const uriHierarchy = `(?://${uriAuthority}(?:/${uriPchar}*)*|/(?:${uriPchar}+(?:/${uriPchar}*)*)?|${uriPchar}+(?:/${uriPchar}*)*|)`;
+const absoluteUriSchema = z
+  .string()
+  .regex(
+    new RegExp(
+      `^[A-Za-z][A-Za-z0-9+.-]*:${uriHierarchy}(?:\\?(?:${uriPchar}|[/?])*)?(?:#(?:${uriPchar}|[/?])*)?$(?![\\s\\S])`,
+    ),
+  );
+
+export const concreteSignatureSchema = z
+  .object({
+    signer: absoluteUriSchema,
+    profile: z.string().min(1),
+    issuedAt: rfc3339DateTimeSchema,
+    expiresAt: rfc3339DateTimeSchema.exactOptional(),
+    jws: z.string(),
+  })
+  .catchall(z.json())
+  .refine(
+    (signature) =>
+      signature.expiresAt === undefined ||
+      !isRfc3339DateTime(signature.issuedAt) ||
+      !isRfc3339DateTime(signature.expiresAt) ||
+      compareRfc3339DateTimes(signature.expiresAt, signature.issuedAt) > 0,
+    {
+      path: ['expiresAt'],
+      message: 'expiresAt must be strictly after issuedAt.',
+    },
+  );
+
 const trustCommonShape = {
-  identity: z.string(),
-  identityType: z.string().exactOptional(),
-  privacyPolicyUrl: z.string().exactOptional(),
-  termsOfServiceUrl: z.string().exactOptional(),
-  expiresAt: rfc3339DateTimeSchema.exactOptional(),
+  contributor: absoluteUriSchema,
+  additionalSignatures: z.json().exactOptional(),
   extensions: jsonObjectSchema.exactOptional(),
 };
 
-function signedTrustShape(
-  trustSchema: z.ZodType,
-  attestations: z.ZodType,
-  provenance: z.ZodType,
-) {
-  return z
-    .object({
-      ...trustCommonShape,
-      trustSchema: trustSchema.exactOptional(),
-      attestations: attestations.exactOptional(),
-      provenance: provenance.exactOptional(),
-      subject: concreteTrustSubjectSchema,
-      issuedAt: rfc3339DateTimeSchema,
-      signature: z.string(),
-    })
-    .catchall(z.json());
-}
+const substantiveExtensionsSchema = jsonObjectSchema
+  .refine((extensions) => Object.keys(extensions).length > 0)
+  .meta({ minProperties: 1 });
 
-function unsignedTrustShapes(
+function trustManifestShapes(
   trustSchema: z.ZodType,
   attestations: z.ZodType,
   substantiveAttestations: z.ZodType,
@@ -90,11 +127,19 @@ function unsignedTrustShapes(
   const unsignedCommon = {
     ...trustCommonShape,
     subject: concreteTrustSubjectSchema.exactOptional(),
-    issuedAt: rfc3339DateTimeSchema.exactOptional(),
     signature: z.never().exactOptional(),
   };
-
   return [
+    z
+      .object({
+        ...trustCommonShape,
+        trustSchema: trustSchema.exactOptional(),
+        attestations: attestations.exactOptional(),
+        provenance: provenance.exactOptional(),
+        subject: concreteTrustSubjectSchema,
+        signature: concreteSignatureSchema,
+      })
+      .catchall(z.json()),
     z
       .object({
         ...unsignedCommon,
@@ -119,26 +164,42 @@ function unsignedTrustShapes(
         provenance: substantiveProvenance,
       })
       .catchall(z.json()),
+    z
+      .object({
+        ...unsignedCommon,
+        trustSchema: trustSchema.exactOptional(),
+        attestations: attestations.exactOptional(),
+        provenance: provenance.exactOptional(),
+        extensions: substantiveExtensionsSchema,
+      })
+      .catchall(z.json()),
   ] as const;
 }
 
-const completeAttestationsSchema = z.array(concreteAttestationSchema).min(1);
-const completeProvenanceSchema = z.array(concreteProvenanceLinkSchema).min(1);
+function contributorMatchesSigner(manifest: {
+  contributor: string;
+  signature?: { signer: string };
+}): boolean {
+  return (
+    manifest.signature === undefined ||
+    manifest.signature.signer === manifest.contributor
+  );
+}
 
-export const concreteTrustManifestSchema = z.union([
-  signedTrustShape(
-    concreteTrustSchemaSchema,
-    z.array(concreteAttestationSchema),
-    z.array(concreteProvenanceLinkSchema),
-  ),
-  ...unsignedTrustShapes(
-    concreteTrustSchemaSchema,
-    z.array(concreteAttestationSchema),
-    completeAttestationsSchema,
-    z.array(concreteProvenanceLinkSchema),
-    completeProvenanceSchema,
-  ),
-]);
+export const concreteTrustManifestSchema = z
+  .union(
+    trustManifestShapes(
+      concreteTrustSchemaSchema,
+      z.array(concreteAttestationSchema),
+      z.array(concreteAttestationSchema).min(1),
+      z.array(concreteProvenanceLinkSchema),
+      z.array(concreteProvenanceLinkSchema).min(1),
+    ),
+  )
+  .refine(contributorMatchesSigner, {
+    path: ['signature', 'signer'],
+    message: 'Signature signer must exactly equal contributor.',
+  });
 
 export const concretePublisherSchema = z
   .object({
@@ -165,7 +226,8 @@ const entryCommonShape = {
   description: z.string().exactOptional(),
   tags: z.array(z.string()).exactOptional(),
   publisher: concretePublisherSchema.exactOptional(),
-  trustManifest: concreteTrustManifestSchema.exactOptional(),
+  digest: digestSchema.exactOptional(),
+  trustManifests: z.array(concreteTrustManifestSchema).exactOptional(),
   updatedAt: rfc3339DateTimeSchema.exactOptional(),
   extensions: jsonObjectSchema.exactOptional(),
 };
@@ -193,23 +255,25 @@ export const concreteAICatalogSchema = z
     host: concreteHostInfoSchema.exactOptional(),
     entries: z.array(concreteCatalogEntrySchema),
     extensions: jsonObjectSchema.exactOptional(),
-    signature: z.string().exactOptional(),
+    signature: concreteSignatureSchema.exactOptional(),
+    additionalSignatures: z.json().exactOptional(),
   })
   .catchall(z.json());
 
-const trustEnvelopeAttestationsSchema = z.array(z.unknown()).min(1);
-const trustEnvelopeProvenanceSchema = z.array(z.unknown()).min(1);
-
-export const trustManifestEnvelopeSchema = z.union([
-  signedTrustShape(z.unknown(), z.array(z.unknown()), z.array(z.unknown())),
-  ...unsignedTrustShapes(
-    z.unknown(),
-    z.array(z.unknown()),
-    trustEnvelopeAttestationsSchema,
-    z.array(z.unknown()),
-    trustEnvelopeProvenanceSchema,
-  ),
-]);
+export const trustManifestEnvelopeSchema = z
+  .union(
+    trustManifestShapes(
+      z.unknown(),
+      z.array(z.unknown()),
+      z.array(z.unknown()).min(1),
+      z.array(z.unknown()),
+      z.array(z.unknown()).min(1),
+    ),
+  )
+  .refine(contributorMatchesSigner, {
+    path: ['signature', 'signer'],
+    message: 'Signature signer must exactly equal contributor.',
+  });
 
 export const trustSchemaEnvelopeSchema = z
   .object({
@@ -237,7 +301,8 @@ const entryEnvelopeCommonShape = {
   description: z.string().exactOptional(),
   tags: z.array(z.unknown()).exactOptional(),
   publisher: concretePublisherSchema.exactOptional(),
-  trustManifest: z.unknown().exactOptional(),
+  digest: digestSchema.exactOptional(),
+  trustManifests: z.array(z.unknown()).exactOptional(),
   updatedAt: rfc3339DateTimeSchema.exactOptional(),
   extensions: jsonObjectSchema.exactOptional(),
 };
@@ -265,7 +330,8 @@ export const aiCatalogEnvelopeSchema = z
     host: z.unknown().exactOptional(),
     entries: z.array(z.unknown()),
     extensions: jsonObjectSchema.exactOptional(),
-    signature: z.string().exactOptional(),
+    signature: concreteSignatureSchema.exactOptional(),
+    additionalSignatures: z.json().exactOptional(),
   })
   .catchall(z.json());
 
@@ -289,6 +355,7 @@ export const schemaRegistry = z.registry<{
   title: string;
   description: string;
   format?: string;
+  minProperties?: number;
 }>();
 
 schemaRegistry.add(rfc3339DateTimeSchema, {
@@ -341,4 +408,17 @@ schemaRegistry.add(concreteProvenanceLinkSchema, {
   id: 'ProvenanceLink',
   title: 'Provenance Link',
   description: 'A link in an artifact provenance chain.',
+});
+
+schemaRegistry.add(concreteSignatureSchema, {
+  id: 'Signature',
+  title: 'Signature',
+  description: 'Signature metadata and a detached compact JWS.',
+});
+
+schemaRegistry.add(substantiveExtensionsSchema, {
+  id: 'SubstantiveExtensions',
+  title: 'Substantive Extensions',
+  description: 'A non-empty object of namespaced contributor claims.',
+  minProperties: 1,
 });

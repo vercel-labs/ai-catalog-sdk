@@ -263,63 +263,76 @@ function parseCatalogEntryValue(
     else valid = false;
   }
   if (collector.stopped) return undefined;
-  if (hasOwn(result.data, 'trustManifest')) {
-    const manifest = parseTrustManifest(
-      result.data.trustManifest,
-      [...path, 'trustManifest'],
-      collector,
-    );
-    if (manifest) {
-      output.trustManifest = manifest;
+  if (hasOwn(result.data, 'trustManifests')) {
+    const manifests: TrustManifest[] = [];
+    const values = result.data.trustManifests as unknown[];
+    for (
+      let index = 0;
+      index < values.length && !collector.stopped;
+      index += 1
+    ) {
+      const manifestPath = [...path, 'trustManifests', index];
+      const manifest = parseTrustManifest(
+        values[index],
+        manifestPath,
+        collector,
+      );
+      if (!manifest) {
+        valid = false;
+        continue;
+      }
+      manifests.push(manifest);
       const { subject } = manifest;
-      if (subject && subject.identifier !== output.identifier) {
+      const mismatch = (field: string, message: string): void => {
         valid = false;
         collector.add(
           issue(
             'inconsistent_value',
-            [...path, 'trustManifest', 'subject', 'identifier'],
-            'Trust Manifest subject.identifier must match the catalog entry identifier.',
+            [...manifestPath, 'subject', field],
+            message,
           ),
+        );
+      };
+      if (subject && subject.identifier !== output.identifier) {
+        mismatch(
+          'identifier',
+          'Trust Manifest subject.identifier must match the catalog entry identifier.',
         );
       }
       if (
         subject &&
-        hasOwn(manifest, 'signature') &&
         (hasOwn(subject, 'version') !== hasOwn(output, 'version') ||
           subject.version !== output.version)
       ) {
-        valid = false;
-        collector.add(
-          issue(
-            'inconsistent_value',
-            [...path, 'trustManifest', 'subject', 'version'],
-            'Signed Trust Manifest subject.version and entry version must both be absent or both be present and exactly equal.',
-          ),
+        mismatch(
+          'version',
+          'Trust Manifest subject.version and entry version must both be absent or both be present and exactly equal.',
         );
       }
       if (subject && subject.type !== output.type) {
+        mismatch(
+          'type',
+          'Trust Manifest subject.type must match the catalog entry type.',
+        );
+      }
+      if (subject && subject.digest !== output.digest) {
+        mismatch(
+          'digest',
+          'Trust Manifest subject.digest must exactly match the catalog entry digest.',
+        );
+      }
+      if (manifest.signature && !hasOwn(output, 'digest')) {
         valid = false;
         collector.add(
           issue(
             'inconsistent_value',
-            [...path, 'trustManifest', 'subject', 'type'],
-            'Trust Manifest subject.type must match the catalog entry type.',
+            [...path, 'digest'],
+            'A signed Trust Manifest requires an entry digest.',
           ),
         );
       }
-      if (subject?.url !== undefined) {
-        if (!('url' in output) || subject.url !== output.url) {
-          valid = false;
-          collector.add(
-            issue(
-              'inconsistent_value',
-              [...path, 'trustManifest', 'subject', 'url'],
-              "Trust Manifest subject.url must match the containing entry's url.",
-            ),
-          );
-        }
-      }
-    } else valid = false;
+    }
+    output.trustManifests = manifests;
   }
   return valid ? output : undefined;
 }

@@ -92,10 +92,13 @@ describe('root parsing', () => {
             identifier: 'x',
             type: 'custom',
             url: 'u',
-            trustManifest: {
-              identity: 'did:web:example.com',
-              futureEvidence: { proof: true },
-            },
+            digest: sha256,
+            trustManifests: [
+              {
+                contributor: 'did:web:example.com',
+                futureEvidence: { proof: true },
+              },
+            ],
           },
         ],
       }).success,
@@ -151,7 +154,7 @@ describe('root parsing', () => {
     }
   });
 
-  it('enforces contextual subject type and URL parity', () => {
+  it('enforces contextual subject type without binding legacy URL metadata', () => {
     const base = {
       specVersion: '1.0',
       entries: [
@@ -159,17 +162,25 @@ describe('root parsing', () => {
           identifier: 'x',
           type: 'application/example+json',
           url: 'https://example.com/artifact',
-          trustManifest: {
-            identity: 'did:web:example.com',
-            subject: {
-              identifier: 'x',
-              type: 'application/other+json',
-              url: 'https://example.com/other',
-              digest: sha256,
+          digest: sha256,
+          trustManifests: [
+            {
+              contributor: 'did:web:example.com',
+              subject: {
+                identifier: 'x',
+                type: 'application/other+json',
+                url: 'https://example.com/other',
+                digest: sha256,
+              },
+
+              signature: {
+                signer: 'did:web:example.com',
+                profile: 'did-web-v1',
+                issuedAt: '2026-08-20T00:00:00Z',
+                jws: 'signed',
+              },
             },
-            issuedAt: '2026-08-20T00:00:00Z',
-            signature: 'signed',
-          },
+          ],
         },
       ],
     };
@@ -178,20 +189,22 @@ describe('root parsing', () => {
     if (!result.success) {
       expect(result.error.issues.map(({ code }) => code)).toEqual([
         'inconsistent_value',
-        'inconsistent_value',
       ]);
     }
   });
 
-  it.each([false, true])(
-    'requires exact subject identifier equality with signed=%s',
-    (signed) => {
-      const entry = {
-        identifier: 'urn:air:example.com:artifact:one',
-        type: 'custom',
-        data: null,
-        trustManifest: {
-          identity: 'did:web:example.com',
+  it.each([
+    false,
+    true,
+  ])('requires exact subject identifier equality with signed=%s', (signed) => {
+    const entry = {
+      identifier: 'urn:air:example.com:artifact:one',
+      type: 'custom',
+      data: null,
+      digest: sha256,
+      trustManifests: [
+        {
+          contributor: 'did:web:example.com',
           trustSchema: { identifier: 'urn:trust:example', version: '1' },
           attestations: [],
           subject: {
@@ -200,30 +213,37 @@ describe('root parsing', () => {
             digest: sha256,
           },
           ...(signed
-            ? { signature: 'signed', issuedAt: '2026-08-20T00:00:00Z' }
+            ? {
+                signature: {
+                  signer: 'did:web:example.com',
+                  profile: 'did-web-v1',
+                  issuedAt: '2026-08-20T00:00:00Z',
+                  jws: 'signed',
+                },
+              }
             : {}),
         },
-      };
-      const standalone = safeParseCatalogEntry(entry);
-      const catalog = safeParseCatalog({ specVersion: '1.0', entries: [entry] });
-      expect(standalone.success).toBe(false);
-      expect(catalog.success).toBe(false);
-      if (!standalone.success && !catalog.success) {
-        expect(standalone.error.issues).toMatchObject([
-          {
-            code: 'inconsistent_value',
-            path: ['trustManifest', 'subject', 'identifier'],
-          },
-        ]);
-        expect(catalog.error.issues).toMatchObject([
-          {
-            code: 'inconsistent_value',
-            path: ['entries', 0, 'trustManifest', 'subject', 'identifier'],
-          },
-        ]);
-      }
-    },
-  );
+      ],
+    };
+    const standalone = safeParseCatalogEntry(entry);
+    const catalog = safeParseCatalog({ specVersion: '1.0', entries: [entry] });
+    expect(standalone.success).toBe(false);
+    expect(catalog.success).toBe(false);
+    if (!standalone.success && !catalog.success) {
+      expect(standalone.error.issues).toMatchObject([
+        {
+          code: 'inconsistent_value',
+          path: ['trustManifests', 0, 'subject', 'identifier'],
+        },
+      ]);
+      expect(catalog.error.issues).toMatchObject([
+        {
+          code: 'inconsistent_value',
+          path: ['entries', 0, 'trustManifests', 0, 'subject', 'identifier'],
+        },
+      ]);
+    }
+  });
 
   it.each([
     ['both absent', undefined, undefined, true],
@@ -235,76 +255,86 @@ describe('root parsing', () => {
     ['no version normalization', '1.0.0', '1.0', false],
     ['empty subject is present', undefined, '', false],
     ['empty entry is present', '', undefined, false],
-  ] as const)(
-    'checks signed release versions: %s',
-    (_name, entryVersion, subjectVersion, accepted) => {
-      const entry = {
-        identifier: 'x',
-        type: 'custom',
-        data: null,
-        ...(entryVersion === undefined ? {} : { version: entryVersion }),
-        trustManifest: {
-          identity: 'did:web:example.com',
-          signature: 'signed',
-          issuedAt: '2026-08-20T00:00:00Z',
+  ] as const)('checks signed release versions: %s', (_name, entryVersion, subjectVersion, accepted) => {
+    const entry = {
+      identifier: 'x',
+      type: 'custom',
+      data: null,
+      ...(entryVersion === undefined ? {} : { version: entryVersion }),
+      digest: sha256,
+      trustManifests: [
+        {
+          contributor: 'did:web:example.com',
+          signature: {
+            signer: 'did:web:example.com',
+            profile: 'did-web-v1',
+            issuedAt: '2026-08-20T00:00:00Z',
+            jws: 'signed',
+          },
+
           subject: {
             identifier: 'x',
             type: 'custom',
             digest: sha256,
-            ...(subjectVersion === undefined ? {} : { version: subjectVersion }),
+            ...(subjectVersion === undefined
+              ? {}
+              : { version: subjectVersion }),
           },
         },
-      };
-      const standalone = safeParseCatalogEntry(entry);
-      const catalog = safeParseCatalog({ specVersion: '1.0', entries: [entry] });
-      expect(standalone.success).toBe(accepted);
-      expect(catalog.success).toBe(accepted);
-      if (!standalone.success && !catalog.success) {
-        expect(standalone.error.issues).toMatchObject([
-          {
-            code: 'inconsistent_value',
-            path: ['trustManifest', 'subject', 'version'],
-          },
-        ]);
-        expect(catalog.error.issues).toMatchObject([
-          {
-            code: 'inconsistent_value',
-            path: ['entries', 0, 'trustManifest', 'subject', 'version'],
-          },
-        ]);
-      }
-    },
-  );
+      ],
+    };
+    const standalone = safeParseCatalogEntry(entry);
+    const catalog = safeParseCatalog({ specVersion: '1.0', entries: [entry] });
+    expect(standalone.success).toBe(accepted);
+    expect(catalog.success).toBe(accepted);
+    if (!standalone.success && !catalog.success) {
+      expect(standalone.error.issues).toMatchObject([
+        {
+          code: 'inconsistent_value',
+          path: ['trustManifests', 0, 'subject', 'version'],
+        },
+      ]);
+      expect(catalog.error.issues).toMatchObject([
+        {
+          code: 'inconsistent_value',
+          path: ['entries', 0, 'trustManifests', 0, 'subject', 'version'],
+        },
+      ]);
+    }
+  });
 
   it.each([
     ['1.0.0', '2.0.0'],
     ['1.0.0', undefined],
     [undefined, '1.0.0'],
-  ] as const)(
-    'accepts unsigned version differences: entry=%s subject=%s',
-    (entryVersion, subjectVersion) => {
-      const entry = {
-        identifier: 'x',
-        type: 'custom',
-        data: null,
-        ...(entryVersion === undefined ? {} : { version: entryVersion }),
-        trustManifest: {
-          identity: 'did:web:example.com',
+  ] as const)('rejects unsigned version differences: entry=%s subject=%s', (entryVersion, subjectVersion) => {
+    const entry = {
+      identifier: 'x',
+      type: 'custom',
+      data: null,
+      ...(entryVersion === undefined ? {} : { version: entryVersion }),
+      digest: sha256,
+      trustManifests: [
+        {
+          contributor: 'did:web:example.com',
           trustSchema: { identifier: 'urn:trust:example', version: '1' },
           attestations: [],
           subject: {
             identifier: 'x',
             type: 'custom',
             digest: sha256,
-            ...(subjectVersion === undefined ? {} : { version: subjectVersion }),
+            ...(subjectVersion === undefined
+              ? {}
+              : { version: subjectVersion }),
           },
         },
-      };
-      expect(safeParseCatalogEntry(entry).success).toBe(true);
-      expect(safeParseCatalog({ specVersion: '1.0', entries: [entry] }).success)
-        .toBe(true);
-    },
-  );
+      ],
+    };
+    expect(safeParseCatalogEntry(entry).success).toBe(false);
+    expect(
+      safeParseCatalog({ specVersion: '1.0', entries: [entry] }).success,
+    ).toBe(false);
+  });
 
   it('keeps empty identifiers as structural strings', () => {
     expect(
@@ -312,12 +342,20 @@ describe('root parsing', () => {
         identifier: '',
         type: 'custom',
         data: null,
-        trustManifest: {
-          identity: 'did:web:example.com',
-          signature: '',
-          issuedAt: '2026-08-20T00:00:00Z',
-          subject: { identifier: '', type: 'custom', digest: sha256 },
-        },
+        digest: sha256,
+        trustManifests: [
+          {
+            contributor: 'did:web:example.com',
+            signature: {
+              signer: 'did:web:example.com',
+              profile: 'did-web-v1',
+              issuedAt: '2026-08-20T00:00:00Z',
+              jws: '',
+            },
+
+            subject: { identifier: '', type: 'custom', digest: sha256 },
+          },
+        ],
       }).success,
     ).toBe(true);
   });
@@ -326,21 +364,18 @@ describe('root parsing', () => {
     [null, false, 42, 'opaque', [], { subject: 'uninterpreted' }].map(
       (value) => [value] as const,
     ),
-  )(
-    'preserves host.trustManifest as any unknown JSON property: %j',
-    (value) => {
-      const parsed = parseCatalog({
-        specVersion: '1.0',
-        entries: [],
-        host: { displayName: 'Host', trustManifest: value, arbitrary: value },
-      });
-      expect(parsed.host).toEqual({
-        displayName: 'Host',
-        trustManifest: value,
-        arbitrary: value,
-      });
-    },
-  );
+  )('preserves host.trustManifest as any unknown JSON property: %j', (value) => {
+    const parsed = parseCatalog({
+      specVersion: '1.0',
+      entries: [],
+      host: { displayName: 'Host', trustManifest: value, arbitrary: value },
+    });
+    expect(parsed.host).toEqual({
+      displayName: 'Host',
+      trustManifest: value,
+      arbitrary: value,
+    });
+  });
 
   it('rejects non-JSON host.trustManifest through generic unknown-field validation', () => {
     for (const value of [undefined, () => null, new Date()]) {
@@ -487,11 +522,14 @@ describe('bounded diagnostics', () => {
         identifier: 'x',
         type: 'custom',
         url: 'u',
-        trustManifest: {
-          identity: 'x',
-          trustSchema: { identifier: 'x', version: '1' },
-          attestations: Array.from({ length: 101 }, () => ({})),
-        },
+        digest: sha256,
+        trustManifests: [
+          {
+            contributor: 'urn:x',
+            trustSchema: { identifier: 'x', version: '1' },
+            attestations: Array.from({ length: 101 }, () => ({})),
+          },
+        ],
       },
     ],
     [
@@ -500,11 +538,14 @@ describe('bounded diagnostics', () => {
         identifier: 'x',
         type: 'custom',
         url: 'u',
-        trustManifest: {
-          identity: 'x',
-          trustSchema: { identifier: 'x', version: '1' },
-          provenance: Array.from({ length: 101 }, () => ({})),
-        },
+        digest: sha256,
+        trustManifests: [
+          {
+            contributor: 'urn:x',
+            trustSchema: { identifier: 'x', version: '1' },
+            provenance: Array.from({ length: 101 }, () => ({})),
+          },
+        ],
       },
     ],
     [
@@ -513,14 +554,17 @@ describe('bounded diagnostics', () => {
         identifier: 'x',
         type: 'custom',
         url: 'u',
-        trustManifest: {
-          identity: 'x',
-          trustSchema: {
-            identifier: 'x',
-            version: '1',
-            verificationMethods: Array.from({ length: 101 }, () => 1),
+        digest: sha256,
+        trustManifests: [
+          {
+            contributor: 'urn:x',
+            trustSchema: {
+              identifier: 'x',
+              version: '1',
+              verificationMethods: Array.from({ length: 101 }, () => 1),
+            },
           },
-        },
+        ],
       },
     ],
   ] as const)('bounds issues in %s', (_name, entry) => {
@@ -530,5 +574,155 @@ describe('bounded diagnostics', () => {
       expect(result.error.issues).toHaveLength(101);
       expect(result.error.issues.at(-1)?.code).toBe('diagnostics_truncated');
     }
+  });
+});
+
+describe('independent contributions', () => {
+  const base = { identifier: 'x', type: 'custom', data: null, digest: sha256 };
+  const manifest = {
+    contributor: 'did:web:example.com',
+    subject: { identifier: 'x', type: 'custom', digest: sha256 },
+    signature: {
+      signer: 'did:web:example.com',
+      profile: 'did-web-v1',
+      issuedAt: '2026-01-01T00:00:00Z',
+      jws: '',
+    },
+  };
+
+  it('allows no contributions, repeated contributors, and extension-only contributions', () => {
+    for (const trustManifests of [
+      [],
+      [manifest, manifest],
+      [
+        {
+          contributor: 'urn:auditor:one',
+          extensions: { 'example.audit': true },
+        },
+      ],
+    ]) {
+      expect(safeParseCatalogEntry({ ...base, trustManifests }).success).toBe(
+        true,
+      );
+    }
+  });
+
+  it('rejects empty individual manifests and does not count reserved signatures as evidence', () => {
+    for (const extra of [
+      {},
+      { extensions: {} },
+      { additionalSignatures: ['anything'] },
+    ]) {
+      const result = safeParseCatalogEntry({
+        ...base,
+        trustManifests: [{ contributor: 'urn:auditor:one', ...extra }],
+      });
+      expect(result.success).toBe(false);
+      if (!result.success)
+        expect(result.error.issues[0]?.path.slice(0, 2)).toEqual([
+          'trustManifests',
+          0,
+        ]);
+    }
+  });
+
+  it('requires exact contributor attribution and an entry digest for signed claims', () => {
+    expect(
+      safeParseCatalogEntry({
+        ...base,
+        trustManifests: [{ ...manifest, contributor: 'did:web:EXAMPLE.com' }],
+      }).success,
+    ).toBe(false);
+    expect(
+      safeParseCatalogEntry({
+        identifier: 'x',
+        type: 'custom',
+        data: null,
+        trustManifests: [manifest],
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([
+    '',
+    'relative/path',
+    'not a uri',
+    'did:web:bad%escape',
+    'did:web:example.com\n',
+    'https://example.com/a#b#c',
+    'https://example.com/[x]',
+    'https://[not-an-ip]/',
+    'https://a@b@c/',
+    'https://example.com:bad/',
+  ])('rejects non-absolute contributor %s', (contributor) => {
+    expect(
+      safeParseCatalogEntry({
+        ...base,
+        trustManifests: [
+          { contributor, extensions: { 'example.audit': true } },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('preserves removed fields as opaque JSON without their old meaning', () => {
+    const value = {
+      ...base,
+      trustManifest: { arbitrary: true },
+      trustManifests: [
+        {
+          ...manifest,
+          identity: { old: true },
+          identityType: false,
+          issuedAt: 42,
+          expiresAt: [],
+          privacyPolicyUrl: null,
+          termsOfServiceUrl: { future: true },
+          subject: { ...manifest.subject, url: { opaque: true } },
+          additionalSignatures: [false, null, 1],
+        },
+      ],
+    };
+    expect(parseCatalogEntry(value)).toEqual(value);
+  });
+
+  it.each([
+    ['2026-01-01T00:00:00.0001Z', '2026-01-01T00:00:00.0002Z', true],
+    ['2026-01-01T00:00:00.0002Z', '2026-01-01T00:00:00.0001Z', false],
+    ['2026-01-01T00:00:00Z', '2026-01-01T01:00:00+01:00', false],
+    ['2016-12-31T23:59:59.99999Z', '2016-12-31T23:59:60Z', true],
+    ['2016-12-31T23:59:60.5Z', '2017-01-01T00:00:00Z', true],
+    ['2017-01-01T00:00:00Z', '2016-12-31T23:59:60.5Z', false],
+  ])('orders signature instants %s and %s', (issuedAt, expiresAt, accepted) => {
+    const signature = { ...manifest.signature, issuedAt, expiresAt };
+    expect(
+      safeParseCatalogEntry({
+        ...base,
+        trustManifests: [{ ...manifest, signature }],
+      }).success,
+    ).toBe(accepted);
+    expect(
+      safeParseCatalog({ specVersion: '1.0', entries: [], signature }).success,
+    ).toBe(accepted);
+  });
+});
+
+describe('absolute contributor URI forms', () => {
+  it.each([
+    'urn:auditor:one',
+    'mailto:auditor@example.com',
+    'custom:',
+    'https://example.com/path?query#fragment',
+    'https://[::]/',
+    'https://[::ffff:192.0.2.1]/',
+    'custom://[v1.future]/',
+  ])('retains %s exactly', (contributor) => {
+    const entry = {
+      identifier: 'x',
+      type: 'custom',
+      data: null,
+      trustManifests: [{ contributor, extensions: { 'example.audit': true } }],
+    };
+    expect(parseCatalogEntry(entry)).toEqual(entry);
   });
 });

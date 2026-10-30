@@ -22,19 +22,27 @@ export const validFixtures: readonly unknown[] = [
           identifier: 'did:web:example.com',
           displayName: 'Example',
         },
-        trustManifest: {
-          identity: 'did:web:example.com',
-          subject: {
-            identifier: 'urn:air:example.com:agent:weather',
-            version: '1.0.0',
-            type: 'application/a2a-agent-card+json',
-            url: 'https://example.com/weather.json',
-            digest: sha256,
+        digest: sha256,
+        trustManifests: [
+          {
+            contributor: 'did:web:example.com',
+            subject: {
+              identifier: 'urn:air:example.com:agent:weather',
+              version: '1.0.0',
+              type: 'application/a2a-agent-card+json',
+              url: 'https://example.com/weather.json',
+              digest: sha256,
+            },
+
+            signature: {
+              signer: 'did:web:example.com',
+              profile: 'did-web-v1',
+              issuedAt: '2016-12-31T23:59:60Z',
+              expiresAt: '2027-01-01T00:00:00+00:00',
+              jws: 'detached-jws',
+            },
           },
-          issuedAt: '2016-12-31T23:59:60Z',
-          expiresAt: '2027-01-01T00:00:00+00:00',
-          signature: 'detached-jws',
-        },
+        ],
         futureEntryField: { preserved: true },
       },
       {
@@ -52,16 +60,19 @@ export const validFixtures: readonly unknown[] = [
         identifier: 'urn:air:example.com:artifact:trust-schema',
         type: 'application/custom+json',
         data: false,
-        trustManifest: {
-          identity: 'did:web:example.com',
-          trustSchema: {
-            identifier: 'urn:trust:example',
-            version: '1.0',
-            verificationMethods: [],
+        digest: sha256,
+        trustManifests: [
+          {
+            contributor: 'did:web:example.com',
+            trustSchema: {
+              identifier: 'urn:trust:example',
+              version: '1.0',
+              verificationMethods: [],
+            },
+            attestations: [],
+            provenance: [],
           },
-          attestations: [],
-          provenance: [],
-        },
+        ],
       },
     ],
   },
@@ -86,7 +97,8 @@ export const structurallyInvalidFixtures: readonly unknown[] = [
         identifier: 'x',
         type: 'x',
         url: 'u',
-        trustManifest: { identity: 'did:web:example.com' },
+        digest: sha256,
+        trustManifests: [{ contributor: 'did:web:example.com' }],
       },
     ],
   },
@@ -97,10 +109,13 @@ export const structurallyInvalidFixtures: readonly unknown[] = [
         identifier: 'x',
         type: 'x',
         url: 'u',
-        trustManifest: {
-          identity: 'did:web:example.com',
-          attestations: [{}],
-        },
+        digest: sha256,
+        trustManifests: [
+          {
+            contributor: 'did:web:example.com',
+            attestations: [{}],
+          },
+        ],
       },
     ],
   },
@@ -122,11 +137,19 @@ export const structurallyInvalidFixtures: readonly unknown[] = [
         identifier: 'x',
         type: 'x',
         url: 'u',
-        trustManifest: {
-          identity: 'did:web:example.com',
-          trustSchema: { identifier: 'x', version: '1' },
-          signature: 'unbound',
-        },
+        digest: sha256,
+        trustManifests: [
+          {
+            contributor: 'did:web:example.com',
+            trustSchema: { identifier: 'x', version: '1' },
+            signature: {
+              signer: 'did:web:example.com',
+              profile: 'did-web-v1',
+              issuedAt: '2026-08-20T00:00:00Z',
+              jws: 'unbound',
+            },
+          },
+        ],
       },
     ],
   },
@@ -142,12 +165,15 @@ export const structurallyInvalidFixtures: readonly unknown[] = [
         identifier: 'x',
         type: 'custom',
         data: null,
-        trustManifest: {
-          identity: 'did:web:example.com',
-          trustSchema: { identifier: 'urn:trust:example', version: '1' },
-          attestations: [],
-          subject,
-        },
+        digest: sha256,
+        trustManifests: [
+          {
+            contributor: 'did:web:example.com',
+            trustSchema: { identifier: 'urn:trust:example', version: '1' },
+            attestations: [],
+            subject,
+          },
+        ],
       },
     ],
   })),

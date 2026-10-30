@@ -7,6 +7,7 @@ import { implementedSpecRevision, parseCatalog } from '../src/index.js';
 import rawSchema from '../schema/ai-catalog.schema.json';
 
 interface SchemaNode {
+  $ref?: string;
   properties?: Record<string, unknown>;
   required?: string[];
   anyOf?: SchemaNode[];
@@ -14,28 +15,31 @@ interface SchemaNode {
 
 const inventory = {
   AICatalog: {
-    properties: ['entries', 'extensions', 'host', 'signature', 'specVersion'],
+    properties: [
+      'additionalSignatures',
+      'entries',
+      'extensions',
+      'host',
+      'signature',
+      'specVersion',
+    ],
     requiredBranches: [['entries', 'specVersion']],
   },
   HostInfo: {
-    properties: [
-      'displayName',
-      'documentationUrl',
-      'identifier',
-      'logoUrl',
-    ],
+    properties: ['displayName', 'documentationUrl', 'identifier', 'logoUrl'],
     requiredBranches: [['displayName']],
   },
   CatalogEntry: {
     properties: [
       'data',
       'description',
+      'digest',
       'displayName',
       'extensions',
       'identifier',
       'publisher',
       'tags',
-      'trustManifest',
+      'trustManifests',
       'type',
       'updatedAt',
       'url',
@@ -52,28 +56,29 @@ const inventory = {
   },
   TrustManifest: {
     properties: [
+      'additionalSignatures',
       'attestations',
-      'expiresAt',
+      'contributor',
       'extensions',
-      'identity',
-      'identityType',
-      'issuedAt',
-      'privacyPolicyUrl',
       'provenance',
       'signature',
       'subject',
-      'termsOfServiceUrl',
       'trustSchema',
     ],
     requiredBranches: [
-      ['identity', 'issuedAt', 'signature', 'subject'],
-      ['identity', 'trustSchema'],
-      ['attestations', 'identity'],
-      ['identity', 'provenance'],
+      ['contributor', 'signature', 'subject'],
+      ['contributor', 'trustSchema'],
+      ['attestations', 'contributor'],
+      ['contributor', 'provenance'],
+      ['contributor', 'extensions'],
     ],
   },
+  Signature: {
+    properties: ['expiresAt', 'issuedAt', 'jws', 'profile', 'signer'],
+    requiredBranches: [['issuedAt', 'jws', 'profile', 'signer']],
+  },
   TrustSubject: {
-    properties: ['digest', 'identifier', 'type', 'url', 'version'],
+    properties: ['digest', 'identifier', 'type', 'version'],
     requiredBranches: [['digest', 'identifier', 'type']],
   },
   TrustSchema: {
@@ -102,8 +107,19 @@ const inventory = {
   },
 } as const;
 
+function resolve(node: SchemaNode): SchemaNode {
+  if (node.$ref) {
+    const name = node.$ref.replace('#/$defs/', '');
+    return resolve(
+      (rawSchema.$defs as Record<string, SchemaNode>)[name] as SchemaNode,
+    );
+  }
+  return node;
+}
+
 function branches(node: SchemaNode): SchemaNode[] {
-  return node.anyOf ?? [node];
+  const resolved = resolve(node);
+  return (resolved.anyOf ?? [resolved]).map(resolve);
 }
 
 function properties(node: SchemaNode): string[] {
@@ -158,36 +174,39 @@ describe('pinned specification field inventory', () => {
             displayName: 'Example',
             futurePublisher: true,
           },
-          trustManifest: {
-            identity: 'did:web:example.com',
-            futureManifest: true,
-            trustSchema: {
-              identifier: 'urn:trust:example',
-              version: '1',
-              futureTrustSchema: true,
-            },
-            attestations: [
-              {
-                type: 'evidence',
-                uri: 'https://example.com/evidence',
-                futureAttestation: true,
+          digest: digest,
+          trustManifests: [
+            {
+              contributor: 'did:web:example.com',
+              futureManifest: true,
+              trustSchema: {
+                identifier: 'urn:trust:example',
+                version: '1',
+                futureTrustSchema: true,
               },
-            ],
-            provenance: [
-              {
-                relation: 'publishedFrom',
-                sourceId: 'source',
-                futureProvenance: true,
+              attestations: [
+                {
+                  type: 'evidence',
+                  uri: 'https://example.com/evidence',
+                  futureAttestation: true,
+                },
+              ],
+              provenance: [
+                {
+                  relation: 'publishedFrom',
+                  sourceId: 'source',
+                  futureProvenance: true,
+                },
+              ],
+              subject: {
+                identifier: 'urn:air:example.com:artifact:one',
+                type: 'custom',
+                url: 'https://example.com/one',
+                digest,
+                futureSubject: true,
               },
-            ],
-            subject: {
-              identifier: 'urn:air:example.com:artifact:one',
-              type: 'custom',
-              url: 'https://example.com/one',
-              digest,
-              futureSubject: true,
             },
-          },
+          ],
         },
       ],
     }) as unknown as Record<string, unknown>;
@@ -207,10 +226,7 @@ describe('pinned specification field inventory', () => {
     expect(rawSchema['x-ai-catalog-specification']).toEqual(
       implementedSpecRevision,
     );
-    const changelog = readFileSync(
-      join(process.cwd(), 'CHANGELOG.md'),
-      'utf8',
-    );
+    const changelog = readFileSync(join(process.cwd(), 'CHANGELOG.md'), 'utf8');
     const unreleased = changelog
       .split(/^## /m)
       .find((section) => section.startsWith('Unreleased'));

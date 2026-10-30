@@ -4,125 +4,95 @@ import type { AICatalog, JsonValue } from '../src/index.js';
 import { createCatalogSignaturePayload } from '../src/verification.js';
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
-
+const metadata = {
+  signer: 'did:example:alice',
+  profile: 'custom-profile',
+  issuedAt: '2026-08-31T00:00:00Z',
+};
 const catalogWithFutureDepth = (depth: number): AICatalog => {
   let future: JsonValue = null;
-  for (let index = 0; index < depth; index += 1) {
-    future = { next: future };
-  }
+  for (let index = 0; index < depth; index += 1) future = { next: future };
   return { specVersion: '1.0', entries: [], future } as AICatalog;
 };
 
 describe('createCatalogSignaturePayload', () => {
-  it('omits only the own top-level case-sensitive signature member', () => {
+  it('omits only immediate signature.jws and additionalSignatures while retaining metadata', () => {
     const catalog = {
-      specVersion: '1.0',
-      signature: 'detached-jws',
+      ...{ specVersion: '1.0', entries: [] },
+      signature: { ...metadata, jws: 'detached-jws', future: true },
+      additionalSignatures: [{ anything: true }],
       Signature: 'case-sensitive',
-      entries: [
-        {
-          identifier: 'remote',
-          type: 'application/example',
-          url: 'https://example.com/artifact',
-          trustManifest: {
-            identity: 'did:example:alice',
-            signature: 'nested-trust-manifest-signature',
-          },
-        },
-        {
-          identifier: 'inline',
-          type: 'application/example',
-          data: { signature: 'inline-data-signature', z: 1 },
-        },
-      ],
-      extensions: {
-        'example.com/catalog': { signature: 'nested-extension' },
+      future: {
+        signature: { jws: 'nested' },
+        additionalSignatures: ['nested'],
       },
-      future: { signature: 'nested-future' },
-      host: {
-        displayName: 'Example Catalog',
-        identifier: 'example.com',
+    } as AICatalog & Record<string, JsonValue>;
+    const payload = JSON.parse(decode(createCatalogSignaturePayload(catalog)));
+    expect(payload).toEqual({
+      ...{ specVersion: '1.0', entries: [] },
+      signature: { ...metadata, future: true },
+      Signature: 'case-sensitive',
+      future: {
+        signature: { jws: 'nested' },
+        additionalSignatures: ['nested'],
       },
-    } satisfies AICatalog & {
-      Signature: string;
-      future: { signature: string };
-    };
-
-    expect(decode(createCatalogSignaturePayload(catalog))).toBe(
-      '{"Signature":"case-sensitive","entries":[' +
-        '{"identifier":"remote","trustManifest":' +
-        '{"identity":"did:example:alice","signature":' +
-        '"nested-trust-manifest-signature"},"type":' +
-        '"application/example","url":"https://example.com/artifact"},' +
-        '{"data":{"signature":"inline-data-signature","z":1},' +
-        '"identifier":"inline","type":"application/example"}],' +
-        '"extensions":{"example.com/catalog":{"signature":' +
-        '"nested-extension"}},"future":{"signature":"nested-future"},' +
-        '"host":{"displayName":"Example Catalog","identifier":' +
-        '"example.com"},"specVersion":"1.0"}',
+    });
+    expect(decode(createCatalogSignaturePayload(catalog))).toMatch(
+      /"issuedAt":"2026-08-31T00:00:00Z","profile":"custom-profile","signer":"did:example:alice"/,
     );
   });
 
-  it('produces identical payloads for signed and unsigned forms', () => {
-    const unsigned: AICatalog = {
-      specVersion: '1.0',
-      entries: [],
-      host: { displayName: 'Example Catalog' },
+  it('accepts pre-sign metadata and produces the same payload after adding jws', () => {
+    const preSign = {
+      ...{ specVersion: '1.0', entries: [] },
+      signature: metadata,
     };
-    const signed: AICatalog = {
-      ...unsigned,
-      signature: 'detached-jws',
+    const signed = {
+      ...preSign,
+      signature: { ...metadata, jws: 'detached-jws' },
     };
-
     expect(createCatalogSignaturePayload(signed)).toEqual(
-      createCatalogSignaturePayload(unsigned),
+      createCatalogSignaturePayload(preSign),
     );
-  });
-
-  it('does not require a schema-valid catalog to create a payload', () => {
-    const catalog = { specVersion: 'future', entries: [] } as AICatalog;
-
-    expect(decode(createCatalogSignaturePayload(catalog))).toBe(
-      '{"entries":[],"specVersion":"future"}',
-    );
-  });
-
-  it('returns fresh bytes without mutating the catalog', () => {
-    const catalog: AICatalog = {
-      specVersion: '1.0',
-      signature: 'detached-jws',
-      entries: [
-        {
-          identifier: 'inline',
-          type: 'application/example',
-          data: { z: 1, a: 2 },
-        },
-      ],
+    const changed = {
+      ...signed,
+      signature: { ...signed.signature, profile: 'another-profile' },
     };
-    const before = structuredClone(catalog);
+    expect(createCatalogSignaturePayload(changed)).not.toEqual(
+      createCatalogSignaturePayload(signed),
+    );
+  });
 
+  it('does not require a schema-valid document to create a payload', () => {
+    const catalog = { specVersion: '1.0', entries: [] };
+    expect(JSON.parse(decode(createCatalogSignaturePayload(catalog)))).toEqual(
+      catalog,
+    );
+  });
+
+  it('returns fresh bytes and preserves frozen null-prototype inputs', () => {
+    const catalog = Object.assign(Object.create(null), {
+      ...{ specVersion: '1.0', entries: [] },
+      signature: Object.freeze({ ...metadata, jws: 'detached-jws' }),
+    }) as AICatalog;
+    Object.freeze(catalog);
+    const before = Object.getOwnPropertyDescriptors(catalog);
     const first = createCatalogSignaturePayload(catalog);
     const second = createCatalogSignaturePayload(catalog);
-
     expect(first).not.toBe(second);
     first[0] = 0;
-    expect(decode(second)).toBe(
-      '{"entries":[{"data":{"a":2,"z":1},"identifier":"inline",' +
-        '"type":"application/example"}],"specVersion":"1.0"}',
-    );
-    expect(catalog).toEqual(before);
+    expect(second[0]).toBe(123);
+    expect(Object.getOwnPropertyDescriptors(catalog)).toEqual(before);
   });
 
   it('preserves an own __proto__ member safely', () => {
     const catalog = JSON.parse(
-      '{"specVersion":"1.0","entries":[],"signature":"detached-jws",' +
-        '"__proto__":{"signature":"nested"}}',
+      '{"specVersion":"1.0","entries":[],"signature":{"jws":"omitted"},"__proto__":{"signature":"nested"}}',
     ) as AICatalog;
-
-    expect(decode(createCatalogSignaturePayload(catalog))).toBe(
-      '{"__proto__":{"signature":"nested"},"entries":[],' +
-        '"specVersion":"1.0"}',
-    );
+    const payload = JSON.parse(decode(createCatalogSignaturePayload(catalog)));
+    expect(Object.hasOwn(payload, '__proto__')).toBe(true);
+    expect(payload.__proto__).toEqual({ signature: 'nested' });
+    expect(payload.signature).toEqual({});
   });
 
   it('rejects accessors without reading them, including the omitted member', () => {
@@ -194,14 +164,17 @@ describe('createCatalogSignaturePayload', () => {
     ).toThrow(TypeError);
   });
 
-  it.each([null, 'catalog', 1, true, []])(
-    'rejects a non-object catalog root: %#',
-    (value) => {
-      expect(() =>
-        createCatalogSignaturePayload(value as unknown as AICatalog),
-      ).toThrow(new TypeError('catalog must be a plain JSON object.'));
-    },
-  );
+  it.each([
+    null,
+    'catalog',
+    1,
+    true,
+    [],
+  ])('rejects a non-object catalog root: %#', (value) => {
+    expect(() =>
+      createCatalogSignaturePayload(value as unknown as AICatalog),
+    ).toThrow(new TypeError('catalog must be a plain JSON object.'));
+  });
 
   it('retains the canonicalization resource limits', () => {
     expect(() =>
