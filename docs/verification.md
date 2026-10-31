@@ -29,7 +29,6 @@ The entry-level result is `CatalogEntryCheckResult`:
 | `checked` | The requested checks completed; `manifests` contains the selected outcomes. |
 | `invalid_entry` | Bounded structural validation failed; `error` is a `CatalogParseError` with issue paths. |
 | `artifact_check_failed` | The declared entry digest could not be verified; `digestResult` explains the failure. |
-| `publisher_selection_failed` | The requested publisher selection cannot be derived from the entry identifier; `error` explains the failure. |
 
 Each report item contains the original array `index`, the captured `manifest` that was checked, and a result discriminator. Repeated contributors are evaluated independently in source order; the SDK does not select a preferred update or merge their claims.
 
@@ -74,11 +73,11 @@ const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {
 
 `alwaysCheckPublisherManifests: true` adds publisher manifests to the selection. False or omission leaves the contributor selection unchanged; it does not exclude a publisher already selected. Publisher selection includes unsigned manifests attributed to that contributor, which receive `missing_signature`.
 
-Publisher-only selection does not require such a manifest to exist: no matches produces `checked` with an empty list. If the SDK cannot derive a publisher identity from the entry identifier, a finite contributor selection plus `alwaysCheckPublisherManifests: true` returns a selection failure. With contributors omitted, all manifests are already selected and the option adds no requirement.
+Publisher-only selection does not require such a manifest to exist: no matches produces `checked` with an empty list. If the SDK cannot derive a publisher identity from the entry identifier, the option adds no manifests to the contributor selection.
 
 ### Network and time controls
 
-The implemented `did-web-v1` Signer Profile authenticates root `did:web` contributors using ES256. It resolves the signer's current DID document and requires the protected `kid` to identify a suitable P-256 assertion key controlled by that signer. A removed assertion key fails current-state verification even if it was authorized when signing. The profile forbids key material or key sources supplied through `jku`, `jwk`, `x5u`, and `x5c`.
+The SDK supports the [`did-web-v1` Signer Profile](https://github.com/Agent-Card/ai-catalog/blob/9aac2c1bfa622356e45a31f3dc1d342bdb329e00/specification/ai-catalog.md#the-did-web-signer-profile) for root `did:web` contributors using ES256. It resolves the contributor's current DID document and checks that the signing key is authorized for assertions.
 
 ```ts
 const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {

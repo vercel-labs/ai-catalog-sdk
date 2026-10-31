@@ -263,7 +263,7 @@ describe('checkCatalogEntry', () => {
     expect(resolver).not.toHaveBeenCalled();
   });
 
-  it('reports inability to select a publisher only when that selection needs an identity', async () => {
+  it('leaves contributor selection unchanged when no publisher identity can be derived', async () => {
     const entry = entryFor();
     entry.identifier = 'https://example.com/artifact';
     entry.trustManifests = [
@@ -282,15 +282,21 @@ describe('checkCatalogEntry', () => {
     expect(
       await statuses(entry, { alwaysCheckPublisherManifests: true }),
     ).toMatchObject([{ status: 'valid', isPublisherEndorsement: false }]);
+    resolver.mockClear();
     await expect(
       checkCatalogEntry(entry, artifact, {
         contributors: [],
         alwaysCheckPublisherManifests: true,
       }),
-    ).resolves.toMatchObject({
-      status: 'publisher_selection_failed',
-      error: expect.any(Error),
-    });
+    ).resolves.toEqual({ status: 'checked', manifests: [] });
+    expect(resolver).not.toHaveBeenCalled();
+    expect(
+      await statuses(entry, {
+        contributors: [assessor],
+        alwaysCheckPublisherManifests: true,
+      }),
+    ).toMatchObject([{ index: 0, status: 'valid', isPublisherEndorsement: false }]);
+    expect(resolver).toHaveBeenCalledTimes(1);
   });
 
   it('resolves each signer once while authorizing every distinct key separately', async () => {

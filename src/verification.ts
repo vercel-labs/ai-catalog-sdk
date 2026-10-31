@@ -598,7 +598,6 @@ export type CatalogEntryCheckResult =
       status: 'artifact_check_failed';
       digestResult: Exclude<DigestCheckResult, { status: 'match' }>;
     }
-  | { status: 'publisher_selection_failed'; error: Error }
   | { status: 'checked'; manifests: TrustManifestEvaluation[] };
 
 /** Signature metadata before JWS creation, or a completed signature. */
@@ -1172,17 +1171,6 @@ export async function checkCatalogEntry(
   if (!parsed.success) return { status: 'invalid_entry', error: parsed.error };
   const snapshot = parsed.data;
   const publisher = publisherIdentityFor(snapshot.identifier);
-  if (
-    options.contributors !== undefined &&
-    options.alwaysCheckPublisherManifests &&
-    publisher === undefined
-  )
-    return {
-      status: 'publisher_selection_failed',
-      error: new Error(
-        'Publisher selection requires a standard urn:air identifier with a supported publisher domain.',
-      ),
-    };
   const manifests = (snapshot.trustManifests ?? [])
     .map((manifest, index) => ({ manifest, index }))
     .filter(

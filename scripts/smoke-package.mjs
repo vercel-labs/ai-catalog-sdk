@@ -216,8 +216,7 @@ const inlineSubject = {
 const inlineManifest = await signTrustManifest({ contributor: 'did:example:alice', subject: inlineSubject }, metadata, createJws);
 assert.equal((await checkCatalogEntryArtifactBinding({ ...inlineEntry, digest: inlineSubject.digest }, inlineManifest, bindingOptions)).status, 'valid');
 const unavailablePublisher = await checkCatalogEntry(inlineEntry, { contributors: [], alwaysCheckPublisherManifests: true });
-assert.equal(unavailablePublisher.status, 'publisher_selection_failed');
-assert.ok(unavailablePublisher.error instanceof Error);
+assert.deepEqual(unavailablePublisher, { status: 'checked', manifests: [] });
 const invalidEntry = await checkCatalogEntry({ ...inlineEntry, trustManifests: [{ contributor: 'did:example:alice' }] });
 assert.equal(invalidEntry.status, 'invalid_entry');
 assert.ok(invalidEntry.error.issues.some(issue => issue.path[0] === 'trustManifests'));
