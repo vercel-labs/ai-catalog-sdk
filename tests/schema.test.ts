@@ -223,12 +223,21 @@ describe('signature structure and schema coverage', () => {
     issuedAt: '2026-01-01T00:00:00Z',
     jws: '',
   };
+  const digest = `sha256:${'a'.repeat(64)}`;
+  const subject = { identifier: 'x', type: 'custom', digest };
 
-  it('requires a non-empty extensions object for extension-only contributions', () => {
-    for (const [extensions, accepted] of [
+  it('does not count known metadata or empty evidence as substantive', () => {
+    for (const [content, accepted] of [
       [{}, false],
-      [{ 'example.audit': null }, true],
+      [{ subject }, false],
+      [{ subject: { ...subject, futureClaim: true } }, false],
+      [{ attestations: [] }, false],
+      [{ provenance: [] }, false],
+      [{ additionalSignatures: { futureClaim: true } }, false],
+      [{ extensions: {} }, false],
+      [{ extensions: { 'example.audit': null } }, true],
     ] as const) {
+      const manifest = { contributor: 'urn:auditor:one', ...content };
       const value = {
         specVersion: '1.0',
         entries: [
@@ -236,14 +245,67 @@ describe('signature structure and schema coverage', () => {
             identifier: 'x',
             type: 'custom',
             data: null,
-            trustManifests: [{ contributor: 'urn:auditor:one', extensions }],
+            digest,
+            trustManifests: [manifest],
           },
         ],
       };
       expect(safeParseCatalog(value).success).toBe(accepted);
       expect(aiCatalogSchema.safeParse(value).success).toBe(accepted);
+      expect(trustManifestSchema.safeParse(manifest).success).toBe(accepted);
       expect(validate(value)).toBe(accepted);
     }
+  });
+
+  it.each([
+    { contributor: 'relative' },
+    { trustSchema: { identifier: 'x' } },
+    { attestations: [{ type: 'evidence', uri: 42 }] },
+    { provenance: [{ relation: 'source', sourceId: 42 }] },
+    { extensions: [] },
+    { subject: { ...subject, digest: false } },
+    { subject, signature: { ...signature, profile: '' } },
+  ])('unknown content does not change rejection of malformed known fields: %j', (malformed) => {
+    for (const unknownContent of [{}, { futureEvidence: null }]) {
+      const manifest = {
+        contributor: 'did:web:example.com',
+        ...malformed,
+        ...unknownContent,
+      };
+      const entry = {
+        identifier: 'x',
+        type: 'custom',
+        data: null,
+        digest,
+        trustManifests: [manifest],
+      };
+      const value = { specVersion: '1.0', entries: [entry] };
+      expect(safeParseCatalog(value).success).toBe(false);
+      expect(aiCatalogSchema.safeParse(value).success).toBe(false);
+      expect(catalogEntrySchema.safeParse(entry).success).toBe(false);
+      expect(trustManifestSchema.safeParse(manifest).success).toBe(false);
+      expect(validate(value)).toBe(false);
+    }
+  });
+
+  it('keeps unknown-content subject binding checks in the root parser', () => {
+    const entry = {
+      identifier: 'x',
+      type: 'custom',
+      data: null,
+      digest,
+      trustManifests: [
+        {
+          contributor: 'urn:auditor:one',
+          subject: { ...subject, identifier: 'different' },
+          futureEvidence: false,
+        },
+      ],
+    };
+    const value = { specVersion: '1.0', entries: [entry] };
+    expect(safeParseCatalog(value).success).toBe(false);
+    expect(aiCatalogSchema.safeParse(value).success).toBe(true);
+    expect(validate(value)).toBe(true);
   });
 
   it('enforces timestamp ordering in runtime schemas, beyond JSON Schema coverage', () => {

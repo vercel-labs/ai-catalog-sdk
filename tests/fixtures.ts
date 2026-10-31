@@ -76,6 +76,22 @@ export const validFixtures: readonly unknown[] = [
       },
     ],
   },
+  {
+    specVersion: '1.99',
+    entries: [
+      {
+        identifier: 'future-content',
+        type: 'custom',
+        data: null,
+        trustManifests: [null, false, 0, '', [], {}, { claim: true }].map(
+          (futureEvidence) => ({
+            contributor: 'urn:auditor:future',
+            futureEvidence,
+          }),
+        ),
+      },
+    ],
+  },
 ];
 
 export const structurallyInvalidFixtures: readonly unknown[] = [

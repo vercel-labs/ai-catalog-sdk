@@ -129,6 +129,12 @@ function trustManifestShapes(
     subject: concreteTrustSubjectSchema.exactOptional(),
     signature: z.never().exactOptional(),
   };
+  const unknownContentShape = {
+    ...unsignedCommon,
+    trustSchema: trustSchema.exactOptional(),
+    attestations: attestations.exactOptional(),
+    provenance: provenance.exactOptional(),
+  };
   return [
     z
       .object({
@@ -173,6 +179,14 @@ function trustManifestShapes(
         extensions: substantiveExtensionsSchema,
       })
       .catchall(z.json()),
+    z
+      .object(unknownContentShape)
+      .catchall(z.json())
+      .refine((manifest) =>
+        Object.keys(manifest).some((key) =>
+          !Object.hasOwn(unknownContentShape, key),
+        ),
+      ),
   ] as const;
 }
 
@@ -186,16 +200,16 @@ function contributorMatchesSigner(manifest: {
   );
 }
 
+const concreteTrustManifestShapes = trustManifestShapes(
+  concreteTrustSchemaSchema,
+  z.array(concreteAttestationSchema),
+  z.array(concreteAttestationSchema).min(1),
+  z.array(concreteProvenanceLinkSchema),
+  z.array(concreteProvenanceLinkSchema).min(1),
+);
+
 export const concreteTrustManifestSchema = z
-  .union(
-    trustManifestShapes(
-      concreteTrustSchemaSchema,
-      z.array(concreteAttestationSchema),
-      z.array(concreteAttestationSchema).min(1),
-      z.array(concreteProvenanceLinkSchema),
-      z.array(concreteProvenanceLinkSchema).min(1),
-    ),
-  )
+  .union(concreteTrustManifestShapes)
   .refine(contributorMatchesSigner, {
     path: ['signature', 'signer'],
     message: 'Signature signer must exactly equal contributor.',
@@ -356,6 +370,7 @@ export const schemaRegistry = z.registry<{
   description: string;
   format?: string;
   minProperties?: number;
+  not?: { propertyNames: { enum: string[] } };
 }>();
 
 schemaRegistry.add(rfc3339DateTimeSchema, {
@@ -421,4 +436,14 @@ schemaRegistry.add(substantiveExtensionsSchema, {
   title: 'Substantive Extensions',
   description: 'A non-empty object of namespaced contributor claims.',
   minProperties: 1,
+});
+
+const unknownContentSchema = concreteTrustManifestShapes[5];
+schemaRegistry.add(unknownContentSchema, {
+  id: 'TrustManifestWithUnknownFields',
+  title: 'Trust Manifest With Unknown Fields',
+  description: 'An unsigned Trust Manifest with an unrecognized content field.',
+  not: {
+    propertyNames: { enum: Object.keys(unknownContentSchema.shape) },
+  },
 });

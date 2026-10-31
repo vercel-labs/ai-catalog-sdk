@@ -71,6 +71,7 @@ const inventory = {
       ['attestations', 'contributor'],
       ['contributor', 'provenance'],
       ['contributor', 'extensions'],
+      ['contributor'],
     ],
   },
   Signature: {

@@ -48,7 +48,7 @@ export const aiCatalogJsonSchema: JsonSchema = {
       "$ref": "#/$defs/Signature"
     },
     "additionalSignatures": {
-      "$ref": "#/$defs/__schema45"
+      "$ref": "#/$defs/__schema49"
     }
   },
   "required": [
@@ -56,7 +56,7 @@ export const aiCatalogJsonSchema: JsonSchema = {
     "entries"
   ],
   "additionalProperties": {
-    "$ref": "#/$defs/__schema46"
+    "$ref": "#/$defs/__schema50"
   },
   "$defs": {
     "HostInfo": {
@@ -148,10 +148,10 @@ export const aiCatalogJsonSchema: JsonSchema = {
               "$ref": "#/$defs/__schema11"
             },
             "updatedAt": {
-              "$ref": "#/$defs/__schema40"
+              "$ref": "#/$defs/__schema44"
             },
             "extensions": {
-              "$ref": "#/$defs/__schema41"
+              "$ref": "#/$defs/__schema45"
             },
             "url": {
               "type": "string"
@@ -166,7 +166,7 @@ export const aiCatalogJsonSchema: JsonSchema = {
             "url"
           ],
           "additionalProperties": {
-            "$ref": "#/$defs/__schema42"
+            "$ref": "#/$defs/__schema46"
           }
         },
         {
@@ -200,13 +200,13 @@ export const aiCatalogJsonSchema: JsonSchema = {
               "$ref": "#/$defs/__schema11"
             },
             "updatedAt": {
-              "$ref": "#/$defs/__schema40"
+              "$ref": "#/$defs/__schema44"
             },
             "extensions": {
-              "$ref": "#/$defs/__schema41"
+              "$ref": "#/$defs/__schema45"
             },
             "data": {
-              "$ref": "#/$defs/__schema43"
+              "$ref": "#/$defs/__schema47"
             },
             "url": {
               "not": {}
@@ -218,7 +218,7 @@ export const aiCatalogJsonSchema: JsonSchema = {
             "data"
           ],
           "additionalProperties": {
-            "$ref": "#/$defs/__schema44"
+            "$ref": "#/$defs/__schema48"
           }
         }
       ],
@@ -332,6 +332,9 @@ export const aiCatalogJsonSchema: JsonSchema = {
         },
         {
           "$ref": "#/$defs/__schema38"
+        },
+        {
+          "$ref": "#/$defs/TrustManifestWithUnknownFields"
         }
       ],
       "title": "Trust Manifest",
@@ -1111,42 +1114,65 @@ export const aiCatalogJsonSchema: JsonSchema = {
         }
       ]
     },
+    "TrustManifestWithUnknownFields": {
+      "type": "object",
+      "properties": {
+        "contributor": {
+          "$ref": "#/$defs/__schema13"
+        },
+        "additionalSignatures": {
+          "$ref": "#/$defs/__schema14"
+        },
+        "extensions": {
+          "$ref": "#/$defs/__schema16"
+        },
+        "subject": {
+          "$ref": "#/$defs/__schema31"
+        },
+        "signature": {
+          "$ref": "#/$defs/__schema32"
+        },
+        "trustSchema": {
+          "$ref": "#/$defs/__schema40"
+        },
+        "attestations": {
+          "$ref": "#/$defs/__schema41"
+        },
+        "provenance": {
+          "$ref": "#/$defs/__schema42"
+        }
+      },
+      "required": [
+        "contributor"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema43"
+      },
+      "title": "Trust Manifest With Unknown Fields",
+      "description": "An unsigned Trust Manifest with an unrecognized content field.",
+      "not": {
+        "propertyNames": {
+          "enum": [
+            "contributor",
+            "additionalSignatures",
+            "extensions",
+            "subject",
+            "signature",
+            "trustSchema",
+            "attestations",
+            "provenance"
+          ]
+        }
+      }
+    },
     "__schema40": {
-      "$ref": "#/$defs/Rfc3339DateTime"
+      "$ref": "#/$defs/TrustSchema"
     },
     "__schema41": {
-      "$ref": "#/$defs/__schema17"
+      "$ref": "#/$defs/__schema20"
     },
     "__schema42": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/__schema42"
-          }
-        },
-        {
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema42"
-          }
-        }
-      ]
+      "$ref": "#/$defs/__schema22"
     },
     "__schema43": {
       "anyOf": [
@@ -1180,66 +1206,10 @@ export const aiCatalogJsonSchema: JsonSchema = {
       ]
     },
     "__schema44": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/__schema44"
-          }
-        },
-        {
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema44"
-          }
-        }
-      ]
+      "$ref": "#/$defs/Rfc3339DateTime"
     },
     "__schema45": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/__schema45"
-          }
-        },
-        {
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema45"
-          }
-        }
-      ]
+      "$ref": "#/$defs/__schema17"
     },
     "__schema46": {
       "anyOf": [
@@ -1268,6 +1238,130 @@ export const aiCatalogJsonSchema: JsonSchema = {
           },
           "additionalProperties": {
             "$ref": "#/$defs/__schema46"
+          }
+        }
+      ]
+    },
+    "__schema47": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema47"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema47"
+          }
+        }
+      ]
+    },
+    "__schema48": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema48"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema48"
+          }
+        }
+      ]
+    },
+    "__schema49": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema49"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema49"
+          }
+        }
+      ]
+    },
+    "__schema50": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema50"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema50"
           }
         }
       ]

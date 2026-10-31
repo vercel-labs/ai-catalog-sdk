@@ -137,7 +137,8 @@ export interface Signature {
 
 /**
  * One contributor's unverified artifact claims. Requires a signature,
- * trustSchema, non-empty attestations, provenance, or extensions.
+ * trustSchema, non-empty attestations, provenance, or extensions, or an
+ * unrecognized JSON-valued field.
  */
 export interface TrustManifest {
   /** Absolute URI identifying this contributor; preserved and compared exactly. */

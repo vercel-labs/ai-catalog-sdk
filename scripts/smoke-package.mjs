@@ -102,6 +102,31 @@ const catalogWithOpaqueHost = parseCatalog({
 });
 assert.deepEqual(catalogWithOpaqueHost.host.trustManifest, opaqueHostManifest);
 assert.equal(aiCatalogSchema.safeParse(value).success, true);
+const futureContentCatalog = {
+  ...value,
+  entries: [{
+    identifier: 'future-content',
+    type: 'application/json',
+    data: null,
+    trustManifests: [{ contributor: 'urn:example:contributor', futureEvidence: null }],
+  }],
+};
+assert.deepEqual(parseCatalog(futureContentCatalog), futureContentCatalog);
+assert.equal(aiCatalogSchema.safeParse(futureContentCatalog).success, true);
+const futureContentReport = await checkCatalogEntry(futureContentCatalog.entries[0]);
+assert.equal(futureContentReport.status, 'checked');
+assert.deepEqual(futureContentReport.manifests.map(result => result.status), ['missing_signature']);
+for (const futureFields of [{}, { futureEvidence: null }]) {
+  const malformedCatalog = {
+    ...value,
+    entries: [{
+      ...futureContentCatalog.entries[0],
+      trustManifests: [{ contributor: 'urn:example:contributor', attestations: 'invalid', ...futureFields }],
+    }],
+  };
+  assert.throws(() => parseCatalog(malformedCatalog));
+  assert.equal(aiCatalogSchema.safeParse(malformedCatalog).success, false);
+}
 assert.equal(aiCatalogJsonSchema.$id, rawSchema.$id);
 assert.equal(implementedSpecRevision.commit, '9aac2c1bfa622356e45a31f3dc1d342bdb329e00');
 const decode = bytes => new TextDecoder().decode(bytes);

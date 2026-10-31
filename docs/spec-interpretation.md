@@ -10,7 +10,7 @@ The pinned snapshot requires duplicate-name rejection when processing signed pay
 
 ## Forward compatibility
 
-The parser accepts AI Catalog `1.x` documents and preserves unknown JSON-valued fields. A manifest containing only `contributor` plus an unrecognized evidence field is rejected until that field is recognized as substantive; contributors can use the namespaced `extensions` object for additional claims.
+For forward compatibility, an unrecognized Trust Manifest field satisfies the SDK’s substantive-content requirement.
 
 ## Verification
 

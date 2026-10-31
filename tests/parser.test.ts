@@ -83,26 +83,25 @@ describe('root parsing', () => {
     }
   });
 
-  it('requires a snapshot-known substantive member in higher 1.x minors', () => {
-    expect(
-      safeParseCatalog({
-        specVersion: '1.99',
-        entries: [
-          {
-            identifier: 'x',
-            type: 'custom',
-            url: 'u',
-            digest: sha256,
-            trustManifests: [
-              {
-                contributor: 'did:web:example.com',
-                futureEvidence: { proof: true },
-              },
-            ],
-          },
-        ],
-      }).success,
-    ).toBe(false);
+  it('preserves unknown-only manifest content in higher 1.x minors', () => {
+    const value = {
+      specVersion: '1.99',
+      entries: [
+        {
+          identifier: 'x',
+          type: 'custom',
+          url: 'u',
+          digest: sha256,
+          trustManifests: [
+            {
+              contributor: 'did:web:example.com',
+              futureEvidence: { proof: true },
+            },
+          ],
+        },
+      ],
+    };
+    expect(parseCatalog(value)).toEqual(value);
   });
 
   it('enforces entry uniqueness for versioned and unversioned groups', () => {
