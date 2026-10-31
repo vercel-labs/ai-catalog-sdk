@@ -128,12 +128,10 @@ describe('checkCatalogEntry', () => {
     );
     expect(reports.map(({ status }) => status)).toEqual(['valid', 'valid']);
     expect(reports[0]).toMatchObject({
-      index: 0,
       status: 'valid',
       isPublisherEndorsement: true,
     });
     expect(reports[1]).toMatchObject({
-      index: 1,
       status: 'valid',
       isPublisherEndorsement: false,
     });
@@ -224,42 +222,46 @@ describe('checkCatalogEntry', () => {
       manifestFor(),
       { contributor: publisher, extensions: { 'example.com': true } },
     ]);
-    expect((await statuses(entry, { contributors: [] })).length).toBe(0);
-    expect(
-      (await statuses(entry, { contributors: [assessor] })).map(
-        ({ index }) => index,
-      ),
-    ).toEqual([1]);
-    expect(
-      (
-        await statuses(entry, {
-          contributors: [],
-          alwaysCheckPublisherManifests: true,
-        })
-      ).map(({ index }) => index),
-    ).toEqual([0, 2, 3]);
-    expect(
-      (
-        await statuses(entry, {
-          contributors: [assessor, publisher],
-          alwaysCheckPublisherManifests: true,
-        })
-      ).map(({ index }) => index),
-    ).toEqual([0, 1, 2, 3]);
-    expect(
-      (await statuses(entry, { alwaysCheckPublisherManifests: false })).map(
-        ({ index }) => index,
-      ),
-    ).toEqual([0, 1, 2, 3]);
+    const cases: [CatalogEntryCheckOptions, string[], string[]][] = [
+      [{ contributors: [] }, ['not_checked', 'not_checked', 'not_checked', 'not_checked'], []],
+      [{ contributors: [assessor] }, ['not_checked', 'valid', 'not_checked', 'not_checked'], [assessor]],
+      [
+        { contributors: [], alwaysCheckPublisherManifests: true },
+        ['valid', 'not_checked', 'valid', 'missing_signature'],
+        [publisher],
+      ],
+      [
+        { contributors: [assessor, publisher], alwaysCheckPublisherManifests: true },
+        ['valid', 'valid', 'valid', 'missing_signature'],
+        [publisher, assessor],
+      ],
+      [
+        { alwaysCheckPublisherManifests: false },
+        ['valid', 'valid', 'valid', 'missing_signature'],
+        [publisher, assessor],
+      ],
+    ];
+    for (const [options, expectedStatuses, expectedSigners] of cases) {
+      resolver.mockClear();
+      const results = await statuses(entry, options);
+      expect(results.map(({ status }) => status)).toEqual(expectedStatuses);
+      expect(results.map(({ manifest }) => manifest)).toEqual(entry.trustManifests);
+      expect(results.every(result => !Object.hasOwn(result, 'index'))).toBe(true);
+      expect(resolver.mock.calls.map(([identity]) => identity)).toEqual(expectedSigners);
+    }
   });
 
   it('publisher-only selection does not require a publisher manifest to exist', async () => {
+    const manifest = manifestFor(assessor);
     await expect(
-      checkCatalogEntry(entryFor([manifestFor(assessor)]), artifact, {
+      checkCatalogEntry(entryFor([manifest]), artifact, {
         contributors: [],
         alwaysCheckPublisherManifests: true,
       }),
-    ).resolves.toEqual({ status: 'checked', manifests: [] });
+    ).resolves.toEqual({
+      status: 'checked',
+      manifests: [{ status: 'not_checked', manifest }],
+    });
     expect(resolver).not.toHaveBeenCalled();
   });
 
@@ -288,14 +290,17 @@ describe('checkCatalogEntry', () => {
         contributors: [],
         alwaysCheckPublisherManifests: true,
       }),
-    ).resolves.toEqual({ status: 'checked', manifests: [] });
+    ).resolves.toEqual({
+      status: 'checked',
+      manifests: [{ status: 'not_checked', manifest: entry.trustManifests[0] }],
+    });
     expect(resolver).not.toHaveBeenCalled();
     expect(
       await statuses(entry, {
         contributors: [assessor],
         alwaysCheckPublisherManifests: true,
       }),
-    ).toMatchObject([{ index: 0, status: 'valid', isPublisherEndorsement: false }]);
+    ).toMatchObject([{ status: 'valid', isPublisherEndorsement: false }]);
     expect(resolver).toHaveBeenCalledTimes(1);
   });
 
@@ -426,8 +431,13 @@ describe('checkCatalogEntry', () => {
     expect(resolver).not.toHaveBeenCalled();
   });
 
-  it('captures entry, selected manifests, artifact digest and options before I/O', async () => {
-    const entry = entryFor();
+  it('captures entry, checked and unchecked manifests, artifact digest and options before I/O', async () => {
+    const unchecked = manifestFor(assessor);
+    if (!unchecked.signature) throw new Error('Expected signed manifest');
+    unchecked.signature.jws = 'not-jws';
+    const manifests = [manifestFor(), unchecked];
+    const capturedManifests = structuredClone(manifests);
+    const entry = entryFor(manifests);
     const bytes = artifact.slice();
     const contributors = [publisher];
     const options = {
@@ -448,6 +458,9 @@ describe('checkCatalogEntry', () => {
     if (!manifest?.signature) throw new Error('Expected signed manifest');
     manifest.contributor = assessor;
     manifest.signature.expiresAt = '2000-01-01T00:00:00Z';
+    const uncheckedManifest = manifests[1];
+    if (!uncheckedManifest) throw new Error('Expected unchecked manifest');
+    uncheckedManifest.contributor = publisher;
     bytes.fill(0);
     contributors.length = 0;
     options.timeoutMs = 1;
@@ -457,9 +470,12 @@ describe('checkCatalogEntry', () => {
     });
     complete?.(documentFor());
     const result = await pending;
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       status: 'checked',
-      manifests: [{ status: 'valid', manifest: { contributor: publisher } }],
+      manifests: [
+        { status: 'valid', isPublisherEndorsement: true, manifest: capturedManifests[0] },
+        { status: 'not_checked', manifest: capturedManifests[1] },
+      ],
     });
   });
 

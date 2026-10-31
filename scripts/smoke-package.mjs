@@ -189,23 +189,27 @@ assert.deepEqual(derived.subject, subject);
 assert.equal(Object.hasOwn(entry, 'trustManifests'), false);
 assert.equal(Object.hasOwn(derived.subject, 'url'), false);
 const signedEntry = { ...entry, trustManifests: manifests };
-parseCatalog({ ...value, entries: [signedEntry] });
+const parsedManifests = parseCatalog({ ...value, entries: [signedEntry] }).entries[0].trustManifests;
 const report = await checkCatalogEntry(signedEntry, artifactBytes);
 assert.equal(report.status, 'checked');
-assert.deepEqual(report.manifests.map(result => result.index), [0, 1, 2]);
+assert.deepEqual(report.manifests.map(result => result.manifest), parsedManifests);
+assert.ok(report.manifests.every(result => !Object.hasOwn(result, 'index')));
 assert.deepEqual(report.manifests.map(result => result.status), ['profile_not_implemented', 'profile_not_implemented', 'profile_not_implemented']);
-const emptyReport = await checkCatalogEntry(signedEntry, artifactBytes, { contributors: [] });
-assert.equal(emptyReport.status, 'checked');
-assert.deepEqual(emptyReport.manifests, []);
+const uncheckedReport = await checkCatalogEntry(signedEntry, artifactBytes, { contributors: [] });
+assert.equal(uncheckedReport.status, 'checked');
+assert.deepEqual(uncheckedReport.manifests, parsedManifests.map(manifest => ({ manifest, status: 'not_checked' })));
 const publisherOnly = await checkCatalogEntry(signedEntry, artifactBytes, { contributors: [], alwaysCheckPublisherManifests: true });
 assert.equal(publisherOnly.status, 'checked');
-assert.deepEqual(publisherOnly.manifests, []);
+assert.deepEqual(publisherOnly.manifests, parsedManifests.map(manifest => ({ manifest, status: 'not_checked' })));
 const publisherMetadata = { contributor: 'did:web:example.com', extensions: { 'com.example': true } };
 const selectedPublisher = await checkCatalogEntry({ ...signedEntry, trustManifests: [...manifests, publisherMetadata] }, artifactBytes, {
   contributors: [], alwaysCheckPublisherManifests: true, clockToleranceMs: 0,
 });
 assert.equal(selectedPublisher.status, 'checked');
-assert.deepEqual(selectedPublisher.manifests.map(result => [result.index, result.status]), [[3, 'missing_signature']]);
+assert.deepEqual(selectedPublisher.manifests, [
+  ...parsedManifests.map(manifest => ({ manifest, status: 'not_checked' })),
+  { manifest: publisherMetadata, status: 'missing_signature' },
+]);
 const inlineEntry = { identifier: 'inline', type: 'application/json', data: null };
 assert.deepEqual(await checkCatalogEntry(inlineEntry), { status: 'checked', manifests: [] });
 const inlineSubject = {
@@ -358,8 +362,13 @@ checkCatalogEntry(entryWithData, new Uint8Array(), options);
 checkCatalogEntry(entryWithData, { publicKey: signaturePublicKey });
 const report = {} as CatalogEntryCheckResult;
 if (report.status === 'checked') {
+  const uncheckedManifests: TrustManifest[] = report.manifests
+    .filter(evaluation => evaluation.status === 'not_checked')
+    .map(evaluation => evaluation.manifest);
+  void uncheckedManifests;
   for (const evaluation of report.manifests) {
-    const index: number = evaluation.index;
+    // @ts-expect-error Evaluations correspond to input positions without an index field.
+    evaluation.index;
     const manifest: TrustManifest = evaluation.manifest;
     if (evaluation.status === 'valid') {
       const publisher: boolean = evaluation.isPublisherEndorsement;
@@ -372,7 +381,7 @@ if (report.status === 'checked') {
       const diagnostic: Error = evaluation.error;
       void diagnostic;
     }
-    void index; void manifest;
+    void manifest;
   }
 }
 const callback: TrustManifestSigner = ({ payload, typ }) => {

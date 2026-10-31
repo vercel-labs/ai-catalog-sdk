@@ -559,7 +559,10 @@ export type CatalogEntryArtifactBindingCheckResult =
 
 /** Selection, time, and DID-resolution controls for an entry check. */
 export interface CatalogEntryCheckOptions {
-  /** Omitted selects all; an empty array selects none. Values match exactly. */
+  /**
+   * Omitted checks all; an empty array checks none. Values match exactly.
+   * Unselected manifests receive `not_checked`.
+   */
   contributors?: readonly string[];
   /** Adds the entry's derived publisher manifests to the contributor selection. */
   alwaysCheckPublisherManifests?: boolean;
@@ -575,6 +578,7 @@ export interface CatalogEntryCheckOptions {
 
 /** One contribution's outcome; a valid contribution need not be from the publisher. */
 export type TrustManifestCheckResult =
+  | { status: 'not_checked' }
   | { status: 'valid'; isPublisherEndorsement: boolean }
   | { status: 'missing_signature' }
   | { status: 'profile_not_implemented'; profile: string }
@@ -585,9 +589,8 @@ export type TrustManifestCheckResult =
   | { status: 'not_yet_valid' }
   | { status: 'expired' };
 
-/** The captured manifest and its original position, with its individual outcome. */
+/** A captured manifest with its individual outcome, in the input array's order. */
 export type TrustManifestEvaluation = TrustManifestCheckResult & {
-  index: number;
   manifest: TrustManifest;
 };
 
@@ -1122,8 +1125,9 @@ function captureJson(value: JsonValue): JsonValue {
 
 /**
  * Validates entry structure and its declared artifact digest, then reports
- * every selected contribution. `checked` is a completed report, not a trust
- * decision; an empty list or failed endorsements can still yield `checked`.
+ * every contribution, using `not_checked` for unselected manifests.
+ * `checked` is a completed report, not a trust decision; an empty list or
+ * failed endorsements can still yield `checked`.
  * Inputs are captured before I/O. Each signer is resolved once per invocation.
  */
 export function checkCatalogEntry(
@@ -1171,15 +1175,6 @@ export async function checkCatalogEntry(
   if (!parsed.success) return { status: 'invalid_entry', error: parsed.error };
   const snapshot = parsed.data;
   const publisher = publisherIdentityFor(snapshot.identifier);
-  const manifests = (snapshot.trustManifests ?? [])
-    .map((manifest, index) => ({ manifest, index }))
-    .filter(
-      ({ manifest }) =>
-        options.contributors === undefined ||
-        options.contributors.includes(manifest.contributor) ||
-        (options.alwaysCheckPublisherManifests &&
-          manifest.contributor === publisher),
-    );
   let artifactBytes: Uint8Array = new Uint8Array();
   let digestResult: DigestCheckResult = { status: 'match' };
   if (snapshot.digest !== undefined) {
@@ -1197,9 +1192,15 @@ export async function checkCatalogEntry(
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   };
   const results: TrustManifestEvaluation[] = [];
-  for (const { manifest, index } of manifests) {
+  for (const manifest of snapshot.trustManifests ?? []) {
+    const selected =
+      options.contributors === undefined ||
+      options.contributors.includes(manifest.contributor) ||
+      (options.alwaysCheckPublisherManifests &&
+        manifest.contributor === publisher);
     let result: TrustManifestCheckResult;
-    if (manifest.signature === undefined)
+    if (!selected) result = { status: 'not_checked' };
+    else if (manifest.signature === undefined)
       result = { status: 'missing_signature' };
     else if (manifest.signature.profile !== 'did-web-v1')
       result = {
@@ -1270,7 +1271,7 @@ export async function checkCatalogEntry(
         }
       }
     }
-    results.push({ index, manifest, ...result });
+    results.push({ manifest, ...result });
   }
   throwIfCanceled(options.signal);
   const now = Date.now();
@@ -1288,7 +1289,6 @@ export async function checkCatalogEntry(
     );
     if (time !== undefined)
       results[index] = {
-        index: evaluation.index,
         manifest: evaluation.manifest,
         status: time,
       };

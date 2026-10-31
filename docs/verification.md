@@ -20,17 +20,17 @@ if (report.status === 'checked') {
 
 For an entry with `url`, supply the artifact bytes obtained by your application as a `Uint8Array`. For an entry with `data`, call `checkCatalogEntry(entryWithData)`; the SDK applies JCS canonicalization to `entry.data` when checking the declared digest. Signed manifests require the digest to be present.
 
-The function performs bounded structural validation across the entire entry, including unselected manifests. Structural or artifact failures return an entry-level failure. Otherwise, `status: 'checked'` means every selected manifest received an outcome. Empty manifest arrays, empty selections, and reports in which every endorsement failed can all be `checked`. There is no aggregate requirement for a publisher endorsement or any other accepted contribution.
+The function performs bounded structural validation across the entire entry, including unselected manifests. Structural or artifact failures return an entry-level failure. Otherwise, `status: 'checked'` means the requested checks completed. The report contains one result per attached manifest in the same order; manifests excluded by the contributor options receive `not_checked`. The report may contain no manifests or no valid endorsements. There is no aggregate requirement for a publisher endorsement or any other accepted contribution.
 
 The entry-level result is `CatalogEntryCheckResult`:
 
 | Status | Meaning |
 | --- | --- |
-| `checked` | The requested checks completed; `manifests` contains the selected outcomes. |
+| `checked` | The requested checks completed; `manifests` contains an outcome for every attached manifest. |
 | `invalid_entry` | Bounded structural validation failed; `error` is a `CatalogParseError` with issue paths. |
 | `artifact_check_failed` | The declared entry digest could not be verified; `digestResult` explains the failure. |
 
-Each report item contains the original array `index`, the captured `manifest` that was checked, and a result discriminator. Repeated contributors are evaluated independently in source order; the SDK does not select a preferred update or merge their claims.
+Each report item contains the captured `manifest` and its individual outcome. Repeated contributors retain separate results in source order.
 
 ### Interpret manifest results
 
@@ -40,6 +40,7 @@ A valid assessor contribution, or a valid contribution for an entry outside the 
 
 | Manifest status | Meaning |
 | --- | --- |
+| `not_checked` | The contributor options excluded this manifest from verification. |
 | `valid` | Contributor authentication, signature, subject binding, and current acceptance passed. Includes `isPublisherEndorsement`. |
 | `missing_signature` | The manifest is unsigned metadata. |
 | `profile_not_implemented` | The exact selected `profile` is not implemented. No fallback profile is tried. |
@@ -54,7 +55,7 @@ Only `valid` results authenticate an endorsement for this entry. None of these r
 
 ### Select contributors
 
-Ordinary calls evaluate all contributors. Use `CatalogEntryCheckOptions` to limit the work:
+Ordinary calls evaluate all contributors. Use `CatalogEntryCheckOptions` to limit which manifests are verified:
 
 ```ts
 const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {
@@ -63,7 +64,7 @@ const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {
 });
 ```
 
-| Options | Selected manifests |
+| Options | Manifests to verify |
 | --- | --- |
 | `contributors` omitted | All manifests. |
 | `contributors: []` | None. |
@@ -73,7 +74,7 @@ const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {
 
 `alwaysCheckPublisherManifests: true` adds publisher manifests to the selection. False or omission leaves the contributor selection unchanged; it does not exclude a publisher already selected. Publisher selection includes unsigned manifests attributed to that contributor, which receive `missing_signature`.
 
-Publisher-only selection does not require such a manifest to exist: no matches produces `checked` with an empty list. If the SDK cannot derive a publisher identity from the entry identifier, the option adds no manifests to the contributor selection.
+Publisher-only selection does not require such a manifest to exist: when none match, every attached manifest receives `not_checked`. If the SDK cannot derive a publisher identity from the entry identifier, the option adds no manifests to the contributor selection.
 
 ### Network and time controls
 

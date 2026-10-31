@@ -125,12 +125,12 @@ describe('native did:web transport', () => {
     respond = (_request, response) => response.end(JSON.stringify(did));
     await expect(checkCatalogEntry(entry)).resolves.toMatchObject({
       status: 'checked',
-      manifests: [{ status: 'valid', isPublisherEndorsement: true, index: 0 }],
+      manifests: [{ status: 'valid', isPublisherEndorsement: true }],
     });
     did.assertionMethod = [];
     await expect(checkCatalogEntry(entry)).resolves.toMatchObject({
       status: 'checked',
-      manifests: [{ status: 'issuer_check_failed', index: 0 }],
+      manifests: [{ status: 'issuer_check_failed' }],
     });
     expect(network.options).toHaveLength(2);
   });
