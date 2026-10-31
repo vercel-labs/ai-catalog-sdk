@@ -10,8 +10,6 @@ Verification and signing utilities are available from `ai-catalog-sdk/verificati
 import { checkCatalogEntry } from 'ai-catalog-sdk/verification';
 
 const report = await checkCatalogEntry(entryWithUrl, artifactBytes);
-// Inline entries need no separate artifact bytes:
-const inlineReport = await checkCatalogEntry(entryWithData);
 
 if (report.status === 'checked') {
   const acceptedManifests = report.manifests
@@ -20,7 +18,7 @@ if (report.status === 'checked') {
 }
 ```
 
-For a URL entry, supply a `Uint8Array` containing the exact artifact representation; the SDK does not download, decode, or parse it. For an inline entry, the SDK uses JCS-canonicalized `data`. A declared entry digest is checked against that representation. Signed manifests require the digest to be present.
+For an entry with `url`, supply the artifact bytes obtained by your application as a `Uint8Array`. For an entry with `data`, call `checkCatalogEntry(entryWithData)`; the SDK applies JCS canonicalization to `entry.data` when checking the declared digest. Signed manifests require the digest to be present.
 
 The function performs bounded structural validation across the entire entry, including unselected manifests. Structural or artifact failures return an entry-level failure. Otherwise, `status: 'checked'` means every selected manifest received an outcome. Empty manifest arrays, empty selections, and reports in which every endorsement failed can all be `checked`. There is no aggregate requirement for a publisher endorsement or any other accepted contribution.
 
