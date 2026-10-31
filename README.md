@@ -97,26 +97,6 @@ const result = await checkCatalogEntryArtifactBinding(
 
 For an entry with `data`, omit `artifactBytes`. A `valid` result means the caller-selected key signed the manifest and its subject matches the entry and artifact. The function performs no network requests, contributor authentication, or time-window checks. See [Verification utilities](./docs/verification.md#check-artifact-binding-with-a-supplied-key) for details.
 
-## Sign a Trust Manifest
-
-`signTrustManifest()` constructs the signed payload and completes the manifest using your signing callback. This example uses `jose`, which your application installs separately:
-
-```ts
-import { CompactSign } from 'jose';
-import { signTrustManifest } from 'ai-catalog-sdk/verification';
-
-const manifest = await signTrustManifest(
-  entry,
-  { contributor: 'did:web:example.com' },
-  { profile: 'did-web-v1', issuedAt: new Date().toISOString() },
-  ({ payload, typ }) => new CompactSign(payload)
-    .setProtectedHeader({ alg: 'ES256', typ, kid: 'did:web:example.com#release-key' })
-    .sign(privateKey),
-);
-```
-
-The entry must already declare its artifact `digest`. The helper derives the subject from the entry, sets the signer to the contributor, and converts the callback's JWS to the required detached compact form. It does not fetch or hash the artifact or attach the returned manifest to the entry. You can also supply a manifest with an explicit subject. See [Signing](./docs/verification.md#sign-a-trust-manifest) for callback formats and guarantees.
-
 ## Use lower-level verification utilities
 
 Use the individual utilities when the composed catalog-entry check does not fit
@@ -220,6 +200,48 @@ const json = JSON.stringify(parseCatalog(catalog), null, 2);
 ```
 
 The SDK does not provide a builder abstraction or custom serializer. Authoring types expose fields known to this SDK. When parsing a compatible AI Catalog `1.x` document, the SDK preserves unknown JSON-valued properties.
+
+### Sign a Trust Manifest
+
+To add a signed endorsement, declare the entry's artifact digest, sign a Trust Manifest, and attach the result to `trustManifests` before serializing the catalog. This example reads the artifact from a local file and uses your configured `privateKey` with the separately installed `jose` package:
+
+```ts
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { CompactSign } from 'jose';
+import { mediaTypes, parseCatalog, type AICatalog } from 'ai-catalog-sdk';
+import { signTrustManifest } from 'ai-catalog-sdk/verification';
+
+const artifactBytes = await readFile('example-agent-plugin.zip');
+const entry = {
+  identifier: 'urn:air:example.com:agent:example-plugin',
+  type: mediaTypes.agentPluginZip,
+  url: 'https://example.com/example-agent-plugin.zip',
+  digest: `sha256:${createHash('sha256').update(artifactBytes).digest('hex')}`,
+};
+
+const manifest = await signTrustManifest(
+  entry,
+  { contributor: 'did:web:example.com' },
+  { profile: 'did-web-v1', issuedAt: new Date().toISOString() },
+  ({ payload, typ }) => new CompactSign(payload)
+    .setProtectedHeader({ alg: 'ES256', typ, kid: 'did:web:example.com#release-key' })
+    .sign(privateKey),
+);
+
+const catalogWithEndorsement = {
+  specVersion: '1.0',
+  entries: [{ ...entry, trustManifests: [manifest] }],
+} satisfies AICatalog;
+
+const jsonWithEndorsement = JSON.stringify(
+  parseCatalog(catalogWithEndorsement),
+  null,
+  2,
+);
+```
+
+The digest must describe the exact bytes published at `entry.url`. For an inline entry, hash `canonicalizeJsonValueToBytes(entry.data)` instead. The signed Trust Manifest endorses the entry's artifact; the containing catalog remains unsigned. See [Signing](./docs/verification.md#sign-a-trust-manifest) for signing with an explicit subject and supported callback formats.
 
 ## Schemas
 

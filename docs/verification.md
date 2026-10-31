@@ -183,13 +183,13 @@ const manifest = await signTrustManifest(
 );
 ```
 
-The manifest input has no existing signature. Signature metadata supplies `profile`, `issuedAt`, and optional `expiresAt`; the helper sets `signer` to `contributor`. The callback receives `{ payload, typ }`, where `payload` contains the exact canonical UTF-8 bytes and `typ` is `ai-catalog-trust-manifest+jws`. It may return a value synchronously or through a promise:
+Signature metadata supplies `profile`, `issuedAt`, and optional `expiresAt`; the helper sets `signer` to `contributor`. The callback receives `{ payload, typ }`, where `payload` contains the exact canonical UTF-8 bytes and `typ` is `ai-catalog-trust-manifest+jws`. It may return a value synchronously or through a promise:
 
 | Callback result | Handling |
 | --- | --- |
-| Ordinary compact JWS string, `protected.payload.signature` | Checks that the embedded payload matches and removes it. |
-| Detached compact JWS string, `protected..signature` | Retains the detached form. The callback is responsible for signing the supplied payload. |
-| Flattened JWS object, `{ protected, payload, signature }` | Checks the embedded payload and constructs detached compact JWS. |
+| Ordinary compact JWS string (`protected.payload.signature`) | Checks that the embedded payload matches and removes it. |
+| Detached compact JWS string (`protected..signature`) | Retains the detached form. The callback is responsible for signing the supplied payload. |
+| Flattened JWS object (`{ protected, payload, signature }`) | Checks the embedded payload and constructs detached compact JWS. |
 
 These are standard JWS representations. The helper rejects unprotected headers, checks the required protected `typ` and `alg`, forbids `alg: 'none'` and any `b64`, and preserves the captured manifest contents. It does not verify the callback's cryptographic signature or authenticate the chosen key. The callback is responsible for selecting the correct algorithm, headers, and signing key for the requested profile.
 
