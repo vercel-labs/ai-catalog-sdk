@@ -1,11 +1,12 @@
 import { Buffer } from 'node:buffer';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type {
-  CatalogEntryWithData,
-  CatalogEntryWithUrl,
-  Signature,
-  TrustManifest,
+import {
+  CatalogParseError,
+  type CatalogEntryWithData,
+  type CatalogEntryWithUrl,
+  type Signature,
+  type TrustManifest,
 } from '../src/index.js';
 import { IssuerCheckError } from '../src/internal/publisher-profile.js';
 import { resolveDidWeb } from '../src/internal/did-web.js';
@@ -209,9 +210,20 @@ describe('checkCatalogEntry', () => {
     await expect(
       checkCatalogEntry(entryFor(), new Uint8Array([4]), { contributors: [] }),
     ).resolves.toEqual({
-      status: 'artifact_check_failed',
-      digestResult: { status: 'mismatch' },
+      status: 'artifact_digest_mismatch',
     });
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['sha256:00', { status: 'invalid_digest' }],
+    ['blake3:00', { status: 'digest_algorithm_not_implemented', algorithm: 'blake3' }],
+    ['sha256:zz', { status: 'invalid_entry', error: expect.any(CatalogParseError) }],
+  ])('reports the entry digest failure for %s before manifest checks', async (digest, expected) => {
+    const entry = { ...entryFor([]), digest };
+    await expect(
+      checkCatalogEntry(entry, artifact, { contributors: [] }),
+    ).resolves.toEqual(expected);
     expect(resolver).not.toHaveBeenCalled();
   });
 

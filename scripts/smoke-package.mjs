@@ -225,8 +225,11 @@ const invalidEntry = await checkCatalogEntry({ ...inlineEntry, trustManifests: [
 assert.equal(invalidEntry.status, 'invalid_entry');
 assert.ok(invalidEntry.error.issues.some(issue => issue.path[0] === 'trustManifests'));
 const wrongArtifact = await checkCatalogEntry({ ...entry, digest: 'sha256:' + '0'.repeat(64) }, artifactBytes, { contributors: [] });
-assert.equal(wrongArtifact.status, 'artifact_check_failed');
-assert.equal(wrongArtifact.digestResult.status, 'mismatch');
+assert.deepEqual(wrongArtifact, { status: 'artifact_digest_mismatch' });
+assert.deepEqual(await checkCatalogEntry({ ...inlineEntry, digest: 'sha256:00' }), { status: 'invalid_digest' });
+assert.deepEqual(await checkCatalogEntry({ ...inlineEntry, digest: 'blake3:00' }), {
+  status: 'digest_algorithm_not_implemented', algorithm: 'blake3',
+});
 await assert.rejects(signTrustManifest({ contributor: 'did:example:alice', subject }, metadata, input => ({
   ...createJws(input, 'flattened'), payload: 'different',
 })), TypeError);
@@ -383,6 +386,12 @@ if (report.status === 'checked') {
     }
     void manifest;
   }
+} else if (report.status === 'digest_algorithm_not_implemented') {
+  const algorithm: string = report.algorithm;
+  void algorithm;
+} else if (report.status === 'artifact_digest_mismatch' || report.status === 'invalid_digest') {
+  // @ts-expect-error Entry digest failures do not have a nested digestResult.
+  report.digestResult;
 }
 const callback: TrustManifestSigner = ({ payload, typ }) => {
   const bytes: Uint8Array = payload;

@@ -597,10 +597,9 @@ export type TrustManifestEvaluation = TrustManifestCheckResult & {
 /** A report of the requested checks, without an application acceptance policy. */
 export type CatalogEntryCheckResult =
   | { status: 'invalid_entry'; error: CatalogParseError }
-  | {
-      status: 'artifact_check_failed';
-      digestResult: Exclude<DigestCheckResult, { status: 'match' }>;
-    }
+  | { status: 'artifact_digest_mismatch' }
+  | { status: 'invalid_digest' }
+  | { status: 'digest_algorithm_not_implemented'; algorithm: string }
   | { status: 'checked'; manifests: TrustManifestEvaluation[] };
 
 /** Signature metadata before JWS creation, or a completed signature. */
@@ -1182,8 +1181,17 @@ export async function checkCatalogEntry(
       ? canonicalizeJsonValueToBytes((snapshot as CatalogEntryWithData).data)
       : (bytesOrOptions as Uint8Array);
     digestResult = checkDigest(artifactBytes, snapshot.digest);
-    if (digestResult.status !== 'match')
-      return { status: 'artifact_check_failed', digestResult };
+    switch (digestResult.status) {
+      case 'mismatch':
+        return { status: 'artifact_digest_mismatch' };
+      case 'invalid_digest':
+        return digestResult;
+      case 'algorithm_not_implemented':
+        return {
+          status: 'digest_algorithm_not_implemented',
+          algorithm: digestResult.algorithm,
+        };
+    }
   }
   const resolutions = new Map<string, Promise<unknown>>();
   const resolutionOptions = {

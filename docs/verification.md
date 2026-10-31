@@ -20,23 +20,81 @@ if (report.status === 'checked') {
 
 For an entry with `url`, supply the artifact bytes obtained by your application as a `Uint8Array`. For an entry with `data`, call `checkCatalogEntry(entryWithData)`; the SDK applies JCS canonicalization to `entry.data` when checking the declared digest. Signed manifests require the digest to be present.
 
-The function performs bounded structural validation across the entire entry, including unselected manifests. Structural or artifact failures return an entry-level failure. Otherwise, `status: 'checked'` means the requested checks completed. The report contains one result per attached manifest in the same order; manifests excluded by the contributor options receive `not_checked`. The report may contain no manifests or no valid endorsements. There is no aggregate requirement for a publisher endorsement or any other accepted contribution.
+The function performs bounded structural validation across the entire entry, including unselected manifests. A `CatalogEntryCheckResult` with `report.status === 'checked'` can look like this:
 
-The entry-level result is `CatalogEntryCheckResult`:
+```ts
+{
+  status: 'checked',
+  manifests: [
+    {
+      manifest: {
+        contributor: 'did:web:example.com',
+        extensions: { 'example.com': true },
+      },
+      status: 'missing_signature',
+    },
+  ],
+}
+```
 
-| Status | Meaning |
-| --- | --- |
-| `checked` | The requested checks completed; `manifests` contains an outcome for every attached manifest. |
-| `invalid_entry` | Bounded structural validation failed; `error` is a `CatalogParseError` with issue paths. |
-| `artifact_check_failed` | The declared entry digest could not be verified; `digestResult` explains the failure. |
+The outer `report.status` of `checked` means the requested checks completed; it does not require an accepted endorsement. In this example, `report.manifests[0].status` is `missing_signature`, so the manifest is unsigned metadata.
 
-Each report item contains the captured `manifest` and its individual outcome. Repeated contributors retain separate results in source order.
+`report.manifests` contains one result per attached manifest, in the same order, including repeated contributors. Manifests excluded by the contributor options receive `not_checked`. An entry without manifests produces an empty array.
+
+If structural validation fails, the result has `report.status === 'invalid_entry'`:
+
+```ts
+{
+  status: 'invalid_entry',
+  error: parseError,
+}
+```
+
+Here, `parseError` is the returned `CatalogParseError` instance. Its `issues` identify the validation problems and their input paths; see [Handle invalid input](../README.md#handle-invalid-input).
+
+When the entry declares a digest, the SDK checks it against the supplied artifact bytes for a URL entry or JCS-canonicalized `data` for an inline entry. These failures also return before manifest verification:
+
+```ts
+// The artifact bytes do not match the declared digest.
+{ status: 'artifact_digest_mismatch' }
+
+// The digest has the wrong length for an implemented algorithm, such as sha256:00.
+{ status: 'invalid_digest' }
+
+// The digest names an algorithm the SDK does not implement.
+{
+  status: 'digest_algorithm_not_implemented',
+  algorithm: 'blake3',
+}
+```
+
+Malformed digest syntax, such as `sha256:zz`, fails structural validation and produces `invalid_entry`.
 
 ### Interpret manifest results
 
 A manifest result of `valid` means the selected signer profile authenticated the contributor, the signed subject matches the entry and artifact, and the endorsement satisfies its time window with the configured tolerance. The result's `isPublisherEndorsement` is true only when that contribution also satisfies the `did:web` Publisher Profile. For example, the publisher for `urn:air:example.com:agent:billing` is exactly `did:web:example.com`. The SDK does not infer this relationship from an artifact URL or informational publisher metadata.
 
 A valid assessor contribution, or a valid contribution for an entry outside the Publisher Profile's identifier syntax, has `isPublisherEndorsement: false`. That value means the SDK did not establish the profile-defined publisher relationship. Applications can require a valid publisher result, particular assessors, or their own combination of evidence by inspecting the report.
+
+For example, a report with valid publisher and assessor contributions can look like this. `publisherManifest` and `assessorManifest` represent their captured manifest objects:
+
+```ts
+{
+  status: 'checked',
+  manifests: [
+    {
+      manifest: publisherManifest,
+      status: 'valid',
+      isPublisherEndorsement: true,
+    },
+    {
+      manifest: assessorManifest,
+      status: 'valid',
+      isPublisherEndorsement: false,
+    },
+  ],
+}
+```
 
 | Manifest status | Meaning |
 | --- | --- |
