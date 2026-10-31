@@ -17,11 +17,16 @@ function signCatalog(
   catalog: AICatalog,
   privateKey = trustedKeys.privateKey,
 ): AICatalog {
+  const metadata = catalog.signature ?? {
+    signer: 'did:web:catalog.example',
+    profile: 'custom-profile',
+    issuedAt: '2026-09-01T00:00:00Z',
+  };
   const protectedSegment = Buffer.from(
-    JSON.stringify({ alg: 'ES256' }),
+    JSON.stringify({ alg: 'ES256', typ: 'ai-catalog+jws' }),
   ).toString('base64url');
   const payloadSegment = Buffer.from(
-    createCatalogSignaturePayload(catalog),
+    createCatalogSignaturePayload({ ...catalog, signature: metadata }),
   ).toString('base64url');
   const signatureSegment = sign(
     'sha256',
@@ -30,7 +35,7 @@ function signCatalog(
   ).toString('base64url');
   return {
     ...catalog,
-    signature: `${protectedSegment}..${signatureSegment}`,
+    signature: { ...metadata, jws: `${protectedSegment}..${signatureSegment}` },
   };
 }
 
@@ -51,16 +56,22 @@ const unsignedCatalog = {
       identifier: 'remote',
       type: 'application/example',
       url: 'https://example.com/artifact',
-      trustManifest: {
-        identity: 'did:example:publisher',
-        issuedAt: '2026-09-01T00:00:00Z',
-        subject: {
-          identifier: 'remote',
-          type: 'application/example',
-          digest: `sha256:${'a'.repeat(64)}`,
+      trustManifests: [
+        {
+          contributor: 'did:example:publisher',
+          subject: {
+            identifier: 'remote',
+            type: 'application/example',
+            digest: `sha256:${'a'.repeat(64)}`,
+          },
+          signature: {
+            signer: 'did:example:publisher',
+            profile: 'custom-profile',
+            issuedAt: '2026-09-01T00:00:00Z',
+            jws: 'nested-trust-manifest-signature',
+          },
         },
-        signature: 'nested-trust-manifest-signature',
-      },
+      ],
     },
     {
       identifier: 'inline',
@@ -76,9 +87,9 @@ describe('checkCatalogSignature', () => {
   it('checks a catalog signature with both native public-key handles', async () => {
     const catalog = signCatalog(unsignedCatalog);
 
-    await expect(
-      checkCatalogSignature(catalog, optionsFor()),
-    ).resolves.toEqual({ status: 'valid' });
+    await expect(checkCatalogSignature(catalog, optionsFor())).resolves.toEqual(
+      { status: 'valid' },
+    );
 
     const cryptoKey = await webcrypto.subtle.importKey(
       'jwk',
@@ -98,7 +109,8 @@ describe('checkCatalogSignature', () => {
     if (
       remoteEntry === undefined ||
       inlineEntry === undefined ||
-      remoteEntry.trustManifest === undefined
+      remoteEntry.trustManifests?.[0] === undefined ||
+      remoteEntry.trustManifests[0].signature === undefined
     ) {
       throw new Error('The test catalog must contain two entries.');
     }
@@ -122,15 +134,23 @@ describe('checkCatalogSignature', () => {
         entries: [
           {
             ...remoteEntry,
-            trustManifest: {
-              ...remoteEntry.trustManifest,
-              signature: 'tampered-nested-signature',
-            },
+            trustManifests: [
+              {
+                ...remoteEntry.trustManifests[0],
+                signature: {
+                  ...remoteEntry.trustManifests[0].signature,
+                  jws: 'tampered-nested-signature',
+                },
+              },
+            ],
           },
           inlineEntry,
         ],
       } as AICatalog,
-      { ...catalog, extensions: { 'example.com/catalog': { environment: 'test' } } },
+      {
+        ...catalog,
+        extensions: { 'example.com/catalog': { environment: 'test' } },
+      },
       { ...catalog, future: { retained: false } } as AICatalog,
     ];
 
@@ -156,12 +176,18 @@ describe('checkCatalogSignature', () => {
         { ...unsignedCatalog, signature: null } as unknown as AICatalog,
         optionsFor(),
       ),
-    ).rejects.toThrow(
-      new TypeError('catalog.signature must be a string when present.'),
-    );
+    ).rejects.toThrow(TypeError);
     await expect(
       checkCatalogSignature(
-        { ...unsignedCatalog, signature: 'not-a-detached-jws' },
+        {
+          ...unsignedCatalog,
+          signature: {
+            signer: 'x',
+            profile: 'x',
+            issuedAt: '2026-01-01T00:00:00Z',
+            jws: 'not-a-detached-jws',
+          },
+        },
         optionsFor(),
       ),
     ).resolves.toEqual({ status: 'invalid_jws' });
@@ -171,6 +197,31 @@ describe('checkCatalogSignature', () => {
         optionsFor(otherKeys.publicKey),
       ),
     ).resolves.toEqual({ status: 'invalid_signature' });
+  });
+
+  it('requires the catalog-specific protected typ and forbids every b64 parameter', async () => {
+    const catalog = signCatalog(unsignedCatalog);
+    if (!catalog.signature) throw new Error('Expected signature.');
+    for (const header of [
+      { alg: 'ES256' },
+      { alg: 'ES256', typ: 'ai-catalog-trust-manifest+jws' },
+      { alg: 'ES256', typ: 'ai-catalog+jws', b64: true, crit: ['b64'] },
+      { alg: 'ES256', typ: 'ai-catalog+jws', b64: false, crit: ['b64'] },
+    ]) {
+      const protectedSegment = Buffer.from(JSON.stringify(header)).toString(
+        'base64url',
+      );
+      const changed: AICatalog = {
+        ...catalog,
+        signature: {
+          ...catalog.signature,
+          jws: `${protectedSegment}..${'A'.repeat(86)}`,
+        },
+      };
+      await expect(
+        checkCatalogSignature(changed, optionsFor()),
+      ).resolves.toEqual({ status: 'invalid_jws' });
+    }
   });
 
   it('checks signatures without requiring a schema-valid catalog', async () => {
@@ -185,7 +236,9 @@ describe('checkCatalogSignature', () => {
   });
 
   it('snapshots the complete catalog and options before asynchronous verification', async () => {
-    const catalog = signCatalog(structuredClone(unsignedCatalog)) as AICatalog & {
+    const catalog = signCatalog(
+      structuredClone(unsignedCatalog),
+    ) as AICatalog & {
       future: JsonValue;
     };
     const options = optionsFor();
@@ -194,7 +247,7 @@ describe('checkCatalogSignature', () => {
     catalog.host = { displayName: 'Mutated Catalog' };
     catalog.entries.reverse();
     catalog.future = { retained: false };
-    catalog.signature = 'mutated';
+    if (catalog.signature) catalog.signature.jws = 'mutated';
     options.publicKey = otherKeys.publicKey;
     options.expectedAlgorithm = 'ES256';
 

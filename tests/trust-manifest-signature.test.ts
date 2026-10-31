@@ -1,6 +1,5 @@
 import { Buffer } from 'node:buffer';
 import {
-  createPublicKey,
   createSecretKey,
   generateKeyPairSync,
   sign,
@@ -16,30 +15,31 @@ import {
   type SignatureCheckOptions,
 } from '../src/verification.js';
 
-// The public key is from RFC 7515 Appendix A.3. The detached signature below
-// was independently produced with node:crypto and cross-checked with jose.
-const fixedPublicJwk = {
-  kty: 'EC',
-  crv: 'P-256',
-  x: 'f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU',
-  y: 'x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0',
-} satisfies JsonWebKey;
-const fixedSignature =
-  'eyJhbGciOiJFUzI1NiJ9..' +
-  'NKmmKrtfVExTyrPwimVozLDtLRAZP0r29iJYkrBRAR7rFsM3UqsXFFH3htDDVUKWPJ-UjvgFQqOWDT97iDzT0A';
-// This cryptographic vector intentionally lacks subject.identifier; signature
-// checking does not validate the manifest schema.
-const fixedManifest = {
-  identity: 'did:example:alice',
+// This vector is signed independently with node:crypto over a literal JCS payload.
+const fixedKeys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const fixedPublicJwk = fixedKeys.publicKey.export({ format: 'jwk' });
+const metadata = {
+  signer: 'did:example:alice',
+  profile: 'custom-profile',
   issuedAt: '2026-03-15T10:00:00Z',
+};
+const fixedHeader = Buffer.from(
+  JSON.stringify({ alg: 'ES256', typ: 'ai-catalog-trust-manifest+jws' }),
+).toString('base64url');
+const fixedPayload =
+  '{"contributor":"did:example:alice","signature":{"issuedAt":"2026-03-15T10:00:00Z","profile":"custom-profile","signer":"did:example:alice"},"subject":{"digest":"sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08","type":"application/json"}}';
+const fixedSignature = `${fixedHeader}..${sign('sha256', Buffer.from(`${fixedHeader}.${Buffer.from(fixedPayload).toString('base64url')}`), { key: fixedKeys.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url')}`;
+// Signature checking deliberately does not require schema-valid subject claims.
+const fixedManifest = {
+  contributor: 'did:example:alice',
   subject: {
     digest:
       'sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
     type: 'application/json',
   },
-  signature: fixedSignature,
+  signature: { ...metadata, jws: fixedSignature },
 } as TrustManifest;
-const fixedPublicKey = createPublicKey({ key: fixedPublicJwk, format: 'jwk' });
+const fixedPublicKey = fixedKeys.publicKey;
 const fixedOptions: SignatureCheckOptions = {
   publicKey: fixedPublicKey,
   expectedAlgorithm: 'ES256',
@@ -49,7 +49,13 @@ const trustedKeys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const otherKeys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 
 function encodeHeader(header: unknown): string {
-  return Buffer.from(JSON.stringify(header)).toString('base64url');
+  return Buffer.from(
+    JSON.stringify(
+      header !== null && typeof header === 'object' && !Array.isArray(header)
+        ? { typ: 'ai-catalog-trust-manifest+jws', ...header }
+        : header,
+    ),
+  ).toString('base64url');
 }
 
 function signManifest(
@@ -59,7 +65,10 @@ function signManifest(
 ): TrustManifest {
   const protectedSegment = encodeHeader(protectedHeader);
   const payloadSegment = Buffer.from(
-    createTrustManifestSignaturePayload(manifest),
+    createTrustManifestSignaturePayload({
+      ...manifest,
+      signature: manifest.signature ?? metadata,
+    }),
   ).toString('base64url');
   const signatureSegment = sign(
     'sha256',
@@ -68,13 +77,15 @@ function signManifest(
   ).toString('base64url');
   return {
     ...manifest,
-    signature: `${protectedSegment}..${signatureSegment}`,
+    signature: {
+      ...(manifest.signature ?? metadata),
+      jws: `${protectedSegment}..${signatureSegment}`,
+    },
   };
 }
 
 function optionsFor(
-  publicKey: SignatureCheckOptions['publicKey'] =
-    trustedKeys.publicKey,
+  publicKey: SignatureCheckOptions['publicKey'] = trustedKeys.publicKey,
 ): SignatureCheckOptions {
   return { publicKey, expectedAlgorithm: 'ES256' };
 }
@@ -83,10 +94,13 @@ function replaceSignatureSegment(
   manifest: TrustManifest,
   signatureSegment: string,
 ): TrustManifest {
-  const [protectedSegment] = manifest.signature?.split('.') ?? [];
+  const [protectedSegment] = manifest.signature?.jws.split('.') ?? [];
   return {
     ...manifest,
-    signature: `${protectedSegment ?? ''}..${signatureSegment}`,
+    signature: {
+      ...(manifest.signature ?? metadata),
+      jws: `${protectedSegment ?? ''}..${signatureSegment}`,
+    },
   };
 }
 
@@ -95,7 +109,7 @@ afterEach(() => {
 });
 
 describe('checkTrustManifestSignature', () => {
-  it('checks an independently signed AI Catalog vector with both native key handles', async () => {
+  it('checks an independently signed manifest vector with both native key handles', async () => {
     await expect(
       checkTrustManifestSignature(fixedManifest, fixedOptions),
     ).resolves.toEqual({ status: 'valid' });
@@ -113,18 +127,18 @@ describe('checkTrustManifestSignature', () => {
   });
 
   it('canonicalizes member order and covers all retained manifest members', async () => {
+    if (!fixedManifest.subject || !fixedManifest.signature) throw new Error('Expected signed subject.');
     const reordered: TrustManifest = {
       signature: fixedManifest.signature,
       subject: fixedManifest.subject,
-      issuedAt: fixedManifest.issuedAt,
-      identity: fixedManifest.identity,
+      contributor: fixedManifest.contributor,
     };
     await expect(
       checkTrustManifestSignature(reordered, fixedOptions),
     ).resolves.toEqual({ status: 'valid' });
 
     const changedKnown = structuredClone(fixedManifest);
-    changedKnown.identity = 'did:example:mallory';
+    changedKnown.contributor = 'did:example:mallory';
     await expect(
       checkTrustManifestSignature(changedKnown, fixedOptions),
     ).resolves.toEqual({ status: 'invalid_signature' });
@@ -140,7 +154,7 @@ describe('checkTrustManifestSignature', () => {
   it('reports an absent signature after validating the manifest input', async () => {
     await expect(
       checkTrustManifestSignature(
-        { identity: 'did:example:unsigned' },
+        { contributor: 'did:example:unsigned' },
         fixedOptions,
       ),
     ).resolves.toEqual({ status: 'missing_signature' });
@@ -148,7 +162,7 @@ describe('checkTrustManifestSignature', () => {
     await expect(
       checkTrustManifestSignature(
         {
-          identity: 'did:example:unsigned',
+          contributor: 'did:example:unsigned',
           future: Number.NaN,
         } as unknown as TrustManifest,
         fixedOptions,
@@ -168,7 +182,7 @@ describe('checkTrustManifestSignature', () => {
   ])('rejects a malformed detached compact serialization: %j', async (signature) => {
     await expect(
       checkTrustManifestSignature(
-        { ...fixedManifest, signature },
+        { ...fixedManifest, signature: { ...metadata, jws: signature } },
         fixedOptions,
       ),
     ).resolves.toEqual({ status: 'invalid_jws' });
@@ -180,7 +194,10 @@ describe('checkTrustManifestSignature', () => {
       checkTrustManifestSignature(
         {
           ...fixedManifest,
-          signature: `eyJhbGciOiJFUzI1NiJ9..${oversizedSignature}`,
+          signature: {
+            ...metadata,
+            jws: `${fixedHeader}..${oversizedSignature}`,
+          },
         },
         fixedOptions,
       ),
@@ -190,7 +207,10 @@ describe('checkTrustManifestSignature', () => {
       checkTrustManifestSignature(
         {
           ...fixedManifest,
-          signature: `${encodeHeader({ alg: 'HS256' })}..${oversizedSignature}`,
+          signature: {
+            ...metadata,
+            jws: `${encodeHeader({ alg: 'HS256' })}..${oversizedSignature}`,
+          },
         },
         fixedOptions,
       ),
@@ -203,7 +223,10 @@ describe('checkTrustManifestSignature', () => {
       checkTrustManifestSignature(
         {
           ...fixedManifest,
-          signature: `${encodeHeader({ alg: 'ES256', crit: ['future'], future: true })}..${oversizedSignature}`,
+          signature: {
+            ...metadata,
+            jws: `${encodeHeader({ alg: 'ES256', crit: ['future'], future: true })}..${oversizedSignature}`,
+          },
         },
         fixedOptions,
       ),
@@ -220,29 +243,26 @@ describe('checkTrustManifestSignature', () => {
   ])('rejects an invalid protected header', async (signature) => {
     await expect(
       checkTrustManifestSignature(
-        { ...fixedManifest, signature },
+        { ...fixedManifest, signature: { ...metadata, jws: signature } },
         fixedOptions,
       ),
     ).resolves.toEqual({ status: 'invalid_jws' });
   });
 
-  it.each(['none', 'HS256', 'ES384', 'es256']) (
-    'reports the exact untrusted algorithm claim %s as a mismatch',
-    async (algorithm) => {
-      const manifest = signManifest(fixedManifest, { alg: algorithm });
-      await expect(
-        checkTrustManifestSignature(manifest, optionsFor()),
-      ).resolves.toEqual({ status: 'algorithm_mismatch', algorithm });
-    },
-  );
+  it.each([
+    'none',
+    'HS256',
+    'ES384',
+    'es256',
+  ])('reports the exact untrusted algorithm claim %s as a mismatch', async (algorithm) => {
+    const manifest = signManifest(fixedManifest, { alg: algorithm });
+    await expect(
+      checkTrustManifestSignature(manifest, optionsFor()),
+    ).resolves.toEqual({ status: 'algorithm_mismatch', algorithm });
+  });
 
   it('distinguishes unsupported critical features from malformed declarations', async () => {
     const unsupported = [
-      signManifest(fixedManifest, {
-        alg: 'ES256',
-        b64: false,
-        crit: ['b64'],
-      }),
       signManifest(fixedManifest, {
         alg: 'ES256',
         crit: ['future'],
@@ -263,6 +283,10 @@ describe('checkTrustManifestSignature', () => {
       { alg: 'ES256', crit: ['alg'] },
       { alg: 'ES256', b64: false },
       { alg: 'ES256', b64: true },
+      { alg: 'ES256', b64: false, crit: ['b64'] },
+      { alg: 'ES256', typ: 'wrong' },
+      { alg: 'ES256', typ: undefined },
+      { alg: 'ES256', typ: null },
       { alg: 'ES256', b64: 'true', crit: ['b64'] },
     ];
     for (const header of malformedHeaders) {
@@ -283,7 +307,7 @@ describe('checkTrustManifestSignature', () => {
         }),
         optionsFor(),
       ),
-    ).resolves.toEqual({ status: 'valid' });
+    ).resolves.toEqual({ status: 'invalid_jws' });
   });
 
   it('does not resolve keys or follow key and certificate header fields', async () => {
@@ -322,10 +346,10 @@ describe('checkTrustManifestSignature', () => {
     ).resolves.toEqual({ status: 'invalid_signature' });
 
     const signatureBytes = Buffer.from(
-      manifest.signature?.split('.')[2] ?? '',
+      manifest.signature?.jws.split('.')[2] ?? '',
       'base64url',
     );
-    signatureBytes[0] ^= 1;
+    signatureBytes[0] = (signatureBytes[0] ?? 0) ^ 1;
     await expect(
       checkTrustManifestSignature(
         replaceSignatureSegment(manifest, signatureBytes.toString('base64url')),
@@ -404,16 +428,16 @@ describe('checkTrustManifestSignature', () => {
 
   it('snapshots the manifest and options before asynchronous verification', async () => {
     const manifest = signManifest({
-      identity: 'did:example:snapshot',
+      contributor: 'did:example:snapshot',
       future: { nested: 'original' },
     } as TrustManifest & Record<string, JsonValue>) as TrustManifest &
       Record<string, JsonValue>;
     const options = optionsFor();
 
     const pending = checkTrustManifestSignature(manifest, options);
-    manifest.identity = 'did:example:mutated';
+    manifest.contributor = 'did:example:mutated';
     manifest.future = { nested: 'mutated' };
-    manifest.signature = 'mutated';
+    if (manifest.signature) manifest.signature.jws = 'mutated';
     options.publicKey = otherKeys.publicKey;
     options.expectedAlgorithm = 'ES256';
 
@@ -421,7 +445,7 @@ describe('checkTrustManifestSignature', () => {
   });
 
   it('checks signatures without requiring schema-valid trust claims', async () => {
-    const schemaInvalid = signManifest({ identity: 'not-a-uri' });
+    const schemaInvalid = signManifest({ contributor: 'not-a-uri' });
     await expect(
       checkTrustManifestSignature(schemaInvalid, optionsFor()),
     ).resolves.toEqual({ status: 'valid' });

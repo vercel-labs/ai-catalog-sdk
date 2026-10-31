@@ -28,6 +28,8 @@ export {
   type ParseResult,
   type ProvenanceLink,
   type Publisher,
+  type Signature,
+  type SignedTrustManifest,
   type TrustManifest,
   type TrustSchema,
   type TrustSubject,

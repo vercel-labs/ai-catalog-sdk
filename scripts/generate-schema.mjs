@@ -46,7 +46,8 @@ const moduleSource = `import type { JsonSchema } from '../json-schema-types.js';
  *
  * Unlike \`parseCatalog()\`, it does not require a supported specification major,
  * enforce entry uniqueness, compare a Trust Manifest subject with its
- * containing entry, or apply defensive input checks and resource limits.
+ * containing entry or signer with its contributor, compare signature timestamp
+ * ordering, or apply defensive input checks and resource limits.
  */
 export const aiCatalogJsonSchema: JsonSchema = ${JSON.stringify(schema, null, 2)};
 `;
