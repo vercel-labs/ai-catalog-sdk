@@ -50,8 +50,8 @@ interface CatalogEntryFields {
    * its format.
    *
    * Within a catalog, multiple entries may share an identifier only when every
-   * entry provides a distinct `version`. Whole-catalog parsing enforces this
-   * rule; standalone entry and schema validation do not.
+   * entry provides a distinct `version`. Authoring validation enforces this
+   * rule; ordinary parsing preserves entries in their supplied order.
    */
   identifier: string;
   displayName?: string;
@@ -171,13 +171,13 @@ export interface SignedTrustManifest extends TrustManifest {
  * payload when a signature is present.
  */
 export interface TrustSubject {
-  /** Logical artifact identifier; catalog-entry parsing requires it to match the containing entry's `identifier`. */
+  /** Logical artifact identifier; authoring validation requires it to match the containing entry's `identifier`. */
   identifier: string;
 
   /** Release version; present and equal exactly when the containing entry has `version`. */
   version?: string;
 
-  /** Type identifier for the content; catalog-entry parsing requires it to match the containing entry's `type`. */
+  /** Type identifier for the content; authoring validation requires it to match the containing entry's `type`. */
   type: string;
 
   /**
@@ -185,8 +185,8 @@ export interface TrustSubject {
    *
    * For an artifact provided through an entry's `url`, this covers the exact
    * bytes served. For inline `data`, it covers the JCS-canonicalized JSON
-   * value. SDK validation checks syntax only, not algorithm strength or
-   * artifact content.
+   * value. Authoring validation checks the declaration's syntax and known
+   * digest lengths; verification checks artifact content.
    */
   digest: string;
 
@@ -273,7 +273,7 @@ export interface ProvenanceLink {
   signatureRef?: string;
 }
 
-/** A parsing or validation issue reported by an SDK parser. */
+/** A parsing or validation issue with its location in the supplied value. */
 export interface CatalogIssue {
   /** Machine-readable category for programmatic classification. */
   code: string;
@@ -307,6 +307,22 @@ export class CatalogParseError extends Error {
   constructor(issues: readonly CatalogIssue[], cause?: unknown) {
     super('The value is not a valid AI Catalog document.');
     this.name = 'CatalogParseError';
+    this.issues = issues;
+    if (cause !== undefined) this.cause = cause;
+  }
+}
+
+/** A failure of explicit catalog authoring or manifest declaration validation. */
+export class CatalogValidationError extends Error {
+  /** Bounded diagnostics identifying invalid declarations and their paths. */
+  readonly issues: readonly CatalogIssue[];
+
+  /** The underlying error, when a lower-level check supplied one. */
+  readonly cause?: unknown;
+
+  constructor(issues: readonly CatalogIssue[], cause?: unknown) {
+    super('The supplied declarations failed validation.');
+    this.name = 'CatalogValidationError';
     this.issues = issues;
     if (cause !== undefined) this.cause = cause;
   }

@@ -87,7 +87,7 @@ try {
     join(consumerDirectory, 'smoke.mjs'),
     `import { strict as assert } from 'node:assert';
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { CatalogParseError, implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
+import { assertValidCatalog, CatalogParseError, CatalogValidationError, implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
 import { canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryTrustManifest, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(`${pkg.name}/verification`)};
@@ -95,6 +95,8 @@ import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.jso
 
 const value = { specVersion: '1.0', entries: [] };
 assert.deepEqual(parseCatalog(value).entries, []);
+assert.equal(assertValidCatalog(value), undefined);
+assert.throws(() => parseCatalog({ ...value, entries: [null] }), CatalogParseError);
 const opaqueHostManifest = { formerField: ['opaque', 1, null] };
 const catalogWithOpaqueHost = parseCatalog({
   ...value,
@@ -131,7 +133,7 @@ assert.equal(aiCatalogJsonSchema.$id, rawSchema.$id);
 assert.equal(implementedSpecRevision.commit, '9aac2c1bfa622356e45a31f3dc1d342bdb329e00');
 const decode = bytes => new TextDecoder().decode(bytes);
 assert.equal(decode(canonicalizeJsonValueToBytes({ b: 2, a: 1 })), '{"a":1,"b":2}');
-const signatureMetadata = { signer: 'did:example:alice', profile: 'custom-v1', issuedAt: '2026-08-31T00:00:00Z' };
+const signatureMetadata = { signer: 'did:example:alice', profile: 'https://example.com/profiles/custom-v1', issuedAt: '2026-08-31T00:00:00Z' };
 const payloadCatalog = {
   ...value,
   signature: { ...signatureMetadata, jws: 'excluded' },
@@ -157,8 +159,8 @@ assert.ok(sha384Digest.startsWith('sha384:'));
 assert.equal(checkDigest(Buffer.from('abc'), sha384Digest).status, 'match');
 
 const keys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-function createJws({ payload, typ }, representation = 'compact') {
-  const protectedSegment = Buffer.from(JSON.stringify({ alg: 'ES256', typ })).toString('base64url');
+function createJws({ payload, typ }, representation = 'compact', headerFields = {}) {
+  const protectedSegment = Buffer.from(JSON.stringify({ alg: 'ES256', typ, ...headerFields })).toString('base64url');
   const payloadSegment = Buffer.from(payload).toString('base64url');
   const signatureSegment = sign('sha256', Buffer.from(protectedSegment + '.' + payloadSegment), {
     key: keys.privateKey, dsaEncoding: 'ieee-p1363',
@@ -171,6 +173,7 @@ const catalogJws = createJws({ payload: createCatalogSignaturePayload(catalogFor
 const signedCatalog = { ...catalogForSignature, signature: { ...signatureMetadata, jws: catalogJws } };
 const bindingOptions = { publicKey: keys.publicKey, expectedAlgorithm: 'ES256' };
 assert.equal((await checkCatalogSignature(signedCatalog, bindingOptions)).status, 'valid');
+assertValidCatalog(signedCatalog);
 
 const artifactBytes = new TextEncoder().encode('test');
 const entry = {
@@ -181,7 +184,7 @@ const entry = {
   url: 'https://example.com/artifact.json',
 };
 const subject = { identifier: entry.identifier, version: entry.version, type: entry.type, digest: entry.digest };
-const metadata = { profile: 'custom-v1', issuedAt: signatureMetadata.issuedAt };
+const metadata = { profile: signatureMetadata.profile, issuedAt: signatureMetadata.issuedAt };
 const manifests = [];
 for (const representation of ['compact', 'detached', 'flattened']) {
   const manifest = await signTrustManifest(
@@ -191,7 +194,7 @@ for (const representation of ['compact', 'detached', 'flattened']) {
   );
   assert.equal(manifest.signature.jws.split('.')[1], '');
   assert.equal((await checkTrustManifestSignature(manifest, bindingOptions)).status, 'valid');
-  assert.equal((await checkCatalogEntryTrustManifest(entry, artifactBytes, manifest, bindingOptions)).status, 'valid');
+  assert.equal((await checkCatalogEntryTrustManifest(entry, artifactBytes, manifest, bindingOptions)).status, 'passed');
   manifests.push(manifest);
 }
 const derived = await signTrustManifest(entry, { contributor: 'did:example:alice' }, createJws, metadata);
@@ -199,7 +202,7 @@ assert.deepEqual(derived.subject, subject);
 const fixedNow = Date.parse('2026-08-31T00:00:00Z');
 assert.equal((await checkCatalogEntryTrustManifest(entry, artifactBytes, derived, {
   ...bindingOptions, nowMs: fixedNow, clockToleranceMs: 0,
-})).status, 'valid');
+})).status, 'passed');
 assert.equal((await checkCatalogEntryTrustManifest(entry, artifactBytes, derived, {
   ...bindingOptions, nowMs: fixedNow - 1, clockToleranceMs: 0,
 })).status, 'not_yet_valid');
@@ -213,21 +216,87 @@ const invalidManifest = await checkCatalogEntryTrustManifest(entry, artifactByte
   ...derived, signature: { ...derived.signature, signer: 'did:example:bob' },
 }, bindingOptions);
 assert.equal(invalidManifest.status, 'invalid_manifest');
-assert.ok(invalidManifest.error instanceof CatalogParseError);
+assert.ok(invalidManifest.error instanceof CatalogValidationError);
 assert.equal(Object.hasOwn(entry, 'trustManifests'), false);
 assert.equal(Object.hasOwn(derived.subject, 'url'), false);
-const defaultManifest = await signTrustManifest({ contributor: 'did:web:example.com', subject }, createJws);
+const defaultManifest = await signTrustManifest(
+  { contributor: 'did:web:example.com', subject },
+  input => createJws(input, 'compact', { kid: 'did:web:example.com#release-key' }),
+);
 assert.equal(defaultManifest.signature.profile, 'did-web-v1');
 assert.ok(Number.isFinite(Date.parse(defaultManifest.signature.issuedAt)));
 assert.equal(Object.hasOwn(defaultManifest.signature, 'expiresAt'), false);
 assert.equal((await checkTrustManifestSignature(defaultManifest, bindingOptions)).status, 'valid');
-const defaultEntryManifest = await signTrustManifest(entry, { contributor: 'did:web:example.com' }, createJws, {
-  expiresAt: '2100-01-01T00:00:00Z',
-});
+const defaultEntryManifest = await signTrustManifest(
+  entry,
+  { contributor: 'did:web:example.com' },
+  input => createJws(input, 'compact', { kid: 'did:web:example.com#release-key' }),
+  { expiresAt: '2100-01-01T00:00:00Z' },
+);
 assert.equal(defaultEntryManifest.signature.profile, 'did-web-v1');
 assert.equal(defaultEntryManifest.signature.expiresAt, '2100-01-01T00:00:00Z');
-assert.equal((await checkCatalogEntryTrustManifest(entry, artifactBytes, defaultEntryManifest, bindingOptions)).status, 'valid');
+assert.equal((await checkCatalogEntryTrustManifest(entry, artifactBytes, defaultEntryManifest, bindingOptions)).status, 'passed');
 const signedEntry = { ...entry, trustManifests: manifests };
+assertValidCatalog({ ...value, entries: [signedEntry] });
+assertValidCatalog({ ...value, entries: [{ ...entry, trustManifests: [expiringManifest] }] });
+const unknownAlgorithm = 'future-256:00';
+const futureAlgorithmCatalog = {
+  ...value,
+  entries: [{ ...entry, digest: unknownAlgorithm, trustManifests: [{
+    ...derived, subject: { ...derived.subject, digest: unknownAlgorithm },
+  }] }],
+};
+assertValidCatalog(futureAlgorithmCatalog);
+const declarationErrors = {
+  ...derived,
+  contributor: 'not a URI',
+  subject: { ...derived.subject, identifier: 'different artifact' },
+  signature: { ...derived.signature, profile: '', issuedAt: 'yesterday', expiresAt: 'earlier' },
+  attestations: [{ type: 'example', uri: 'https://example.com/evidence', size: -1, digest: 'sha256:zz' }],
+};
+const malformedEntry = { ...entry, trustManifests: [declarationErrors] };
+const malformedCatalog = { ...value, entries: [malformedEntry, malformedEntry] };
+assert.deepEqual(parseCatalog(malformedCatalog), malformedCatalog);
+assert.throws(() => assertValidCatalog(malformedCatalog), error =>
+  error instanceof CatalogValidationError && error.issues.length > 0,
+);
+const malformedReport = await checkCatalogEntry(malformedEntry, artifactBytes);
+assert.equal(malformedReport.status, 'checked');
+assert.equal(malformedReport.manifests[0].status, 'invalid_manifest');
+assert.ok(malformedReport.manifests[0].error instanceof CatalogValidationError);
+const excludedMalformed = await checkCatalogEntry(malformedEntry, artifactBytes, { contributors: [] });
+assert.equal(excludedMalformed.status, 'checked');
+assert.deepEqual(excludedMalformed.manifests, [{ manifest: declarationErrors, status: 'not_checked' }]);
+const malformedJwsManifest = { ...derived, signature: { ...derived.signature, jws: 'not-a-jws' } };
+assert.throws(() => assertValidCatalog({
+  ...value, entries: [{ ...entry, trustManifests: [malformedJwsManifest] }],
+}), CatalogValidationError);
+const shortDigest = 'sha256:00';
+assert.throws(() => assertValidCatalog({
+  ...value, entries: [{ ...entry, digest: shortDigest, trustManifests: [{
+    ...derived, subject: { ...derived.subject, digest: shortDigest },
+  }] }],
+}), CatalogValidationError);
+const assessor = 'did:web:auditor.example';
+const assessorManifest = await signTrustManifest(
+  entry,
+  { contributor: assessor },
+  input => createJws(input, 'compact', { kid: assessor + '#release-key' }),
+);
+assertValidCatalog({ ...value, entries: [{ ...entry, trustManifests: [assessorManifest] }] });
+const wrongKidHeader = Buffer.from(JSON.stringify({
+  alg: 'ES256', typ: 'ai-catalog-trust-manifest+jws', kid: 'did:web:other.example#key',
+})).toString('base64url');
+const wrongKidManifest = {
+  ...assessorManifest,
+  signature: { ...assessorManifest.signature, jws: wrongKidHeader + '..' + assessorManifest.signature.jws.split('.')[2] },
+};
+assert.throws(() => assertValidCatalog({
+  ...value, entries: [{ ...entry, trustManifests: [wrongKidManifest] }],
+}), CatalogValidationError);
+const sharedArtifactFailure = { status: 'artifact_digest_mismatch' };
+assert.deepEqual(await checkCatalogEntry({ ...entry, trustManifests: [malformedJwsManifest] }, new Uint8Array([0])), sharedArtifactFailure);
+assert.deepEqual(await checkCatalogEntryTrustManifest(entry, new Uint8Array([0]), malformedJwsManifest, bindingOptions), sharedArtifactFailure);
 const parsedManifests = parseCatalog({ ...value, entries: [signedEntry] }).entries[0].trustManifests;
 const report = await checkCatalogEntry(signedEntry, artifactBytes);
 assert.equal(report.status, 'checked');
@@ -257,12 +326,13 @@ const inlineSubject = {
   digest: 'sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b',
 };
 const inlineManifest = await signTrustManifest({ contributor: 'did:example:alice', subject: inlineSubject }, createJws, metadata);
-assert.equal((await checkCatalogEntryTrustManifest({ ...inlineEntry, digest: inlineSubject.digest }, inlineManifest, bindingOptions)).status, 'valid');
+assert.equal((await checkCatalogEntryTrustManifest({ ...inlineEntry, digest: inlineSubject.digest }, inlineManifest, bindingOptions)).status, 'passed');
 const unavailablePublisher = await checkCatalogEntry(inlineEntry, { contributors: [], alwaysCheckPublisherManifests: true });
 assert.deepEqual(unavailablePublisher, { status: 'checked', manifests: [] });
-const invalidEntry = await checkCatalogEntry({ ...inlineEntry, trustManifests: [{ contributor: 'did:example:alice' }] });
-assert.equal(invalidEntry.status, 'invalid_entry');
-assert.ok(invalidEntry.error.issues.some(issue => issue.path[0] === 'trustManifests'));
+const invalidManifestReport = await checkCatalogEntry({ ...inlineEntry, trustManifests: [{ contributor: 'did:example:alice' }] });
+assert.equal(invalidManifestReport.status, 'checked');
+assert.equal(invalidManifestReport.manifests[0].status, 'invalid_manifest');
+assert.ok(invalidManifestReport.manifests[0].error instanceof CatalogValidationError);
 const wrongArtifact = await checkCatalogEntry({ ...entry, digest: 'sha256:' + '0'.repeat(64) }, artifactBytes, { contributors: [] });
 assert.deepEqual(wrongArtifact, { status: 'artifact_digest_mismatch' });
 assert.deepEqual(await checkCatalogEntry({ ...inlineEntry, digest: 'sha256:00' }), { status: 'invalid_digest' });
@@ -272,10 +342,10 @@ assert.deepEqual(await checkCatalogEntry({ ...inlineEntry, digest: 'blake3:00' }
 await assert.rejects(signTrustManifest({ contributor: 'did:example:alice', subject }, input => ({
   ...createJws(input, 'flattened'), payload: 'different',
 }), metadata), TypeError);
-for (const [property, status] of [['identifier', 'identifier_mismatch'], ['version', 'version_mismatch']]) {
+for (const property of ['identifier', 'version']) {
   const result = await checkCatalogEntryTrustManifest({ ...entry, [property]: 'different' }, artifactBytes, derived, bindingOptions);
-  assert.equal(result.status, 'subject_check_failed');
-  assert.equal(result.subjectResult.status, status);
+  assert.equal(result.status, 'invalid_manifest');
+  assert.ok(result.error.issues.some(issue => issue.path.includes(property)));
 }
 const abortController = new AbortController();
 const cancellationReason = new Error('Packed consumer cancellation');
@@ -305,6 +375,9 @@ import {
   isEntryType,
   mediaTypes,
   safeParseCatalog,
+  assertValidCatalog,
+  CatalogValidationError,
+  type CatalogIssue,
 } from '${pkg.name}';
 import { aiCatalogSchema } from '${pkg.name}/zod';
 import { aiCatalogJsonSchema, type JsonSchema } from '${pkg.name}/json-schema';
@@ -335,6 +408,13 @@ import {
 import rawSchema from '${pkg.name}/schema/ai-catalog.schema.json' with { type: 'json' };
 
 const authored: AICatalog = { specVersion: '1.0', entries: [] };
+const candidate: unknown = authored;
+assertValidCatalog(candidate);
+const assertedCatalog: AICatalog = candidate;
+// @ts-expect-error Assertions do not return the catalog for serialization.
+const assertionResult: AICatalog = assertValidCatalog(authored);
+const validationDiagnostic = {} as CatalogValidationError;
+const validationIssues: readonly CatalogIssue[] = validationDiagnostic.issues;
 const authoredHost: HostInfo = {
   displayName: 'Example',
   // @ts-expect-error Host Trust Manifests are not a recognized authoring field.
@@ -418,8 +498,16 @@ checkCatalogEntry(entryWithData, new Uint8Array(), options);
 checkCatalogEntry(entryWithData, { publicKey: signaturePublicKey });
 const manifestReport = {} as CatalogEntryTrustManifestCheckResult;
 if (manifestReport.status === 'invalid_manifest') {
-  const parseError: import('${pkg.name}').CatalogParseError = manifestReport.error;
-  void parseError;
+  const validationError: CatalogValidationError = manifestReport.error;
+  void validationError;
+}
+// @ts-expect-error Signature failures are direct statuses, not nested wrappers.
+manifestReport.signatureResult;
+// @ts-expect-error Binding failures are direct statuses, not nested wrappers.
+manifestReport.subjectResult;
+if (manifestReport.status === 'digest_algorithm_not_implemented' || manifestReport.status === 'algorithm_mismatch') {
+  const algorithm: string = manifestReport.algorithm;
+  void algorithm;
 }
 const report = {} as CatalogEntryCheckResult;
 if (report.status === 'checked') {
@@ -431,7 +519,7 @@ if (report.status === 'checked') {
     // @ts-expect-error Evaluations correspond to input positions without an index field.
     evaluation.index;
     const manifest: TrustManifest = evaluation.manifest;
-    if (evaluation.status === 'valid') {
+    if (evaluation.status === 'passed') {
       const publisher: boolean = evaluation.isPublisherEndorsement;
       void publisher;
     } else {
@@ -489,6 +577,7 @@ void dataBindingCheck; void urlBindingCheck; void unionBindingCheck; void dataCh
 void urlCheck; void configuredUrlCheck; void signed; void signedFromEntry; void rawSchema;
 void signedWithDefaults; void signedEntryWithDefaults; void signedWithExpiry;
 void generatedDigest; void jsonDigest; void unionDigest;
+void assertedCatalog; void assertionResult; void validationIssues;
 `,
   );
   await writeFile(

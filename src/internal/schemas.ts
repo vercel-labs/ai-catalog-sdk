@@ -78,7 +78,7 @@ const ipvFuture = `[vV][A-Fa-f0-9]+\\.(?:[A-Za-z0-9._~-]|[!$&'()*+,;=:])+`;
 const uriHost = `(?:\\[(?:${ipv6}|${ipvFuture})\\]|${uriToken}*)`;
 const uriAuthority = `(?:(?:${uriToken}|:)*@)?${uriHost}(?::[0-9]*)?`;
 const uriHierarchy = `(?://${uriAuthority}(?:/${uriPchar}*)*|/(?:${uriPchar}+(?:/${uriPchar}*)*)?|${uriPchar}+(?:/${uriPchar}*)*|)`;
-const absoluteUriSchema = z
+export const absoluteUriSchema = z
   .string()
   .regex(
     new RegExp(
@@ -86,15 +86,23 @@ const absoluteUriSchema = z
     ),
   );
 
-export const concreteSignatureSchema = z
+export const parsedSignatureSchema = z
   .object({
+    signer: z.string(),
+    profile: z.string(),
+    issuedAt: z.string(),
+    expiresAt: z.string().exactOptional(),
+    jws: z.string(),
+  })
+  .catchall(z.json());
+
+export const concreteSignatureSchema = parsedSignatureSchema
+  .extend({
     signer: absoluteUriSchema,
     profile: z.string().min(1),
     issuedAt: rfc3339DateTimeSchema,
     expiresAt: rfc3339DateTimeSchema.exactOptional(),
-    jws: z.string(),
   })
-  .catchall(z.json())
   .refine(
     (signature) =>
       signature.expiresAt === undefined ||
@@ -274,20 +282,31 @@ export const concreteAICatalogSchema = z
   })
   .catchall(z.json());
 
+export const parsedTrustSubjectSchema = concreteTrustSubjectSchema.extend({
+  digest: z.string(),
+});
+
+export const parsedAttestationSchema = concreteAttestationSchema.extend({
+  digest: z.string().exactOptional(),
+  size: z.number().exactOptional(),
+});
+
+export const parsedProvenanceLinkSchema = concreteProvenanceLinkSchema.extend({
+  sourceDigest: z.string().exactOptional(),
+});
+
 export const trustManifestEnvelopeSchema = z
-  .union(
-    trustManifestShapes(
-      z.unknown(),
-      z.array(z.unknown()),
-      z.array(z.unknown()).min(1),
-      z.array(z.unknown()),
-      z.array(z.unknown()).min(1),
-    ),
-  )
-  .refine(contributorMatchesSigner, {
-    path: ['signature', 'signer'],
-    message: 'Signature signer must exactly equal contributor.',
-  });
+  .object({
+    contributor: z.string(),
+    trustSchema: z.unknown().exactOptional(),
+    attestations: z.array(z.unknown()).exactOptional(),
+    provenance: z.array(z.unknown()).exactOptional(),
+    subject: parsedTrustSubjectSchema.exactOptional(),
+    signature: parsedSignatureSchema.exactOptional(),
+    additionalSignatures: z.json().exactOptional(),
+    extensions: jsonObjectSchema.exactOptional(),
+  })
+  .catchall(z.json());
 
 export const trustSchemaEnvelopeSchema = z
   .object({
@@ -315,9 +334,9 @@ const entryEnvelopeCommonShape = {
   description: z.string().exactOptional(),
   tags: z.array(z.unknown()).exactOptional(),
   publisher: concretePublisherSchema.exactOptional(),
-  digest: digestSchema.exactOptional(),
+  digest: z.string().exactOptional(),
   trustManifests: z.array(z.unknown()).exactOptional(),
-  updatedAt: rfc3339DateTimeSchema.exactOptional(),
+  updatedAt: z.string().exactOptional(),
   extensions: jsonObjectSchema.exactOptional(),
 };
 
@@ -344,7 +363,7 @@ export const aiCatalogEnvelopeSchema = z
     host: z.unknown().exactOptional(),
     entries: z.array(z.unknown()),
     extensions: jsonObjectSchema.exactOptional(),
-    signature: concreteSignatureSchema.exactOptional(),
+    signature: parsedSignatureSchema.exactOptional(),
     additionalSignatures: z.json().exactOptional(),
   })
   .catchall(z.json());

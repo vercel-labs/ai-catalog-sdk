@@ -5,7 +5,7 @@ import canonicalize from 'canonicalize';
 import { flattenedVerify } from 'jose/jws/flattened/verify';
 import * as joseErrors from 'jose/errors';
 
-import { DIGEST_PATTERN } from './internal/digest.js';
+import { DIGEST_PATTERN, DIGEST_HEX_LENGTHS } from './internal/digest.js';
 import { preflightJsonValue } from './internal/json-value.js';
 import { resolveDidWeb } from './internal/did-web.js';
 import {
@@ -19,8 +19,9 @@ import {
   safeParseCatalogEntry,
   safeParseTrustManifest,
 } from './internal/parser.js';
+import { validateTrustManifest } from './internal/validation.js';
+import { CatalogParseError, CatalogValidationError } from './types.js';
 import type {
-  CatalogParseError,
   Signature,
   AICatalog,
   CatalogEntry,
@@ -51,21 +52,6 @@ const registeredJoseHeaderParameters = new Set([
   'crit',
 ]);
 
-const digestImplementations = {
-  sha256: {
-    nodeName: 'sha256',
-    hexLength: 64,
-  },
-  sha384: {
-    nodeName: 'sha384',
-    hexLength: 96,
-  },
-  sha512: {
-    nodeName: 'sha512',
-    hexLength: 128,
-  },
-} as const;
-
 /** Digest algorithms supported for creating AI Catalog digests. */
 export type DigestAlgorithm = 'sha256' | 'sha384' | 'sha512';
 
@@ -89,22 +75,10 @@ interface SignatureCheckSnapshot extends SignaturePayloadSnapshot {
   publicKey: webcrypto.CryptoKey | KeyObject;
 }
 
-type TrustSubjectSnapshot =
-  | { kind: 'missing' }
-  | { kind: 'invalid' }
-  | {
-      kind: 'present';
-      identifier: unknown;
-      hasVersion: boolean;
-      version: unknown;
-      type: unknown;
-      digest: unknown;
-    };
-
 function isImplementedDigestAlgorithm(
   algorithm: string,
 ): algorithm is DigestAlgorithm {
-  return Object.hasOwn(digestImplementations, algorithm);
+  return Object.hasOwn(DIGEST_HEX_LENGTHS, algorithm);
 }
 
 function assertStableBytes(bytes: unknown): asserts bytes is Uint8Array {
@@ -298,35 +272,6 @@ function assertCatalogEntryObject(
   }
 }
 
-function snapshotTrustSubject(manifest: TrustManifest): TrustSubjectSnapshot {
-  const descriptor = Object.getOwnPropertyDescriptor(manifest, 'subject');
-  if (!descriptor) return { kind: 'missing' };
-
-  // The signature payload preflight has already rejected accessors, proxies,
-  // and non-JSON members throughout the manifest.
-  const subject = 'value' in descriptor ? descriptor.value : undefined;
-  if (
-    subject === null ||
-    typeof subject !== 'object' ||
-    Array.isArray(subject)
-  ) {
-    return { kind: 'invalid' };
-  }
-
-  const versionDescriptor = Object.getOwnPropertyDescriptor(subject, 'version');
-  return {
-    kind: 'present',
-    identifier: readOwnDataProperty(subject, 'identifier'),
-    hasVersion: versionDescriptor !== undefined,
-    version:
-      versionDescriptor && 'value' in versionDescriptor
-        ? versionDescriptor.value
-        : undefined,
-    type: readOwnDataProperty(subject, 'type'),
-    digest: readOwnDataProperty(subject, 'digest'),
-  };
-}
-
 function assertEs256PublicKey(
   publicKey: unknown,
 ): asserts publicKey is webcrypto.CryptoKey | KeyObject {
@@ -502,15 +447,7 @@ function inspectDetachedJws(
   if (unsupportedCriticalFeature) {
     return { status: 'jws_feature_not_implemented' };
   }
-  if (value.length - signatureStart !== 86) {
-    return { status: 'invalid_signature' };
-  }
-
   const signatureSegment = value.slice(signatureStart);
-  const signatureBytes = Buffer.from(signatureSegment, 'base64url');
-  if (signatureBytes.length !== 64) {
-    return { status: 'invalid_signature' };
-  }
 
   return { protectedHeader, protectedSegment, signatureSegment };
 }
@@ -546,21 +483,21 @@ export type SignatureCheckResult =
   | { status: 'jws_feature_not_implemented' }
   | { status: 'invalid_signature' };
 
-/** A failed comparison between a signed subject and its entry/artifact. */
-export type SubjectCheckFailure =
-  | { status: 'missing_subject' }
-  | { status: 'identifier_mismatch' }
-  | { status: 'version_mismatch' }
-  | { status: 'type_mismatch' }
-  | { status: 'digest_mismatch' }
-  | Exclude<DigestCheckResult, { status: 'match' }>;
+type ArtifactCheckFailure =
+  | { status: 'artifact_digest_mismatch' }
+  | { status: 'invalid_digest' }
+  | { status: 'digest_algorithm_not_implemented'; algorithm: string };
+
+type EntryCheckFailure =
+  | { status: 'invalid_entry'; error: CatalogParseError }
+  | ArtifactCheckFailure;
 
 /** The outcome of checking one explicit manifest using a caller-selected key. */
 export type CatalogEntryTrustManifestCheckResult =
-  | { status: 'valid' }
-  | { status: 'invalid_manifest'; error: CatalogParseError }
-  | { status: 'signature_check_failed'; signatureResult: SignatureCheckFailure }
-  | { status: 'subject_check_failed'; subjectResult: SubjectCheckFailure }
+  | { status: 'passed' }
+  | EntryCheckFailure
+  | { status: 'invalid_manifest'; error: CatalogValidationError }
+  | SignatureCheckFailure
   | { status: 'not_yet_valid' }
   | { status: 'expired' };
 
@@ -597,13 +534,12 @@ export interface CatalogEntryCheckOptions {
 /** One contribution's outcome; a valid contribution need not be from the publisher. */
 export type TrustManifestCheckResult =
   | { status: 'not_checked' }
-  | { status: 'valid'; isPublisherEndorsement: boolean }
-  | { status: 'missing_signature' }
+  | { status: 'passed'; isPublisherEndorsement: boolean }
+  | { status: 'invalid_manifest'; error: CatalogValidationError }
+  | SignatureCheckFailure
   | { status: 'profile_not_implemented'; profile: string }
   | { status: 'profile_check_failed'; error: Error }
   | { status: 'issuer_check_failed'; error: Error }
-  | { status: 'signature_check_failed'; signatureResult: SignatureCheckFailure }
-  | { status: 'subject_check_failed'; subjectResult: SubjectCheckFailure }
   | { status: 'not_yet_valid' }
   | { status: 'expired' };
 
@@ -614,10 +550,7 @@ export type TrustManifestEvaluation = TrustManifestCheckResult & {
 
 /** A report of the requested checks, without an application acceptance policy. */
 export type CatalogEntryCheckResult =
-  | { status: 'invalid_entry'; error: CatalogParseError }
-  | { status: 'artifact_digest_mismatch' }
-  | { status: 'invalid_digest' }
-  | { status: 'digest_algorithm_not_implemented'; algorithm: string }
+  | EntryCheckFailure
   | { status: 'checked'; manifests: TrustManifestEvaluation[] };
 
 /** Signature metadata before JWS creation, or a completed signature. */
@@ -791,6 +724,8 @@ async function executeSignatureCheck(
   snapshot: SignatureCheckSnapshot | SignatureCheckResult,
 ): Promise<SignatureCheckResult> {
   if ('status' in snapshot) return snapshot;
+  if (Buffer.from(snapshot.jws.signatureSegment, 'base64url').length !== 64)
+    return { status: 'invalid_signature' };
 
   try {
     await flattenedVerify(
@@ -884,8 +819,8 @@ export async function checkTrustManifestSignature(
 }
 
 /**
- * Reports the first failure in this order: manifest structure, supplied-key
- * signature, subject/artifact binding, and time-window acceptance.
+ * Checks entry/artifact preconditions, then reports manifest declaration,
+ * supplied-key signature, and time-window failures in that order.
  * An `expired` or `not_yet_valid` result means the preceding checks passed.
  * The caller selects the signer profile and authenticates/authorizes the key;
  * this operation performs no network requests or whole-entry validation.
@@ -912,23 +847,30 @@ export async function checkCatalogEntryTrustManifest(
   const rawOptions = isDataCall ? manifestOrOptions : maybeOptions;
   const options = snapshotSignatureCheckOptions(rawOptions);
   const timeOptions = snapshotTimeCheckOptions(rawOptions as object);
-  const artifact = captureArtifactContext(entry, bytesOrManifest, isDataCall);
+  const artifact = precheckArtifact(entry, bytesOrManifest, isDataCall);
+  if ('status' in artifact) return artifact;
   const input = isDataCall ? bytesOrManifest : manifestOrOptions;
   assertCanonicalizableJsonObject(input, 'manifest');
   const parsed = safeParseTrustManifest(input);
-  if (!parsed.success) return { status: 'invalid_manifest', error: parsed.error };
+  if (!parsed.success)
+    return {
+      status: 'invalid_manifest',
+      error: new CatalogValidationError(
+        parsed.error.issues,
+        parsed.error.cause,
+      ),
+    };
   const manifest = parsed.data;
+  const error = validateTrustManifest(manifest, artifact.entry);
+  if (error !== undefined) return { status: 'invalid_manifest', error };
+  if (manifest.signature === undefined) return { status: 'missing_signature' };
   const signature = snapshotSignaturePayload(manifest, 'manifest');
-  const subjectResult = checkSubject(artifact.entry, manifest, artifact.bytes);
   const signatureResult = await executeSignatureCheck(
     'status' in signature
       ? signature
       : { ...signature, publicKey: options.publicKey },
   );
-  if (signatureResult.status !== 'valid')
-    return { status: 'signature_check_failed', signatureResult };
-  if (subjectResult.status !== 'match')
-    return { status: 'subject_check_failed', subjectResult };
+  if (signatureResult.status !== 'valid') return signatureResult;
   if (manifest.signature !== undefined) {
     const time = checkManifestTime(
       manifest.signature,
@@ -937,14 +879,15 @@ export async function checkCatalogEntryTrustManifest(
     );
     if (time !== undefined) return { status: time };
   }
-  return { status: 'valid' };
+  return { status: 'passed' };
 }
 
-function captureArtifactContext(
+/** Capture the shared entry coordinates and check its declared artifact once. */
+function precheckArtifact(
   entry: CatalogEntry,
   bytes: unknown,
   isDataCall: boolean,
-): { entry: CatalogEntry; bytes: Uint8Array } {
+): { entry: CatalogEntry } | EntryCheckFailure {
   assertCatalogEntryObject(entry);
   const identifier = readRequiredEntryProperty(entry, 'identifier');
   const type = readRequiredEntryProperty(entry, 'type');
@@ -969,50 +912,55 @@ function captureArtifactContext(
     );
   if (url.present && typeof url.value !== 'string')
     throw new TypeError('entry.url must be a string.');
-  let artifactBytes: Uint8Array;
-  if (data.present)
-    artifactBytes = canonicalizeJsonValueToBytes(data.value as JsonValue);
-  else {
-    assertStableBytes(bytes);
-    artifactBytes = bytes;
+  if (!data.present) assertStableBytes(bytes);
+  if (data.present) {
+    const shapeIssue = preflightJsonValue(data.value, {
+      allowOwnProtoMember: true,
+      isDisallowedObject: utilTypes.isProxy,
+      requireIJsonStrings: false,
+    });
+    if (shapeIssue)
+      throw new (shapeIssue.code === 'resource_limit' ? RangeError : TypeError)(
+        shapeIssue.message,
+      );
   }
-  const captured = {
-    identifier,
-    type,
-    ...(version.present ? { version: version.value as string } : {}),
-    ...(digest.present ? { digest: digest.value as string } : {}),
-    ...(data.present ? { data: null } : { url: url.value as string }),
-  } as CatalogEntry;
-  return { entry: captured, bytes: artifactBytes };
-}
-
-function checkSubject(
-  entry: CatalogEntry,
-  manifest: TrustManifest,
-  bytes: Uint8Array,
-  digestResult?: DigestCheckResult,
-): { status: 'match' } | SubjectCheckFailure {
-  const subject = snapshotTrustSubject(manifest);
-  if (subject.kind === 'missing') return { status: 'missing_subject' };
-  if (subject.kind === 'invalid')
-    throw new TypeError('manifest.subject must be an object.');
-  if (
-    typeof subject.identifier !== 'string' ||
-    typeof subject.type !== 'string' ||
-    typeof subject.digest !== 'string' ||
-    (subject.hasVersion && typeof subject.version !== 'string')
-  )
-    throw new TypeError('Subject coordinates and digest must be strings.');
-  if (subject.identifier !== entry.identifier)
-    return { status: 'identifier_mismatch' };
-  if (
-    subject.hasVersion !== Object.hasOwn(entry, 'version') ||
-    subject.version !== entry.version
-  )
-    return { status: 'version_mismatch' };
-  if (subject.type !== entry.type) return { status: 'type_mismatch' };
-  if (subject.digest !== entry.digest) return { status: 'digest_mismatch' };
-  return digestResult ?? checkDigest(bytes, subject.digest);
+  if (digest.present) {
+    if (data.present) {
+      const issue = preflightJsonValue(data.value, {
+        allowOwnProtoMember: true,
+        isDisallowedObject: utilTypes.isProxy,
+        requireIJsonStrings: true,
+      });
+      if (issue)
+        return {
+          status: 'invalid_entry',
+          error: new CatalogParseError([
+            { ...issue, path: ['data', ...issue.path] },
+          ]),
+        };
+    }
+    const artifactBytes = data.present
+      ? canonicalizeJsonValueToBytes(data.value as JsonValue)
+      : (bytes as Uint8Array);
+    const result = checkDigest(artifactBytes, digest.value as string);
+    if (result.status === 'mismatch')
+      return { status: 'artifact_digest_mismatch' };
+    if (result.status === 'invalid_digest') return result;
+    if (result.status === 'algorithm_not_implemented')
+      return {
+        status: 'digest_algorithm_not_implemented',
+        algorithm: result.algorithm,
+      };
+  }
+  return {
+    entry: {
+      identifier,
+      type,
+      ...(version.present ? { version: version.value as string } : {}),
+      ...(digest.present ? { digest: digest.value as string } : {}),
+      ...(data.present ? { data: null } : { url: url.value as string }),
+    } as CatalogEntry,
+  };
 }
 
 function throwIfCanceled(signal: AbortSignal | undefined): void {
@@ -1161,25 +1109,6 @@ function snapshotEntryCheckOptions(value: unknown): CapturedEntryCheckOptions {
   };
 }
 
-/** Copy accepted JSON data without adding canonicalization-only restrictions. */
-function captureJson(value: JsonValue): JsonValue {
-  if (Array.isArray(value)) {
-    const result: JsonValue[] = [];
-    for (let index = 0; index < value.length; index += 1)
-      result[index] = captureJson(
-        readOwnDataProperty(value, String(index)) as JsonValue,
-      );
-    return result;
-  }
-  if (value !== null && typeof value === 'object') {
-    const result: Record<string, JsonValue> = Object.create(null);
-    for (const key of Object.keys(value))
-      result[key] = captureJson(readOwnDataProperty(value, key) as JsonValue);
-    return result;
-  }
-  return value;
-}
-
 /**
  * Validates entry structure and its declared artifact digest, then reports
  * every contribution, using `not_checked` for unselected manifests.
@@ -1218,39 +1147,20 @@ export async function checkCatalogEntry(
     throw new (inputIssue.code === 'resource_limit' ? RangeError : TypeError)(
       inputIssue.message,
     );
-  const captured = captureJson(
-    entry as unknown as JsonValue,
-  ) as unknown as CatalogEntry;
+  // The bounded parser captures known and unknown JSON members synchronously.
   // Validate overload shape before reporting structural failures.
-  const hasData = Object.hasOwn(captured, 'data');
-  if ((hasData || Object.hasOwn(captured, 'url')) && hasData !== isDataCall)
+  const hasData = Object.hasOwn(entry, 'data');
+  if ((hasData || Object.hasOwn(entry, 'url')) && hasData !== isDataCall)
     throw new TypeError(
       'URL entries require artifact bytes; inline entries do not accept artifact bytes.',
     );
   if (!isDataCall) assertStableBytes(bytesOrOptions);
-  const parsed = safeParseCatalogEntry(captured);
+  const parsed = safeParseCatalogEntry(entry);
   if (!parsed.success) return { status: 'invalid_entry', error: parsed.error };
   const snapshot = parsed.data;
   const publisher = publisherIdentityFor(snapshot.identifier);
-  let artifactBytes: Uint8Array = new Uint8Array();
-  let digestResult: DigestCheckResult = { status: 'match' };
-  if (snapshot.digest !== undefined) {
-    artifactBytes = hasData
-      ? canonicalizeJsonValueToBytes((snapshot as CatalogEntryWithData).data)
-      : (bytesOrOptions as Uint8Array);
-    digestResult = checkDigest(artifactBytes, snapshot.digest);
-    switch (digestResult.status) {
-      case 'mismatch':
-        return { status: 'artifact_digest_mismatch' };
-      case 'invalid_digest':
-        return digestResult;
-      case 'algorithm_not_implemented':
-        return {
-          status: 'digest_algorithm_not_implemented',
-          algorithm: digestResult.algorithm,
-        };
-    }
-  }
+  const artifact = precheckArtifact(snapshot, bytesOrOptions, isDataCall);
+  if ('status' in artifact) return artifact;
   const resolutions = new Map<string, Promise<unknown>>();
   const resolutionOptions = {
     timeoutMs: options.timeoutMs,
@@ -1266,73 +1176,57 @@ export async function checkCatalogEntry(
         manifest.contributor === publisher);
     let result: TrustManifestCheckResult;
     if (!selected) result = { status: 'not_checked' };
-    else if (manifest.signature === undefined)
-      result = { status: 'missing_signature' };
-    else if (manifest.signature.profile !== 'did-web-v1')
-      result = {
-        status: 'profile_not_implemented',
-        profile: manifest.signature.profile,
-      };
     else {
-      const signature = snapshotSignaturePayload(manifest, 'manifest');
-      const header =
-        'status' in signature
-          ? decodeProtectedHeader(manifest.signature.jws)
-          : signature.jws.protectedHeader;
-      const profile =
-        header === undefined
-          ? undefined
-          : inspectSignerProfile(manifest, header);
-      if (profile instanceof Error)
-        result = { status: 'profile_check_failed', error: profile };
-      else if ('status' in signature)
+      const error = validateTrustManifest(manifest, snapshot);
+      if (error !== undefined) result = { status: 'invalid_manifest', error };
+      else if (manifest.signature === undefined)
+        result = { status: 'missing_signature' };
+      else if (manifest.signature.profile !== 'did-web-v1')
         result = {
-          status: 'signature_check_failed',
-          signatureResult: signature,
-        };
-      else if (profile === undefined)
-        result = {
-          status: 'signature_check_failed',
-          signatureResult: { status: 'invalid_jws' },
+          status: 'profile_not_implemented',
+          profile: manifest.signature.profile,
         };
       else {
-        const subjectResult = checkSubject(
-          snapshot,
-          manifest,
-          artifactBytes,
-          digestResult,
-        );
-        if (subjectResult.status !== 'match')
-          result = { status: 'subject_check_failed', subjectResult };
+        const signature = snapshotSignaturePayload(manifest, 'manifest');
+        if ('status' in signature) result = signature;
         else {
-          try {
-            let document = resolutions.get(profile.identity);
-            if (document === undefined) {
-              document = resolveDidWeb(profile.identity, resolutionOptions);
-              resolutions.set(profile.identity, document);
+          const profile = inspectSignerProfile(
+            manifest,
+            signature.jws.protectedHeader,
+          );
+          if (profile instanceof Error)
+            result = { status: 'profile_check_failed', error: profile };
+          else {
+            try {
+              let document = resolutions.get(profile.identity);
+              if (document === undefined) {
+                document = resolveDidWeb(profile.identity, resolutionOptions);
+                resolutions.set(profile.identity, document);
+              }
+              const publicKey = authorizePublisherKey(
+                await document,
+                profile.identity,
+                profile.kid,
+              );
+              throwIfCanceled(options.signal);
+              const signatureResult = await executeSignatureCheck({
+                ...signature,
+                publicKey,
+              });
+              throwIfCanceled(options.signal);
+              result =
+                signatureResult.status === 'valid'
+                  ? {
+                      status: 'passed',
+                      isPublisherEndorsement:
+                        manifest.contributor === publisher,
+                    }
+                  : signatureResult;
+            } catch (error) {
+              throwIfCanceled(options.signal);
+              if (!(error instanceof IssuerCheckError)) throw error;
+              result = { status: 'issuer_check_failed', error };
             }
-            const publicKey = authorizePublisherKey(
-              await document,
-              profile.identity,
-              profile.kid,
-            );
-            throwIfCanceled(options.signal);
-            const signatureResult = await executeSignatureCheck({
-              ...signature,
-              publicKey,
-            });
-            throwIfCanceled(options.signal);
-            result =
-              signatureResult.status === 'valid'
-                ? {
-                    status: 'valid',
-                    isPublisherEndorsement: manifest.contributor === publisher,
-                  }
-                : { status: 'signature_check_failed', signatureResult };
-          } catch (error) {
-            throwIfCanceled(options.signal);
-            if (!(error instanceof IssuerCheckError)) throw error;
-            result = { status: 'issuer_check_failed', error };
           }
         }
       }
@@ -1344,7 +1238,7 @@ export async function checkCatalogEntry(
   for (let index = 0; index < results.length; index += 1) {
     const evaluation = results[index];
     if (
-      evaluation?.status !== 'valid' ||
+      evaluation?.status !== 'passed' ||
       evaluation.manifest.signature === undefined
     )
       continue;
@@ -1364,9 +1258,7 @@ export async function checkCatalogEntry(
 
 function digestHex(bytes: Uint8Array, algorithm: DigestAlgorithm): string {
   try {
-    return createHash(digestImplementations[algorithm].nodeName)
-      .update(bytes)
-      .digest('hex');
+    return createHash(algorithm).update(bytes).digest('hex');
   } catch (cause) {
     throw new DigestAlgorithmUnavailableError(algorithm, cause);
   }
@@ -1435,8 +1327,7 @@ export function checkDigest(
     return { status: 'algorithm_not_implemented', algorithm };
   }
 
-  const implementation = digestImplementations[algorithm];
-  if (expectedHex.length !== implementation.hexLength) {
+  if (expectedHex.length !== DIGEST_HEX_LENGTHS[algorithm]) {
     return { status: 'invalid_digest' };
   }
 

@@ -16,6 +16,7 @@ export {
 export { implementedSpecRevision } from './spec-revision.js';
 export {
   CatalogParseError,
+  CatalogValidationError,
   type AICatalog,
   type Attestation,
   type CatalogEntry,
@@ -34,3 +35,4 @@ export {
   type TrustSchema,
   type TrustSubject,
 } from './types.js';
+export { assertValidCatalog } from './internal/validation.js';

@@ -1,6 +1,6 @@
 # Verification utilities
 
-Verification and signing utilities are available from `ai-catalog-sdk/verification`. Parsing establishes structure; verification establishes only the claims described by each operation. Applications decide which endorsements and contributors satisfy their requirements.
+Verification and signing utilities are available from `ai-catalog-sdk/verification`. Authoring validation checks a catalog’s declarations and internal consistency. Verification checks signatures, artifact binding, and the applicable authentication and time requirements. Applications decide which endorsements satisfy their requirements.
 
 ## Check a catalog entry
 
@@ -12,15 +12,15 @@ import { checkCatalogEntry } from 'ai-catalog-sdk/verification';
 const report = await checkCatalogEntry(entryWithUrl, artifactBytes);
 
 if (report.status === 'checked') {
-  const acceptedManifests = report.manifests
-    .filter(result => result.status === 'valid')
+  const passingManifests = report.manifests
+    .filter(result => result.status === 'passed')
     .map(result => result.manifest);
 }
 ```
 
 For an entry with `url`, supply the artifact bytes obtained by your application as a `Uint8Array`. For an entry with `data`, call `checkCatalogEntry(entryWithData)`; the SDK applies JCS canonicalization to `entry.data` when checking the declared digest. Signed manifests require the digest to be present.
 
-The function performs bounded structural validation across the entire entry, including unselected manifests. A `CatalogEntryCheckResult` with `report.status === 'checked'` can look like this:
+The function checks the entry’s field shapes and declared artifact digest before evaluating individual manifests. Invalid declarations or an unusable signed payload in one selected manifest produce that manifest’s failure result while the other contributions are evaluated independently. A `CatalogEntryCheckResult` with `report.status === 'checked'` can look like this:
 
 ```ts
 {
@@ -37,7 +37,7 @@ The function performs bounded structural validation across the entire entry, inc
 }
 ```
 
-The outer `report.status` of `checked` means the requested checks completed; it does not require an accepted endorsement. In this example, `report.manifests[0].status` is `missing_signature`, so the manifest is unsigned metadata.
+The outer `report.status` of `checked` means the requested checks completed; it does not require a passing endorsement. In this example, `report.manifests[0].status` is `missing_signature`, so the manifest is unsigned metadata.
 
 `report.manifests` contains one result per attached manifest, in the same order, including repeated contributors. Manifests excluded by the contributor options receive `not_checked`. An entry without manifests produces an empty array.
 
@@ -58,7 +58,7 @@ When the entry declares a digest, the SDK checks it against the supplied artifac
 // The artifact bytes do not match the declared digest.
 { status: 'artifact_digest_mismatch' }
 
-// The digest has the wrong length for an implemented algorithm, such as sha256:00.
+// The digest syntax or an implemented algorithm’s digest length is invalid.
 { status: 'invalid_digest' }
 
 // The digest names an algorithm the SDK does not implement.
@@ -68,15 +68,13 @@ When the entry declares a digest, the SDK checks it against the supplied artifac
 }
 ```
 
-Malformed digest syntax, such as `sha256:zz`, fails structural validation and produces `invalid_entry`.
-
 ### Interpret manifest results
 
-A manifest result of `valid` means the selected signer profile authenticated the contributor, the signed subject matches the entry and artifact, and the endorsement satisfies its time window with the configured tolerance. The result's `isPublisherEndorsement` is true only when that contribution also satisfies the `did:web` Publisher Profile. For example, the publisher for `urn:air:example.com:agent:billing` is exactly `did:web:example.com`. The SDK does not infer this relationship from an artifact URL or informational publisher metadata.
+In a `checkCatalogEntry()` report, `passed` means the selected signer profile authenticated the contributor, the signed subject matches the entry and artifact, and the endorsement satisfies its time window with the configured tolerance. The result's `isPublisherEndorsement` is true only when that contribution also satisfies the `did:web` Publisher Profile. For example, the publisher for `urn:air:example.com:agent:billing` is exactly `did:web:example.com`. The SDK does not infer this relationship from an artifact URL or informational publisher metadata.
 
-A valid assessor contribution, or a valid contribution for an entry outside the Publisher Profile's identifier syntax, has `isPublisherEndorsement: false`. That value means the SDK did not establish the profile-defined publisher relationship. Applications can require a valid publisher result, particular assessors, or their own combination of evidence by inspecting the report.
+A passing assessor contribution, or a passing contribution for an entry outside the Publisher Profile's identifier syntax, has `isPublisherEndorsement: false`. That value means the SDK did not establish the profile-defined publisher relationship. Applications can require a passing publisher result, particular assessors, or their own combination of evidence by inspecting the report.
 
-For example, a report with valid publisher and assessor contributions can look like this. `publisherManifest` and `assessorManifest` represent their captured manifest objects:
+For example, a report with passing publisher and assessor contributions can look like this. `publisherManifest` and `assessorManifest` represent their captured manifest objects:
 
 ```ts
 {
@@ -84,32 +82,44 @@ For example, a report with valid publisher and assessor contributions can look l
   manifests: [
     {
       manifest: publisherManifest,
-      status: 'valid',
+      status: 'passed',
       isPublisherEndorsement: true,
     },
     {
       manifest: assessorManifest,
-      status: 'valid',
+      status: 'passed',
       isPublisherEndorsement: false,
     },
   ],
 }
 ```
 
-| Manifest status | Meaning |
-| --- | --- |
-| `not_checked` | The contributor options excluded this manifest from verification. |
-| `valid` | Contributor authentication, signature, subject binding, and time-window checks passed. Includes `isPublisherEndorsement`. |
-| `missing_signature` | The manifest is unsigned metadata. |
-| `profile_not_implemented` | The exact selected `profile` is not implemented. No fallback profile is tried. |
-| `profile_check_failed` | The manifest or JWS does not satisfy the supported profile. `error` explains the failure. |
-| `issuer_check_failed` | DID resolution, DID document validation, or key authorization failed. `error` explains the failure. |
-| `signature_check_failed` | `signatureResult` contains the lower-level signature failure. |
-| `subject_check_failed` | `subjectResult` contains the lower-level binding failure. |
-| `not_yet_valid` | The authenticated issuance time is later than the evaluation time plus tolerance. |
-| `expired` | The evaluation time has reached expiration plus tolerance. |
+### Check results
 
-Only `valid` results authenticate an endorsement for this entry. None of these results establish claim accuracy, publisher reputation, attestation validity, or artifact safety. The operation does not authenticate the surrounding catalog or validate the artifact's format-specific schema.
+`checkCatalogEntryTrustManifest()` returns its result directly. `checkCatalogEntry()` returns entry-precheck failures directly, or a `checked` report containing the individual results in `manifests`. Both functions use the following statuses. Rows follow failure precedence within the applicable entry and selected-manifest checks; a failure in one contribution does not stop evaluation of the others.
+
+| Status | Description |
+| --- | --- |
+| `invalid_entry` | The entry’s field shapes are invalid (`checkCatalogEntry()`), or inline data cannot satisfy JCS for the declared digest (either function). `error` is a `CatalogParseError` with path-specific `issues`. |
+| `invalid_digest` | The entry’s declared artifact digest has invalid syntax or an incorrect length for an implemented algorithm. |
+| `digest_algorithm_not_implemented` | The entry’s artifact digest names an algorithm the SDK does not implement. Includes `algorithm`. |
+| `artifact_digest_mismatch` | The supplied artifact bytes, or JCS-canonicalized inline data, do not match the entry’s declared digest. |
+| `not_checked` | `checkCatalogEntry()` only. The contributor options excluded this manifest. This is a selection outcome. |
+| `invalid_manifest` | The manifest’s metadata, required content, or subject/entry correspondence is invalid, or its signed payload cannot satisfy JCS. `error` is a `CatalogValidationError` with path-specific `issues`. |
+| `missing_signature` | The manifest is unsigned metadata. |
+| `profile_not_implemented` | `checkCatalogEntry()` only. The selected signer profile is not implemented. Includes `profile`; no fallback profile is tried. |
+| `invalid_jws` | The JWS is malformed or violates its required representation or common headers. |
+| `algorithm_mismatch` | The protected `alg` differs from the expected algorithm. Includes the claimed `algorithm`. |
+| `jws_feature_not_implemented` | A well-formed critical JWS extension is unsupported. |
+| `profile_check_failed` | `checkCatalogEntry()` only. The manifest or JWS does not satisfy the supported signer profile. `error` explains the failure. |
+| `issuer_check_failed` | `checkCatalogEntry()` only. DID resolution, DID document validation, or key authorization failed. `error` explains the failure. |
+| `invalid_signature` | The signature does not verify under the selected key. |
+| `not_yet_valid` | Issuance is later than the evaluation time plus tolerance. The preceding checks passed. |
+| `expired` | The evaluation time has reached expiration plus tolerance. The preceding checks passed. |
+| `passed` | The individual manifest passed the operation’s checks. In a `checkCatalogEntry()` report, includes `isPublisherEndorsement`. |
+| `checked` | `checkCatalogEntry()` only. The entry report completed, and `manifests` contains its individual outcomes. This can include no passing contributions or no manifests. |
+
+The supplied-key operation relies on the caller to authenticate and authorize its key; the automatic-profile operation performs that authentication itself. Neither establishes claim accuracy, publisher reputation, attestation validity, or artifact safety. These operations do not authenticate the surrounding catalog or validate the artifact’s format-specific schema.
 
 ### Select contributors
 
@@ -263,16 +273,11 @@ const resultForEntryWithData = await checkCatalogEntryTrustManifest(
 );
 ```
 
-The manifest need not already be attached to the entry. The function expects a typed or previously parsed entry and does not rerun whole-entry structural validation. It reports the first failure in this order:
+The manifest need not already be attached to the entry. The function expects a typed or previously parsed entry and does not rerun whole-entry structural validation. It checks the entry’s declared artifact digest first, then the supplied manifest’s declarations and subject correspondence, its signature, and its time window. See the shared [check results](#check-results) for statuses and precedence.
 
-1. Manifest structure, including signature signer/contributor equality, timestamp syntax, and expiration after issuance. Failure returns `invalid_manifest` with a `CatalogParseError` in `error`.
-2. The signature under the supplied public key and expected algorithm. Failure returns `signature_check_failed` with the lower-level `signatureResult`.
-3. Subject and artifact binding: identifier and type equality, matching version presence and value, matching subject/entry digests, and artifact bytes matching that digest. Failure returns `subject_check_failed` with the lower-level `subjectResult`.
-4. The time window, using the same [`nowMs` and `clockToleranceMs` controls](#network-and-time-controls) as `checkCatalogEntry()`. Failure returns `not_yet_valid` or `expired`.
+A `passed` result means those checks passed under the caller-selected key. A `not_yet_valid` or `expired` result means the preceding declaration, signature, and binding checks passed. Artifact retrieval URLs do not participate in subject binding, so identical bytes can be served from mirrors.
 
-A `valid` result means all four checks passed. A `not_yet_valid` or `expired` result means the preceding structure, signature, and binding checks passed. Artifact retrieval URLs do not participate in subject binding, so identical bytes can be served from mirrors.
-
-This utility performs no network requests. The caller is responsible for selecting the signer profile and authenticating and authorizing the supplied key. Invalid call shapes or options and unexpected runtime failures reject, as with `checkCatalogEntry()`.
+This utility performs no network requests. The caller is responsible for selecting the signer profile and authenticating and authorizing the supplied key. It accepts the same [`nowMs` and `clockToleranceMs` controls](#network-and-time-controls) as `checkCatalogEntry()`. Invalid call shapes or options and unexpected runtime failures reject, as with that operation.
 
 ## Canonicalize a logical JSON value
 

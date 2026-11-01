@@ -125,7 +125,7 @@ describe('native did:web transport', () => {
     respond = (_request, response) => response.end(JSON.stringify(did));
     await expect(checkCatalogEntry(entry)).resolves.toMatchObject({
       status: 'checked',
-      manifests: [{ status: 'valid', isPublisherEndorsement: true }],
+      manifests: [{ status: 'passed', isPublisherEndorsement: true }],
     });
     did.assertionMethod = [];
     await expect(checkCatalogEntry(entry)).resolves.toMatchObject({

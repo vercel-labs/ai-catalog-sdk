@@ -3,6 +3,9 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CatalogParseError,
+  CatalogValidationError,
+  isCatalogEntryWithUrl,
+  parseCatalogJson,
   type CatalogEntryWithData,
   type CatalogEntryWithUrl,
   type Signature,
@@ -18,9 +21,14 @@ import {
 } from '../src/verification.js';
 
 vi.mock('../src/internal/did-web.js', () => ({ resolveDidWeb: vi.fn() }));
-const keys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const publisher = 'did:web:example.com';
 const assessor = 'did:web:assessor.example';
+const signerKeys = new Map(
+  [publisher, assessor].map((identity) => [identity, [
+    generateKeyPairSync('ec', { namedCurve: 'prime256v1' }),
+    generateKeyPairSync('ec', { namedCurve: 'prime256v1' }),
+  ]] as const),
+);
 const identifier = 'urn:air:example.com:agent:billing';
 const type = 'application/json';
 const artifact = new Uint8Array([1, 2, 3]);
@@ -29,13 +37,15 @@ const digestOf = (bytes: Uint8Array) =>
   `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 
 function documentFor(identity = publisher) {
+  const keys = signerKeys.get(identity);
+  if (!keys) throw new Error('Unknown fixture identity');
   return {
     id: identity,
     verificationMethod: [1, 2].map((number) => ({
       id: `${identity}#key${number}`,
       controller: identity,
       type: 'JsonWebKey2020',
-      publicKeyJwk: keys.publicKey.export({ format: 'jwk' }),
+      publicKeyJwk: keys[number - 1]?.publicKey.export({ format: 'jwk' }),
     })),
     assertionMethod: [`${identity}#key1`, `${identity}#key2`],
   };
@@ -45,6 +55,10 @@ function signManifest(
   manifest: TrustManifest,
   header: Record<string, unknown> = {},
 ): TrustManifest {
+  const keys = signerKeys.get(manifest.contributor)?.[
+    header.kid === `${manifest.contributor}#key2` ? 1 : 0
+  ];
+  if (!keys) throw new Error('Unknown fixture identity');
   const metadata: Signature = manifest.signature ?? {
     signer: manifest.contributor,
     profile: 'did-web-v1',
@@ -127,13 +141,13 @@ describe('checkCatalogEntry', () => {
     const reports = await statuses(
       entryFor([manifestFor(), manifestFor(assessor)]),
     );
-    expect(reports.map(({ status }) => status)).toEqual(['valid', 'valid']);
+    expect(reports.map(({ status }) => status)).toEqual(['passed', 'passed']);
     expect(reports[0]).toMatchObject({
-      status: 'valid',
+      status: 'passed',
       isPublisherEndorsement: true,
     });
     expect(reports[1]).toMatchObject({
-      status: 'valid',
+      status: 'passed',
       isPublisherEndorsement: false,
     });
     expect(resolver).toHaveBeenCalledTimes(2);
@@ -159,7 +173,7 @@ describe('checkCatalogEntry', () => {
     };
     await expect(checkCatalogEntry(entry)).resolves.toMatchObject({
       status: 'checked',
-      manifests: [{ status: 'valid' }],
+      manifests: [{ status: 'passed' }],
     });
   });
 
@@ -182,16 +196,16 @@ describe('checkCatalogEntry', () => {
     if (failed.signature) failed.signature.jws = 'not-jws';
     expect(await statuses(entryFor([unsigned, failed]))).toMatchObject([
       { status: 'missing_signature' },
-      {
-        status: 'signature_check_failed',
-        signatureResult: { status: 'invalid_jws' },
-      },
+      { status: 'invalid_jws' },
     ]);
     expect(resolver).not.toHaveBeenCalled();
   });
 
   it('validates structure across unselected manifests and reports the original path', async () => {
-    const entry = entryFor([{ contributor: publisher }]);
+    const entry = entryFor([{
+      contributor: publisher,
+      signature: { signer: publisher, profile: 'did-web-v1', issuedAt: 42, jws: '' },
+    } as unknown as TrustManifest]);
     const report = await checkCatalogEntry(entry, artifact, {
       contributors: [],
     });
@@ -199,7 +213,7 @@ describe('checkCatalogEntry', () => {
       status: 'invalid_entry',
       error: {
         issues: expect.arrayContaining([
-          expect.objectContaining({ path: ['trustManifests', 0] }),
+          expect.objectContaining({ path: ['trustManifests', 0, 'signature', 'issuedAt'] }),
         ]),
       },
     });
@@ -215,10 +229,165 @@ describe('checkCatalogEntry', () => {
     expect(resolver).not.toHaveBeenCalled();
   });
 
+  it('reports a shared artifact failure before a malformed manifest', async () => {
+    const malformed = manifestFor(assessor);
+    if (!malformed.signature) throw new Error('Expected signed manifest');
+    malformed.signature.issuedAt = 'yesterday';
+    await expect(
+      checkCatalogEntry(entryFor([malformed]), new Uint8Array([4])),
+    ).resolves.toEqual({ status: 'artifact_digest_mismatch' });
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { issuedAt: 'yesterday' },
+    { expiresAt: '2025-01-01T00:00:00Z' },
+    { signer: publisher },
+    { profile: '' },
+  ])('isolates malformed contribution metadata without blocking the publisher: %j', async (fields) => {
+    const malformed = manifestFor(assessor);
+    if (!malformed.signature) throw new Error('Expected signed manifest');
+    Object.assign(malformed.signature, fields);
+    const parsed = parseCatalogJson(JSON.stringify({
+      specVersion: '1.0',
+      entries: [entryFor([malformed, manifestFor()])],
+    }));
+    const entry = parsed.entries[0];
+    if (!entry || !isCatalogEntryWithUrl(entry)) throw new Error('Expected URL entry');
+    const results = await statuses(entry);
+    expect(results).toMatchObject([
+      { status: 'invalid_manifest', error: expect.any(CatalogValidationError) },
+      { status: 'passed', isPublisherEndorsement: true },
+    ]);
+    expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
+  });
+
+  it.each([
+    'contributor URI',
+    'subject digest',
+    'missing subject',
+    'empty content',
+    'attestation size',
+  ])('reports invalid %s on its contribution rather than rejecting the entry', async (defect) => {
+    let malformed = manifestFor(assessor);
+    if (!malformed.signature || !malformed.subject) throw new Error('Expected signed subject');
+    switch (defect) {
+      case 'contributor URI':
+        malformed.contributor = 'not-a-uri';
+        malformed.signature.signer = malformed.contributor;
+        break;
+      case 'subject digest':
+        malformed.subject.digest = 'sha256:zz';
+        break;
+      case 'missing subject':
+        delete malformed.subject;
+        break;
+      case 'empty content':
+        malformed = { contributor: assessor };
+        break;
+      case 'attestation size':
+        malformed.attestations = [{ type: 'test', uri: 'https://assessor.example/report', size: -1 }];
+        break;
+    }
+    expect(await statuses(entryFor([malformed, manifestFor()]))).toMatchObject([
+      { status: 'invalid_manifest', error: expect.any(CatalogValidationError) },
+      { status: 'passed', isPublisherEndorsement: true },
+    ]);
+    expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
+  });
+
+  it('does not validate excluded contribution declarations', async () => {
+    const malformed = manifestFor(assessor);
+    if (!malformed.signature) throw new Error('Expected signed manifest');
+    malformed.signature.issuedAt = 'yesterday';
+    expect(await statuses(entryFor([malformed, manifestFor()]), {
+      contributors: [publisher],
+    })).toMatchObject([
+      { status: 'not_checked', manifest: malformed },
+      { status: 'passed', isPublisherEndorsement: true },
+    ]);
+    expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
+  });
+
+  it('isolates an unusable signed payload and continues evaluating other contributions', async () => {
+    const malformed = manifestFor(assessor);
+    malformed.extensions = { 'assessor.example': '\ud800' };
+    expect(await statuses(entryFor([malformed, manifestFor()]))).toMatchObject([
+      { status: 'invalid_manifest', error: expect.any(CatalogValidationError) },
+      { status: 'passed', isPublisherEndorsement: true },
+    ]);
+    expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
+  });
+
+  it('does not impose signed-payload Unicode restrictions on unsigned metadata', async () => {
+    const unsigned = {
+      contributor: assessor,
+      extensions: { 'assessor.example': '\ud800' },
+    };
+    expect(await statuses(entryFor([unsigned, manifestFor()]))).toMatchObject([
+      { status: 'missing_signature' },
+      { status: 'passed', isPublisherEndorsement: true },
+    ]);
+    expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
+  });
+
+  it('reports a subject for another release as an individual manifest failure', async () => {
+    const malformed = manifestFor(assessor);
+    if (!malformed.subject) throw new Error('Expected subject');
+    malformed.subject.identifier = 'urn:air:example.com:agent:other';
+    expect(await statuses(entryFor([malformed, manifestFor()]))).toMatchObject([
+      { status: 'invalid_manifest', error: expect.any(CatalogValidationError) },
+      { status: 'passed', isPublisherEndorsement: true },
+    ]);
+    expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
+  });
+
+  it('does not require a digest merely to report unsigned metadata', async () => {
+    const signed = manifestFor();
+    const unsigned = { contributor: assessor, extensions: { 'assessor.example': true } };
+    const entry = entryFor([signed, unsigned]);
+    delete entry.digest;
+    expect(await statuses(entry)).toMatchObject([
+      { status: 'invalid_manifest', error: expect.any(CatalogValidationError) },
+      { status: 'missing_signature' },
+    ]);
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it('does not apply authoring validation to unrelated entry timestamps', async () => {
+    const entry = { ...entryFor(), updatedAt: 'not-a-timestamp' };
+    expect(await statuses(entry)).toMatchObject([{ status: 'passed' }]);
+  });
+
+  it('can verify an unaffected entry after parsing a catalog with invalid optional declarations', async () => {
+    const malformed = manifestFor(assessor);
+    if (!malformed.signature || !malformed.subject) throw new Error('Expected signed subject');
+    malformed.signature.issuedAt = 'yesterday';
+    const affected = entryFor([malformed]);
+    affected.identifier = 'urn:air:example.com:agent:other';
+    malformed.subject.identifier = affected.identifier;
+    const catalog = parseCatalogJson(JSON.stringify({
+      specVersion: '1.0',
+      signature: {
+        signer: publisher,
+        profile: 'did-web-v1',
+        issuedAt: 'yesterday',
+        jws: 'not-a-jws',
+      },
+      entries: [affected, entryFor()],
+    }));
+    const entry = catalog.entries[1];
+    if (!entry || !isCatalogEntryWithUrl(entry)) throw new Error('Expected URL entry');
+    expect(await statuses(entry)).toMatchObject([
+      { status: 'passed', isPublisherEndorsement: true },
+    ]);
+    expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
+  });
+
   it.each([
     ['sha256:00', { status: 'invalid_digest' }],
     ['blake3:00', { status: 'digest_algorithm_not_implemented', algorithm: 'blake3' }],
-    ['sha256:zz', { status: 'invalid_entry', error: expect.any(CatalogParseError) }],
+    ['sha256:zz', { status: 'invalid_digest' }],
   ])('reports the entry digest failure for %s before manifest checks', async (digest, expected) => {
     const entry = { ...entryFor([]), digest };
     await expect(
@@ -236,20 +405,20 @@ describe('checkCatalogEntry', () => {
     ]);
     const cases: [CatalogEntryCheckOptions, string[], string[]][] = [
       [{ contributors: [] }, ['not_checked', 'not_checked', 'not_checked', 'not_checked'], []],
-      [{ contributors: [assessor] }, ['not_checked', 'valid', 'not_checked', 'not_checked'], [assessor]],
+      [{ contributors: [assessor] }, ['not_checked', 'passed', 'not_checked', 'not_checked'], [assessor]],
       [
         { contributors: [], alwaysCheckPublisherManifests: true },
-        ['valid', 'not_checked', 'valid', 'missing_signature'],
+        ['passed', 'not_checked', 'passed', 'missing_signature'],
         [publisher],
       ],
       [
         { contributors: [assessor, publisher], alwaysCheckPublisherManifests: true },
-        ['valid', 'valid', 'valid', 'missing_signature'],
+        ['passed', 'passed', 'passed', 'missing_signature'],
         [publisher, assessor],
       ],
       [
         { alwaysCheckPublisherManifests: false },
-        ['valid', 'valid', 'valid', 'missing_signature'],
+        ['passed', 'passed', 'passed', 'missing_signature'],
         [publisher, assessor],
       ],
     ];
@@ -291,11 +460,11 @@ describe('checkCatalogEntry', () => {
       }),
     ];
     expect(await statuses(entry)).toMatchObject([
-      { status: 'valid', isPublisherEndorsement: false },
+      { status: 'passed', isPublisherEndorsement: false },
     ]);
     expect(
       await statuses(entry, { alwaysCheckPublisherManifests: true }),
-    ).toMatchObject([{ status: 'valid', isPublisherEndorsement: false }]);
+    ).toMatchObject([{ status: 'passed', isPublisherEndorsement: false }]);
     resolver.mockClear();
     await expect(
       checkCatalogEntry(entry, artifact, {
@@ -312,7 +481,7 @@ describe('checkCatalogEntry', () => {
         contributors: [assessor],
         alwaysCheckPublisherManifests: true,
       }),
-    ).toMatchObject([{ status: 'valid', isPublisherEndorsement: false }]);
+    ).toMatchObject([{ status: 'passed', isPublisherEndorsement: false }]);
     expect(resolver).toHaveBeenCalledTimes(1);
   });
 
@@ -320,8 +489,8 @@ describe('checkCatalogEntry', () => {
     const first = manifestFor();
     const second = manifestFor(publisher, {}, { kid: `${publisher}#key2` });
     expect(await statuses(entryFor([first, second]))).toMatchObject([
-      { status: 'valid' },
-      { status: 'valid' },
+      { status: 'passed' },
+      { status: 'passed' },
     ]);
     expect(resolver).toHaveBeenCalledTimes(1);
     resolver.mockClear();
@@ -341,7 +510,18 @@ describe('checkCatalogEntry', () => {
     ).toMatchObject([
       { status: 'profile_not_implemented', profile: 'custom-v1' },
       { status: 'profile_check_failed', error: expect.any(Error) },
-      { status: 'profile_check_failed', error: expect.any(Error) },
+      { status: 'invalid_jws' },
+    ]);
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it('reports common signature failures directly before DID resolution', async () => {
+    expect(await statuses(entryFor([
+      manifestFor(publisher, {}, { alg: 'ES384' }),
+      manifestFor(assessor, {}, { crit: ['future'], future: true }),
+    ]))).toMatchObject([
+      { status: 'algorithm_mismatch', algorithm: 'ES384' },
+      { status: 'jws_feature_not_implemented' },
     ]);
     expect(resolver).not.toHaveBeenCalled();
   });
@@ -377,10 +557,7 @@ describe('checkCatalogEntry', () => {
     if (!signature) throw new Error('Expected signature');
     signature.issuedAt = '2026-01-02T00:00:00Z';
     expect(await statuses(entry)).toMatchObject([
-      {
-        status: 'signature_check_failed',
-        signatureResult: { status: 'invalid_signature' },
-      },
+      { status: 'invalid_signature' },
     ]);
   });
 
@@ -393,8 +570,8 @@ describe('checkCatalogEntry', () => {
         manifestFor(assessor, { issuedAt: '2026-10-06T00:00:30Z' }),
       ]);
       expect(await statuses(entry)).toMatchObject([
-        { status: 'valid' },
-        { status: 'valid' },
+        { status: 'passed' },
+        { status: 'passed' },
       ]);
       expect(await statuses(entry, { clockToleranceMs: 0 })).toMatchObject([
         { status: 'expired' },
@@ -406,7 +583,7 @@ describe('checkCatalogEntry', () => {
       });
       expect(await statuses(entry)).toMatchObject([
         { status: 'expired' },
-        { status: 'valid' },
+        { status: 'passed' },
       ]);
     } finally {
       vi.useRealTimers();
@@ -420,8 +597,8 @@ describe('checkCatalogEntry', () => {
     ]);
     const nowMs = Date.parse('2026-10-06T00:00:00Z');
     expect(await statuses(entry, { nowMs })).toMatchObject([
-      { status: 'valid' },
-      { status: 'valid' },
+      { status: 'passed' },
+      { status: 'passed' },
     ]);
     expect(await statuses(entry, { nowMs, clockToleranceMs: 0 })).toMatchObject([
       { status: 'expired' },
@@ -442,7 +619,7 @@ describe('checkCatalogEntry', () => {
       options.clockToleranceMs = 0;
       return documentFor(identity);
     });
-    expect(await statuses(entry, options)).toMatchObject([{ status: 'valid' }]);
+    expect(await statuses(entry, options)).toMatchObject([{ status: 'passed' }]);
   });
 
   it('preserves submillisecond currentness at tolerance boundaries', async () => {
@@ -455,7 +632,7 @@ describe('checkCatalogEntry', () => {
       ]);
       expect(await statuses(entry)).toMatchObject([
         { status: 'not_yet_valid' },
-        { status: 'valid' },
+        { status: 'passed' },
       ]);
     } finally {
       vi.useRealTimers();
@@ -470,7 +647,8 @@ describe('checkCatalogEntry', () => {
       }),
     ]);
     await expect(checkCatalogEntry(entry, artifact)).resolves.toMatchObject({
-      status: 'invalid_entry',
+      status: 'checked',
+      manifests: [{ status: 'invalid_manifest', error: expect.any(CatalogValidationError) }],
     });
     expect(resolver).not.toHaveBeenCalled();
   });
@@ -517,7 +695,7 @@ describe('checkCatalogEntry', () => {
     expect(result).toEqual({
       status: 'checked',
       manifests: [
-        { status: 'valid', isPublisherEndorsement: true, manifest: capturedManifests[0] },
+        { status: 'passed', isPublisherEndorsement: true, manifest: capturedManifests[0] },
         { status: 'not_checked', manifest: capturedManifests[1] },
       ],
     });
@@ -587,6 +765,6 @@ describe('checkCatalogEntry', () => {
   it('reports missing artifact representations as structural failures', async () => {
     await expect(
       checkCatalogEntry({ identifier, type } as CatalogEntryWithData),
-    ).resolves.toMatchObject({ status: 'invalid_entry' });
+    ).resolves.toMatchObject({ status: 'invalid_entry', error: expect.any(CatalogParseError) });
   });
 });

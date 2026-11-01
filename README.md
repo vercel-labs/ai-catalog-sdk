@@ -33,11 +33,11 @@ const pluginEntries = catalog.entries.filter(
 );
 ```
 
-The parsed result is an ordinary mutable, JSON-shaped object. Parsing validates the catalog and Trust Manifest structure, but does not fetch or parse referenced artifacts.
+The parsed result is an ordinary mutable, JSON-shaped object. Parsing checks field shapes and primitive types while preserving declaration values and unknown JSON-valued properties. It does not fetch or parse referenced artifacts.
 
 ## Parsing does not verify trust
 
-Parsed catalogs and Trust Manifest data are structurally validated but unauthenticated. Parsing does not verify catalog or Trust Manifest signatures, check digests, resolve identities, fetch attestations, evaluate provenance, or decide whether an artifact, catalog operator, or publisher is trustworthy.
+Parsing provides structurally usable data, including declarations that may fail authoring validation or verification. Use [authoring validation](#author-a-catalog) to check an assembled document’s declarations and consistency, and verification to evaluate its artifacts and endorsements.
 
 ## Check a catalog signature
 
@@ -72,13 +72,13 @@ if (report.status !== 'checked') {
 }
 
 const publisherEndorsements = report.manifests.filter(
-  result => result.status === 'valid' && result.isPublisherEndorsement,
+  result => result.status === 'passed' && result.isPublisherEndorsement,
 );
 ```
 
 For an entry with `url`, supply the artifact bytes obtained by your application. For an entry with `data`, call `checkCatalogEntry(entryWithData)`; the SDK canonicalizes the inline artifact with JCS.
 
-`checked` means the requested checks completed. Each attached manifest has its own result in the original array order; manifests excluded by the contributor options receive `not_checked`. The report may contain no manifests or no valid endorsements. A valid manifest result authenticates its contributor, binds its claims to the entry and artifact, and checks its time window. `isPublisherEndorsement: true` additionally establishes the `did:web` Publisher Profile's exact relationship to the entry's `urn:air` namespace. Applications choose which contributors and endorsements they require. See [Verification utilities](./docs/verification.md#check-a-catalog-entry) for filtering, results, and network controls.
+`checked` means the requested checks completed. Each attached manifest has its own result in the original array order; manifests excluded by the contributor options receive `not_checked`. The report may contain no manifests or no passing endorsements. A `passed` manifest result authenticates its contributor, binds its claims to the entry and artifact, and checks its time window. `isPublisherEndorsement: true` additionally establishes the `did:web` Publisher Profile's exact relationship to the entry's `urn:air` namespace. Applications choose which contributors and endorsements they require. See [Verification utilities](./docs/verification.md#check-a-catalog-entry) for filtering, results, and network controls.
 
 ## Check a Trust Manifest with a supplied key
 
@@ -95,7 +95,7 @@ const result = await checkCatalogEntryTrustManifest(
 );
 ```
 
-For an entry with `data`, omit `artifactBytes`. A `valid` result means the manifest is structurally valid, its signature verifies under the supplied key, its subject matches the entry and artifact, and its time window passes. The caller is responsible for selecting the signer profile and authenticating the key; the function performs no network requests. See [Verification utilities](./docs/verification.md#check-a-trust-manifest-with-a-supplied-key) for details.
+For an entry with `data`, omit `artifactBytes`. A `passed` result means the manifest’s declarations and signature pass the supplied-key checks, its subject matches the entry and artifact, and its time window passes. The caller is responsible for selecting the signer profile and authenticating the key; the function performs no network requests. See [Verification utilities](./docs/verification.md#check-a-trust-manifest-with-a-supplied-key) for details.
 
 ## Use lower-level verification utilities
 
@@ -119,6 +119,7 @@ These utilities do not fetch content or resolve keys. See [Verification utilitie
 | Catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
 | An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
+| An assembled catalog before serialization | `assertValidCatalog()` | `ai-catalog-sdk` |
 | A catalog, caller-selected public key, and expected algorithm | `checkCatalogSignature()` | `ai-catalog-sdk/verification` |
 | An entry and its selected contributors' endorsements, with supplied artifact bytes for an entry with `url` | `checkCatalogEntry()` | `ai-catalog-sdk/verification` |
 | An entry, explicit manifest, caller-selected public key, and the artifact representation | `checkCatalogEntryTrustManifest()` | `ai-catalog-sdk/verification` |
@@ -126,7 +127,7 @@ These utilities do not fetch content or resolve keys. See [Verification utilitie
 | JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
 | Raw JSON Schema for another validator or tool | `ai-catalog.schema.json` | `ai-catalog-sdk/schema/ai-catalog.schema.json` |
 
-The `parse*` functions throw `CatalogParseError` when input is invalid. The matching `safeParse*` functions return a discriminated `ParseResult` instead. All SDK parsers apply defensive input validation that the standalone schemas do not. `parseCatalog()` and `parseCatalogJson()` also perform catalog-wide checks. See [What gets validated](#what-gets-validated) for details.
+The `parse*` functions throw `CatalogParseError` when input is invalid. The matching `safeParse*` functions return a discriminated `ParseResult` instead. All SDK parsers apply defensive input validation that the standalone schemas do not. See [What gets validated](#what-gets-validated) for the parsing, authoring, and schema boundaries.
 
 ## Handle invalid input
 
@@ -158,30 +159,30 @@ Use `code` to classify an issue and `path` to locate it in the input. Present `m
 
 ### Diagnostic codes
 
-Issue codes identify broad failure categories:
+Parsing errors and authoring-validation errors use `CatalogIssue` diagnostics with these broad categories:
 
 | Code | Meaning |
 | --- | --- |
 | `invalid_json` | Catalog text could not be decoded as JSON. |
-| `invalid_json_value` | Input is not accepted as plain, acyclic JSON data. |
+| `invalid_json_value` | A value violates the required JSON or I-JSON representation. |
 | `invalid_type` | A required value is missing or has the wrong JSON type. |
-| `invalid_value` | A value violates another structural rule, such as a format, range, or allowed representation. |
+| `invalid_value` | A value violates a format, range, or allowed representation. |
 | `unsupported_spec_version` | A well-formed catalog version declares an unsupported major. |
 | `duplicate_entry` | Catalog entries violate identifier/version uniqueness. |
-| `inconsistent_value` | Related fields disagree, currently a Trust Manifest subject and its containing entry. |
-| `resource_limit` | Input exceeds a parser node or nesting limit. |
+| `inconsistent_value` | Related declarations disagree, such as a Trust Manifest subject and its containing entry. |
+| `resource_limit` | Input exceeds an SDK node or nesting limit. |
 | `diagnostics_truncated` | Additional validation issues were omitted after the reporting limit was reached. |
 
 Codes may be added in future releases. Keep a fallback for unknown codes, and do not depend on issue order or a lower-level `cause` for classification.
 
 ## Author a catalog
 
-Catalogs are ordinary JSON-shaped objects. Use `satisfies AICatalog` to check known fields at compile time, `parseCatalog()` to perform runtime and catalog-wide validation, and `JSON.stringify()` to serialize the validated result:
+Catalogs are ordinary JSON-shaped objects. Use `satisfies AICatalog` to check known fields at compile time, call `assertValidCatalog()` to validate the assembled document, and serialize it with `JSON.stringify()`:
 
 ```ts
 import {
   mediaTypes,
-  parseCatalog,
+  assertValidCatalog,
   type AICatalog,
 } from 'ai-catalog-sdk';
 
@@ -196,10 +197,11 @@ const catalog = {
   ],
 } satisfies AICatalog;
 
-const json = JSON.stringify(parseCatalog(catalog), null, 2);
+assertValidCatalog(catalog);
+const json = JSON.stringify(catalog, null, 2);
 ```
 
-The SDK does not provide a builder abstraction or custom serializer. Authoring types expose fields known to this SDK. When parsing a compatible AI Catalog `1.x` document, the SDK preserves unknown JSON-valued properties.
+The assertion checks declaration formats and internal consistency, including entry uniqueness and whether attached manifests describe their containing entries. It returns no value and throws `CatalogValidationError` with path-specific `issues` on failure. Unsigned catalogs are allowed. Artifact integrity, cryptographic authenticity, and current endorsement acceptance are evaluated by the [verification utilities](./docs/verification.md).
 
 ### Sign a Trust Manifest
 
@@ -208,7 +210,7 @@ To add a signed endorsement, declare the entry's artifact digest, sign a Trust M
 ```ts
 import { readFile } from 'node:fs/promises';
 import { CompactSign } from 'jose';
-import { mediaTypes, parseCatalog, type AICatalog } from 'ai-catalog-sdk';
+import { assertValidCatalog, mediaTypes, type AICatalog } from 'ai-catalog-sdk';
 import { createDigest, signTrustManifest } from 'ai-catalog-sdk/verification';
 
 const artifactBytes = await readFile('example-agent-plugin.zip');
@@ -232,11 +234,8 @@ const catalogWithEndorsement = {
   entries: [{ ...entry, trustManifests: [manifest] }],
 } satisfies AICatalog;
 
-const jsonWithEndorsement = JSON.stringify(
-  parseCatalog(catalogWithEndorsement),
-  null,
-  2,
-);
+assertValidCatalog(catalogWithEndorsement);
+const jsonWithEndorsement = JSON.stringify(catalogWithEndorsement, null, 2);
 ```
 
 The digest must describe the exact bytes published at `entry.url`. For an inline entry, use `createDigest(entry.data)` to hash its JCS-canonicalized JSON value. The signed Trust Manifest endorses the entry's artifact; the containing catalog remains unsigned. See [Signing](./docs/verification.md#sign-a-trust-manifest) for signing with an explicit subject and supported callback formats.
@@ -260,9 +259,10 @@ TypeScript NodeNext consumers also need `compilerOptions.resolveJsonModule: true
 
 ## What gets validated
 
-- `parseCatalog()` and `parseCatalogJson()` validate catalog structure, require an AI Catalog `1.x` version, and enforce entry uniqueness. The catalog and entry parsers check each Trust Manifest subject against its entry, including identifier, type, digest, and the presence and value of version. A signed manifest requires an entry digest. Parsers also enforce matching contributor and signer values and require expiration to follow issuance. When validating JSON values, they reject circular or non-JSON data and limit work on unusually large or deeply nested inputs.
-- The Zod schemas validate document structure with native Zod errors and behavior. They do not include the parser-specific resource limits or catalog-wide checks.
-- The JSON Schema validates portable document structure. Some format details depend on the validator being used. Cross-field equality, timestamp ordering, and catalog-wide checks require the SDK parsers.
+- The `parse*` and `safeParse*` functions check known field shapes and primitive types and reject non-JSON or excessively large or deeply nested inputs. Whole-catalog parsing also requires a supported specification major. Declaration formats, ranges, and relationships are preserved for explicit validation; a timestamp string such as `"yesterday"` is retained, while a number in that field fails parsing.
+- `assertValidCatalog()` checks an assembled catalog’s declaration formats, constraints, and relationships, including entry uniqueness, subject/entry correspondence, signer/contributor equality, and timestamp ordering. It also checks digest declarations, signature representations and signed-payload eligibility, and locally checkable requirements of supported signer profiles. Unfamiliar but well-formed profiles and algorithms do not fail solely because the SDK cannot verify them.
+- The Zod schemas validate their declared structure and constraints with native Zod errors and behavior. They do not apply the root parsers’ defensive input limits or the complete authoring assertion’s checks.
+- The JSON Schema describes portable document constraints. Format enforcement depends on the validator; use `assertValidCatalog()` for the document relationships and signature/payload checks described above.
 
 The SDK targets an exact prerelease specification snapshot. See [Specification snapshot interpretation](./docs/spec-interpretation.md) for the pinned revision and how conflicts in that snapshot are handled.
 

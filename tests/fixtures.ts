@@ -94,7 +94,7 @@ export const validFixtures: readonly unknown[] = [
   },
 ];
 
-export const structurallyInvalidFixtures: readonly unknown[] = [
+export const invalidDeclarationFixtures: readonly unknown[] = [
   {},
   { specVersion: '1', entries: [] },
   { specVersion: '1.0', entries: [{}] },

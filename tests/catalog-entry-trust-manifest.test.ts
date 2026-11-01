@@ -7,7 +7,7 @@ import {
 } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  CatalogParseError,
+  CatalogValidationError,
   type CatalogEntryWithData,
   type CatalogEntryWithUrl,
   type JsonValue,
@@ -121,7 +121,7 @@ describe('checkCatalogEntryTrustManifest', () => {
     expect(entry.trustManifests).toBeUndefined();
     await expect(
       checkCatalogEntryTrustManifest(entry, bytes, manifest, optionsFor()),
-    ).resolves.toEqual({ status: 'valid' });
+    ).resolves.toEqual({ status: 'passed' });
   });
   it.each([
     'sha384',
@@ -133,13 +133,13 @@ describe('checkCatalogEntryTrustManifest', () => {
     });
     await expect(
       checkCatalogEntryTrustManifest(entry, bytes, manifest, optionsFor()),
-    ).resolves.toEqual({ status: 'valid' });
+    ).resolves.toEqual({ status: 'passed' });
   });
   it('JCS-canonicalizes inline data', async () => {
     const { entry, manifest } = dataFixture({ b: 2, a: 1 });
     await expect(
       checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
-    ).resolves.toEqual({ status: 'valid' });
+    ).resolves.toEqual({ status: 'passed' });
   });
   it('accepts a caller-selected key and custom profile while enforcing currentness', async () => {
     const { entry, manifest } = dataFixture(null);
@@ -152,7 +152,7 @@ describe('checkCatalogEntryTrustManifest', () => {
         ...optionsFor(),
         nowMs: Date.parse('2000-06-01T00:00:00Z'),
       }),
-    ).resolves.toEqual({ status: 'valid' });
+    ).resolves.toEqual({ status: 'passed' });
   });
   it.each([
     { signer: 'did:example:someone-else' },
@@ -165,7 +165,7 @@ describe('checkCatalogEntryTrustManifest', () => {
       checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
     ).resolves.toMatchObject({
       status: 'invalid_manifest',
-      error: expect.any(CatalogParseError),
+      error: expect.any(CatalogValidationError),
     });
   });
   it('rejects empty manifests while allowing unsigned substantive metadata', async () => {
@@ -173,15 +173,13 @@ describe('checkCatalogEntryTrustManifest', () => {
     await expect(
       checkCatalogEntryTrustManifest(entry, { contributor }, optionsFor()),
     ).resolves.toMatchObject({ status: 'invalid_manifest' });
-    await expect(
-      checkCatalogEntryTrustManifest(entry, {
-        contributor,
-        extensions: { 'example.com': true },
-      }, optionsFor()),
-    ).resolves.toEqual({
-      status: 'signature_check_failed',
-      signatureResult: { status: 'missing_signature' },
-    });
+    for (const value of [true, '\ud800'])
+      await expect(
+        checkCatalogEntryTrustManifest(entry, {
+          contributor,
+          extensions: { 'example.com': value },
+        }, optionsFor()),
+      ).resolves.toEqual({ status: 'missing_signature' });
   });
   it('applies the same explicit instant and tolerance to issuance and expiration', async () => {
     const { entry, manifest } = dataFixture(null);
@@ -196,7 +194,7 @@ describe('checkCatalogEntryTrustManifest', () => {
     for (const candidate of [future, expired])
       await expect(
         checkCatalogEntryTrustManifest(entry, candidate, optionsFor()),
-      ).resolves.toEqual({ status: 'valid' });
+      ).resolves.toEqual({ status: 'passed' });
     await expect(
       checkCatalogEntryTrustManifest(entry, future, { ...optionsFor(), clockToleranceMs: 0 }),
     ).resolves.toEqual({ status: 'not_yet_valid' });
@@ -215,17 +213,32 @@ describe('checkCatalogEntryTrustManifest', () => {
       checkCatalogEntryTrustManifest(entry, bytes, expired, {
         ...optionsFor(), publicKey: otherKeys.publicKey,
       }),
-    ).resolves.toEqual({
-      status: 'signature_check_failed', signatureResult: { status: 'invalid_signature' },
-    });
+    ).resolves.toEqual({ status: 'invalid_signature' });
     await expect(
       checkCatalogEntryTrustManifest(entry, new Uint8Array([0]), expired, optionsFor()),
-    ).resolves.toEqual({
-      status: 'subject_check_failed', subjectResult: { status: 'mismatch' },
-    });
+    ).resolves.toEqual({ status: 'artifact_digest_mismatch' });
     await expect(
       checkCatalogEntryTrustManifest(entry, bytes, expired, optionsFor()),
     ).resolves.toEqual({ status: 'expired' });
+  });
+  it('reports the entry artifact failure before malformed manifest declarations', async () => {
+    const bytes = new TextEncoder().encode('test');
+    const { entry, manifest } = urlFixture(bytes);
+    if (!manifest.signature) throw new Error('Expected signature');
+    manifest.signature.issuedAt = 'yesterday';
+    await expect(
+      checkCatalogEntryTrustManifest(entry, new Uint8Array([0]), manifest, optionsFor()),
+    ).resolves.toEqual({ status: 'artifact_digest_mismatch' });
+  });
+  it('reports a signed payload that cannot be canonicalized as an invalid manifest', async () => {
+    const { entry, manifest } = dataFixture(null);
+    manifest.extensions = { 'example.com': '\ud800' };
+    await expect(
+      checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
+    ).resolves.toMatchObject({
+      status: 'invalid_manifest',
+      error: expect.any(CatalogValidationError),
+    });
   });
   it('uses the completion-time clock when nowMs is omitted', async () => {
     const { entry, manifest } = dataFixture(null);
@@ -254,7 +267,7 @@ describe('checkCatalogEntryTrustManifest', () => {
       checkCatalogEntryTrustManifest(entry, candidate, {
         ...optionsFor(), nowMs: Date.parse(instant), clockToleranceMs: 0,
       }),
-    ).resolves.toEqual({ status: 'valid' });
+    ).resolves.toEqual({ status: 'passed' });
   });
   it.each([
     { nowMs: Infinity },
@@ -269,7 +282,7 @@ describe('checkCatalogEntryTrustManifest', () => {
       checkCatalogEntryTrustManifest(entry, manifest, { ...optionsFor(), ...timeOptions }),
     ).rejects.toBeInstanceOf(TypeError);
   });
-  it('preserves every signature failure as a nested result', async () => {
+  it('reports signature failures directly', async () => {
     const bytes = new TextEncoder().encode('test');
     const { entry, manifest } = urlFixture(bytes);
     const { signature: _signature, ...unsignedManifest } = manifest;
@@ -298,26 +311,25 @@ describe('checkCatalogEntryTrustManifest', () => {
         { status: 'invalid_signature' },
       ],
     ];
-    for (const [candidate, signatureResult] of cases) {
+    for (const [candidate, expected] of cases) {
       await expect(
         checkCatalogEntryTrustManifest(entry, bytes, candidate, optionsFor()),
-      ).resolves.toEqual({ status: 'signature_check_failed', signatureResult });
+      ).resolves.toEqual(expected);
     }
   });
-  it('reports a signature failure before a subject failure', async () => {
+  it('reports manifest applicability before signature failure', async () => {
     const bytes = new TextEncoder().encode('test');
     const { entry, manifest } = urlFixture(bytes, {
       identifier: 'wrong',
       version: 'wrong',
       type: 'application/wrong',
-      digest: 'sha256:abc',
     });
     manifest.signature = { ...metadata, jws: 'not-a-jws' };
     await expect(
       checkCatalogEntryTrustManifest(entry, bytes, manifest, optionsFor()),
-    ).resolves.toEqual({
-      status: 'signature_check_failed',
-      signatureResult: { status: 'invalid_jws' },
+    ).resolves.toMatchObject({
+      status: 'invalid_manifest',
+      error: expect.any(CatalogValidationError),
     });
   });
   it('rejects a signed manifest without a subject before signature verification', async () => {
@@ -326,30 +338,30 @@ describe('checkCatalogEntryTrustManifest', () => {
       checkCatalogEntryTrustManifest(entry, manifestFor(), optionsFor()),
     ).resolves.toMatchObject({
       status: 'invalid_manifest',
-      error: expect.any(CatalogParseError),
+      error: expect.any(CatalogValidationError),
     });
   });
   it.each([
-    ['identifier', 'EXAMPLE-artifact', 'identifier_mismatch'],
-    ['type', 'application/wrong', 'type_mismatch'],
-  ] as const)('requires subject %s equality', async (field, value, status) => {
+    ['identifier', 'EXAMPLE-artifact'],
+    ['type', 'application/wrong'],
+  ] as const)('requires subject %s equality', async (field, value) => {
     const bytes = new TextEncoder().encode('test');
     const { entry, manifest } = urlFixture(bytes, { [field]: value });
     await expect(
       checkCatalogEntryTrustManifest(entry, bytes, manifest, optionsFor()),
-    ).resolves.toEqual({
-      status: 'subject_check_failed',
-      subjectResult: { status },
+    ).resolves.toMatchObject({
+      status: 'invalid_manifest',
+      error: expect.any(CatalogValidationError),
     });
   });
   it.each([
-    ['1.0', '1.0', 'valid'],
-    ['1.0', '1.0.0', 'version_mismatch'],
-    ['1.0', undefined, 'version_mismatch'],
-    [undefined, '1.0', 'version_mismatch'],
-    ['', '', 'valid'],
-    ['', undefined, 'version_mismatch'],
-    [undefined, '', 'version_mismatch'],
+    ['1.0', '1.0', 'passed'],
+    ['1.0', '1.0.0', 'invalid_manifest'],
+    ['1.0', undefined, 'invalid_manifest'],
+    [undefined, '1.0', 'invalid_manifest'],
+    ['', '', 'passed'],
+    ['', undefined, 'invalid_manifest'],
+    [undefined, '', 'invalid_manifest'],
   ] as const)('checks entry version %j against subject version %j', async (entryVersion, subjectVersion, status) => {
     const { entry, manifest } = dataFixture(
       null,
@@ -358,20 +370,21 @@ describe('checkCatalogEntryTrustManifest', () => {
     if (entryVersion !== undefined) entry.version = entryVersion;
     await expect(
       checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
-    ).resolves.toEqual(
-      status === 'valid'
+    ).resolves.toMatchObject(
+      status === 'passed'
         ? { status }
-        : { status: 'subject_check_failed', subjectResult: { status } },
+        : { status: 'invalid_manifest', error: expect.any(CatalogValidationError) },
     );
   });
-  it('requires entry digest and signed subject digest to match', async () => {
+  it('requires the signed subject digest to match the entry declaration', async () => {
     const { entry, manifest } = dataFixture(null);
-    entry.digest = digest(new Uint8Array([1]));
+    if (!manifest.subject) throw new Error('Expected subject');
+    manifest.subject.digest = digest(new Uint8Array([1]));
     await expect(
       checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
-    ).resolves.toEqual({
-      status: 'subject_check_failed',
-      subjectResult: { status: 'digest_mismatch' },
+    ).resolves.toMatchObject({
+      status: 'invalid_manifest',
+      error: expect.any(CatalogValidationError),
     });
   });
   it('does not accept a signed binding without an entry digest', async () => {
@@ -379,9 +392,9 @@ describe('checkCatalogEntryTrustManifest', () => {
     delete entry.digest;
     await expect(
       checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
-    ).resolves.toEqual({
-      status: 'subject_check_failed',
-      subjectResult: { status: 'digest_mismatch' },
+    ).resolves.toMatchObject({
+      status: 'invalid_manifest',
+      error: expect.any(CatalogValidationError),
     });
   });
   it('treats a legacy subject URL as signed, uninterpreted data', async () => {
@@ -395,26 +408,26 @@ describe('checkCatalogEntryTrustManifest', () => {
         signManifest(manifest),
         optionsFor(),
       ),
-    ).resolves.toEqual({ status: 'valid' });
+    ).resolves.toEqual({ status: 'passed' });
   });
   it.each([
     [
       'different bytes',
       digest(new TextEncoder().encode('different')),
-      { status: 'mismatch' },
+      { status: 'artifact_digest_mismatch' },
     ],
     ['invalid length', 'sha256:abc', { status: 'invalid_digest' }],
     [
       'unimplemented algorithm',
       'sha3-256:a',
-      { status: 'algorithm_not_implemented', algorithm: 'sha3-256' },
+      { status: 'digest_algorithm_not_implemented', algorithm: 'sha3-256' },
     ],
-  ])('preserves artifact digest failure for %s', async (_label, value, subjectResult) => {
+  ])('reports artifact digest failure directly for %s', async (_label, value, expected) => {
     const bytes = new TextEncoder().encode('test');
     const { entry, manifest } = urlFixture(bytes, { digest: value as string });
     await expect(
       checkCatalogEntryTrustManifest(entry, bytes, manifest, optionsFor()),
-    ).resolves.toEqual({ status: 'subject_check_failed', subjectResult });
+    ).resolves.toEqual(expected);
   });
   it('captures inline data, entry coordinates, manifest, and options before yielding', async () => {
     const data = { nested: { value: 'original' } };
@@ -437,7 +450,7 @@ describe('checkCatalogEntryTrustManifest', () => {
     options.publicKey = otherKeys.publicKey;
     options.nowMs = Date.parse('1900-01-01T00:00:00Z');
     options.clockToleranceMs = 0;
-    await expect(pending).resolves.toEqual({ status: 'valid' });
+    await expect(pending).resolves.toEqual({ status: 'passed' });
   });
   it('hashes URL bytes and captures context before yielding', async () => {
     const bytes = new TextEncoder().encode('test');
@@ -452,7 +465,7 @@ describe('checkCatalogEntryTrustManifest', () => {
     entry.identifier = 'mutated';
     entry.url = 'https://other.example';
     if (manifest.subject) manifest.subject.digest = digest(bytes);
-    await expect(pending).resolves.toEqual({ status: 'valid' });
+    await expect(pending).resolves.toEqual({ status: 'passed' });
   });
   it('validates the selected key before capturing entry context', async () => {
     const bytes = new TextEncoder().encode('test');
@@ -475,9 +488,9 @@ describe('checkCatalogEntryTrustManifest', () => {
         publicKey: key,
         expectedAlgorithm: 'ES256',
       }),
-    ).resolves.toEqual({
-      status: 'subject_check_failed',
-      subjectResult: { status: 'type_mismatch' },
+    ).resolves.toMatchObject({
+      status: 'invalid_manifest',
+      error: expect.any(CatalogValidationError),
     });
     expect(reads).toBeGreaterThan(0);
   });
@@ -493,7 +506,7 @@ describe('checkCatalogEntryTrustManifest', () => {
     });
     await expect(
       checkCatalogEntryTrustManifest(entry, bytes, manifest, optionsFor()),
-    ).resolves.toEqual({ status: 'valid' });
+    ).resolves.toEqual({ status: 'passed' });
     expect(reads).toBe(0);
   });
   it.each([
@@ -544,7 +557,7 @@ describe('checkCatalogEntryTrustManifest', () => {
       if (location === 'subject' && value !== undefined)
         await expect(pending).resolves.toMatchObject({
           status: 'invalid_manifest',
-          error: expect.any(CatalogParseError),
+          error: expect.any(CatalogValidationError),
         });
       else await expect(pending).rejects.toThrow(TypeError);
     }
@@ -557,7 +570,7 @@ describe('checkCatalogEntryTrustManifest', () => {
     if (location === 'subject')
       await expect(pending).resolves.toMatchObject({
         status: 'invalid_manifest',
-        error: expect.any(CatalogParseError),
+        error: expect.any(CatalogValidationError),
       });
     else await expect(pending).rejects.toThrow(TypeError);
   });
