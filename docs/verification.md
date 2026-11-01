@@ -163,6 +163,111 @@ Both `checkCatalogEntry()` and `checkCatalogEntryTrustManifest()` accept `nowMs`
 
 Entry, manifest, option, and artifact inputs are captured before asynchronous work. Later caller mutations do not change what an invocation checks. Returned manifests are the captured values. Expected verification failures return results; invalid call shapes or options, explicit cancellation, and unexpected cryptographic or runtime failures reject. Diagnostic `Error` objects can carry causes, but their message text is not a stable classification API. Branch on result discriminators.
 
+## Check a Trust Manifest with a supplied key
+
+`checkCatalogEntryTrustManifest()` checks one explicit manifest against an entry and its artifact representation using your application's verification key:
+
+```ts
+import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/verification';
+
+const resultForEntryWithUrl = await checkCatalogEntryTrustManifest(
+  entryWithUrl,
+  artifactBytes,
+  manifest,
+  { publicKey, expectedAlgorithm: 'ES256' },
+);
+
+const resultForEntryWithData = await checkCatalogEntryTrustManifest(
+  entryWithData,
+  manifest,
+  { publicKey, expectedAlgorithm: 'ES256' },
+);
+```
+
+The manifest need not already be attached to the entry. The function expects a typed or previously parsed entry and does not rerun whole-entry structural validation. It checks the entry’s declared artifact digest first, then the supplied manifest’s declarations and subject correspondence, its signature, and its time window. See the shared [check results](#check-results) for statuses and precedence.
+
+A `passed` result means those checks passed under the caller-selected key. A `not_yet_valid` or `expired` result means the preceding declaration, signature, and binding checks passed. Artifact retrieval URLs do not participate in subject binding, so identical bytes can be served from mirrors.
+
+This utility performs no network requests. The caller is responsible for selecting the signer profile and authenticating and authorizing the supplied key. It accepts the same [`nowMs` and `clockToleranceMs` controls](#network-and-time-controls) as `checkCatalogEntry()`. Invalid call shapes or options and unexpected runtime failures reject, as with that operation.
+
+## Check signatures with a supplied key
+
+`checkCatalogSignature()` and `checkTrustManifestSignature()` verify a detached compact JWS with one caller-selected public key and expected algorithm:
+
+```ts
+import { checkCatalogSignature } from 'ai-catalog-sdk/verification';
+
+const result = await checkCatalogSignature(catalog, {
+  publicKey,
+  expectedAlgorithm: 'ES256',
+});
+```
+
+They share `SignatureCheckOptions` and `SignatureCheckResult`. The SDK implements the exact algorithm token `ES256`; supply a native public P-256 `KeyObject` or a P-256 `CryptoKey` usable for verification. Typed consumers of this Node-only subpath need compatible Node.js declarations, such as `@types/node`.
+
+A `valid` result establishes only that the supplied key verifies the captured payload. It does not authenticate the claimed contributor or catalog operator, enforce issuance or expiration, check artifact binding, or establish trust. Header fields do not select a key or trigger network requests.
+
+The JWS must use canonical, unpadded base64url segments and a valid UTF-8 protected header. The required `typ` is exactly `ai-catalog+jws` for catalogs or `ai-catalog-trust-manifest+jws` for manifests. Any protected `b64` is forbidden. The expected algorithm is trusted caller input; the unverified `alg` is compared against it and never selects an algorithm.
+
+| Signature status | Meaning |
+| --- | --- |
+| `valid` | The supplied key verifies the signature over the captured payload. |
+| `missing_signature` | The containing object has no signature. |
+| `invalid_jws` | The JWS is malformed or violates its required representation or headers. |
+| `algorithm_mismatch` | The protected `alg` differs from the caller's expectation. Includes the claimed algorithm for diagnostics. |
+| `jws_feature_not_implemented` | A well-formed critical extension is unsupported. |
+| `invalid_signature` | The signature representation or cryptographic check failed. |
+
+These functions validate the materialized JSON value without performing catalog or manifest schema validation. Wrong runtime argument types, incompatible keys, and malformed programmatic inputs reject with `TypeError`; resource limits reject with `RangeError`. Unexpected backend failures reject rather than becoming verification results.
+
+## Check a digest
+
+`checkDigest(bytes, expectedDigest)` compares the exact byte range supplied by the caller with an AI Catalog digest:
+
+```ts
+import { checkDigest } from 'ai-catalog-sdk/verification';
+
+const result = checkDigest(
+  artifactBytes,
+  'sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
+);
+
+if (result.status !== 'match') {
+  // Do not use the bytes as the declared artifact.
+}
+```
+
+The function hashes bytes verbatim. It does not fetch content, decode a representation, serialize JSON, or apply JCS canonicalization. In particular, callers must not pass an ordinary JSON serialization for an entry with `data`, whose inline artifact digest is defined over JCS-canonicalized `data`.
+
+The result statuses have deliberately narrow meanings:
+
+| Status | Meaning |
+| --- | --- |
+| `match` | The supplied bytes match the declared digest. |
+| `mismatch` | The digest is implemented and well-formed, but the bytes do not match. |
+| `invalid_digest` | The declaration is malformed, or a known algorithm has an invalid output length. |
+| `algorithm_not_implemented` | The declaration is syntactically valid, but the SDK does not implement its exact algorithm token. |
+
+The SDK currently implements the exact, case-sensitive `sha256`, `sha384`, and `sha512` tokens with 64, 96, and 128 lowercase hexadecimal characters, respectively. This is an SDK capability boundary, not a claim that other algorithms are forbidden or insecure. If the runtime cannot execute a registered implementation, the function throws `DigestAlgorithmUnavailableError` and preserves the underlying error as `cause`.
+
+`Buffer` values and `Uint8Array` subviews are accepted. Shared or detached backing buffers are rejected because they cannot provide a stable byte view for the check. Wrong JavaScript argument types and shared or detached byte views throw `TypeError`.
+
+A `match` result establishes only equality between caller-supplied bytes and a declared digest. It does not establish who made the declaration, whether the digest is authoritative, or whether the content is trustworthy.
+
+## Create a digest
+
+`createDigest(value, algorithm?)` returns an artifact digest in `algorithm:lowercase-hex` form. The algorithm defaults to `sha256`; `sha384` and `sha512` are also supported:
+
+```ts
+import { createDigest } from 'ai-catalog-sdk/verification';
+
+const artifactDigest = createDigest(artifactBytes);
+const inlineDigest = createDigest(entry.data);
+const sha384Digest = createDigest(artifactBytes, 'sha384');
+```
+
+A `Uint8Array` or `Buffer` is hashed as its exact byte range. Other logical JSON values are JCS-canonicalized before hashing. Strings are JSON string values, including their JSON quotes and escapes; ordinary arrays are JSON arrays. To hash text as raw bytes, encode it with `TextEncoder` first.
+
 ## Sign a Trust Manifest
 
 `signTrustManifest()` prepares the payload, calls your signer, and returns a completed `SignedTrustManifest`:
@@ -222,63 +327,6 @@ Each helper omits only the immediate `signature.jws` and immediate `additionalSi
 
 The helpers accept materialized values and do not perform schema validation. Their output is the JWS payload, not a complete signing input or base64url-encoded text. They do not select keys or algorithms, fetch content, enforce time windows, or establish trust. Plain-JSON input defenses and resource limits apply to the complete input. JCS's I-JSON constraints apply to the retained payload after the two omissions.
 
-## Check signatures with a supplied key
-
-`checkCatalogSignature()` and `checkTrustManifestSignature()` verify a detached compact JWS with one caller-selected public key and expected algorithm:
-
-```ts
-import { checkCatalogSignature } from 'ai-catalog-sdk/verification';
-
-const result = await checkCatalogSignature(catalog, {
-  publicKey,
-  expectedAlgorithm: 'ES256',
-});
-```
-
-They share `SignatureCheckOptions` and `SignatureCheckResult`. The SDK implements the exact algorithm token `ES256`; supply a native public P-256 `KeyObject` or a P-256 `CryptoKey` usable for verification. Typed consumers of this Node-only subpath need compatible Node.js declarations, such as `@types/node`.
-
-A `valid` result establishes only that the supplied key verifies the captured payload. It does not authenticate the claimed contributor or catalog operator, enforce issuance or expiration, check artifact binding, or establish trust. Header fields do not select a key or trigger network requests.
-
-The JWS must use canonical, unpadded base64url segments and a valid UTF-8 protected header. The required `typ` is exactly `ai-catalog+jws` for catalogs or `ai-catalog-trust-manifest+jws` for manifests. Any protected `b64` is forbidden. The expected algorithm is trusted caller input; the unverified `alg` is compared against it and never selects an algorithm.
-
-| Signature status | Meaning |
-| --- | --- |
-| `valid` | The supplied key verifies the signature over the captured payload. |
-| `missing_signature` | The containing object has no signature. |
-| `invalid_jws` | The JWS is malformed or violates its required representation or headers. |
-| `algorithm_mismatch` | The protected `alg` differs from the caller's expectation. Includes the claimed algorithm for diagnostics. |
-| `jws_feature_not_implemented` | A well-formed critical extension is unsupported. |
-| `invalid_signature` | The signature representation or cryptographic check failed. |
-
-These functions validate the materialized JSON value without performing catalog or manifest schema validation. Wrong runtime argument types, incompatible keys, and malformed programmatic inputs reject with `TypeError`; resource limits reject with `RangeError`. Unexpected backend failures reject rather than becoming verification results.
-
-## Check a Trust Manifest with a supplied key
-
-`checkCatalogEntryTrustManifest()` checks one explicit manifest against an entry and its artifact representation using your application's verification key:
-
-```ts
-import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/verification';
-
-const resultForEntryWithUrl = await checkCatalogEntryTrustManifest(
-  entryWithUrl,
-  artifactBytes,
-  manifest,
-  { publicKey, expectedAlgorithm: 'ES256' },
-);
-
-const resultForEntryWithData = await checkCatalogEntryTrustManifest(
-  entryWithData,
-  manifest,
-  { publicKey, expectedAlgorithm: 'ES256' },
-);
-```
-
-The manifest need not already be attached to the entry. The function expects a typed or previously parsed entry and does not rerun whole-entry structural validation. It checks the entry’s declared artifact digest first, then the supplied manifest’s declarations and subject correspondence, its signature, and its time window. See the shared [check results](#check-results) for statuses and precedence.
-
-A `passed` result means those checks passed under the caller-selected key. A `not_yet_valid` or `expired` result means the preceding declaration, signature, and binding checks passed. Artifact retrieval URLs do not participate in subject binding, so identical bytes can be served from mirrors.
-
-This utility performs no network requests. The caller is responsible for selecting the signer profile and authenticating and authorizing the supplied key. It accepts the same [`nowMs` and `clockToleranceMs` controls](#network-and-time-controls) as `checkCatalogEntry()`. Invalid call shapes or options and unexpected runtime failures reject, as with that operation.
-
 ## Canonicalize a logical JSON value
 
 `canonicalizeJsonValueToBytes(value)` produces fresh RFC 8785 JCS UTF-8 bytes from a materialized JSON value:
@@ -295,51 +343,3 @@ const result = checkDigest(
 Property names are sorted by UTF-16 code units, array order and Unicode normalization are preserved, and numbers use JCS's ECMAScript representation. The function does not parse source text: passing `'{"x":1}'` canonicalizes a JSON string. It cannot recover duplicate names, original number spelling or precision, or invalid source UTF-8 lost during parsing. It does not omit any signature fields.
 
 Inputs must contain plain JSON objects, arrays, and primitives. Non-finite numbers, lone Unicode surrogates, noncharacters, cycles, sparse or decorated arrays, accessors, proxies, exotic objects, and other non-JSON values throw `TypeError`. Fixed node or nesting-depth limits produce `RangeError`. Canonicalization uses accepted own data properties without invoking inherited `toJSON` hooks or overridden array methods.
-
-## Create a digest
-
-`createDigest(value, algorithm?)` returns an artifact digest in `algorithm:lowercase-hex` form. The algorithm defaults to `sha256`; `sha384` and `sha512` are also supported:
-
-```ts
-import { createDigest } from 'ai-catalog-sdk/verification';
-
-const artifactDigest = createDigest(artifactBytes);
-const inlineDigest = createDigest(entry.data);
-const sha384Digest = createDigest(artifactBytes, 'sha384');
-```
-
-A `Uint8Array` or `Buffer` is hashed as its exact byte range. Other logical JSON values are JCS-canonicalized before hashing. Strings are JSON string values, including their JSON quotes and escapes; ordinary arrays are JSON arrays. To hash text as raw bytes, encode it with `TextEncoder` first.
-
-## Check a digest
-
-`checkDigest(bytes, expectedDigest)` compares the exact byte range supplied by the caller with an AI Catalog digest:
-
-```ts
-import { checkDigest } from 'ai-catalog-sdk/verification';
-
-const result = checkDigest(
-  artifactBytes,
-  'sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
-);
-
-if (result.status !== 'match') {
-  // Do not use the bytes as the declared artifact.
-}
-```
-
-The function hashes bytes verbatim. It does not fetch content, decode a representation, serialize JSON, or apply JCS canonicalization. In particular, callers must not pass an ordinary JSON serialization for an entry with `data`, whose inline artifact digest is defined over JCS-canonicalized `data`.
-
-The result statuses have deliberately narrow meanings:
-
-| Status | Meaning |
-| --- | --- |
-| `match` | The supplied bytes match the declared digest. |
-| `mismatch` | The digest is implemented and well-formed, but the bytes do not match. |
-| `invalid_digest` | The declaration is malformed, or a known algorithm has an invalid output length. |
-| `algorithm_not_implemented` | The declaration is syntactically valid, but the SDK does not implement its exact algorithm token. |
-
-The SDK currently implements the exact, case-sensitive `sha256`, `sha384`, and `sha512` tokens with 64, 96, and 128 lowercase hexadecimal characters, respectively. This is an SDK capability boundary, not a claim that other algorithms are forbidden or insecure. If the runtime cannot execute a registered implementation, the function throws `DigestAlgorithmUnavailableError` and preserves the underlying error as `cause`.
-
-`Buffer` values and `Uint8Array` subviews are accepted. Shared or detached backing buffers are rejected because they cannot provide a stable byte view for the check. Wrong JavaScript argument types and shared or detached byte views throw `TypeError`.
-
-A `match` result establishes only equality between caller-supplied bytes and a declared digest. It does not establish who made the declaration, whether the digest is authoritative, or whether the content is trustworthy.
