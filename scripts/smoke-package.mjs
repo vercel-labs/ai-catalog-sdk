@@ -87,10 +87,10 @@ try {
     join(consumerDirectory, 'smoke.mjs'),
     `import { strict as assert } from 'node:assert';
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
+import { CatalogParseError, implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
-import { canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryArtifactBinding, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(`${pkg.name}/verification`)};
+import { canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryTrustManifest, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(`${pkg.name}/verification`)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
 const value = { specVersion: '1.0', entries: [] };
@@ -191,11 +191,29 @@ for (const representation of ['compact', 'detached', 'flattened']) {
   );
   assert.equal(manifest.signature.jws.split('.')[1], '');
   assert.equal((await checkTrustManifestSignature(manifest, bindingOptions)).status, 'valid');
-  assert.equal((await checkCatalogEntryArtifactBinding(entry, artifactBytes, manifest, bindingOptions)).status, 'valid');
+  assert.equal((await checkCatalogEntryTrustManifest(entry, artifactBytes, manifest, bindingOptions)).status, 'valid');
   manifests.push(manifest);
 }
 const derived = await signTrustManifest(entry, { contributor: 'did:example:alice' }, createJws, metadata);
 assert.deepEqual(derived.subject, subject);
+const fixedNow = Date.parse('2026-08-31T00:00:00Z');
+assert.equal((await checkCatalogEntryTrustManifest(entry, artifactBytes, derived, {
+  ...bindingOptions, nowMs: fixedNow, clockToleranceMs: 0,
+})).status, 'valid');
+assert.equal((await checkCatalogEntryTrustManifest(entry, artifactBytes, derived, {
+  ...bindingOptions, nowMs: fixedNow - 1, clockToleranceMs: 0,
+})).status, 'not_yet_valid');
+const expiringManifest = await signTrustManifest(entry, { contributor: 'did:example:alice' }, createJws, {
+  ...metadata, expiresAt: '2026-09-01T00:00:00Z',
+});
+assert.equal((await checkCatalogEntryTrustManifest(entry, artifactBytes, expiringManifest, {
+  ...bindingOptions, nowMs: Date.parse('2026-09-01T00:00:00Z'), clockToleranceMs: 0,
+})).status, 'expired');
+const invalidManifest = await checkCatalogEntryTrustManifest(entry, artifactBytes, {
+  ...derived, signature: { ...derived.signature, signer: 'did:example:bob' },
+}, bindingOptions);
+assert.equal(invalidManifest.status, 'invalid_manifest');
+assert.ok(invalidManifest.error instanceof CatalogParseError);
 assert.equal(Object.hasOwn(entry, 'trustManifests'), false);
 assert.equal(Object.hasOwn(derived.subject, 'url'), false);
 const defaultManifest = await signTrustManifest({ contributor: 'did:web:example.com', subject }, createJws);
@@ -208,7 +226,7 @@ const defaultEntryManifest = await signTrustManifest(entry, { contributor: 'did:
 });
 assert.equal(defaultEntryManifest.signature.profile, 'did-web-v1');
 assert.equal(defaultEntryManifest.signature.expiresAt, '2100-01-01T00:00:00Z');
-assert.equal((await checkCatalogEntryArtifactBinding(entry, artifactBytes, defaultEntryManifest, bindingOptions)).status, 'valid');
+assert.equal((await checkCatalogEntryTrustManifest(entry, artifactBytes, defaultEntryManifest, bindingOptions)).status, 'valid');
 const signedEntry = { ...entry, trustManifests: manifests };
 const parsedManifests = parseCatalog({ ...value, entries: [signedEntry] }).entries[0].trustManifests;
 const report = await checkCatalogEntry(signedEntry, artifactBytes);
@@ -216,7 +234,7 @@ assert.equal(report.status, 'checked');
 assert.deepEqual(report.manifests.map(result => result.manifest), parsedManifests);
 assert.ok(report.manifests.every(result => !Object.hasOwn(result, 'index')));
 assert.deepEqual(report.manifests.map(result => result.status), ['profile_not_implemented', 'profile_not_implemented', 'profile_not_implemented']);
-const uncheckedReport = await checkCatalogEntry(signedEntry, artifactBytes, { contributors: [] });
+const uncheckedReport = await checkCatalogEntry(signedEntry, artifactBytes, { contributors: [], nowMs: fixedNow, clockToleranceMs: 0 });
 assert.equal(uncheckedReport.status, 'checked');
 assert.deepEqual(uncheckedReport.manifests, parsedManifests.map(manifest => ({ manifest, status: 'not_checked' })));
 const publisherOnly = await checkCatalogEntry(signedEntry, artifactBytes, { contributors: [], alwaysCheckPublisherManifests: true });
@@ -239,7 +257,7 @@ const inlineSubject = {
   digest: 'sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b',
 };
 const inlineManifest = await signTrustManifest({ contributor: 'did:example:alice', subject: inlineSubject }, createJws, metadata);
-assert.equal((await checkCatalogEntryArtifactBinding({ ...inlineEntry, digest: inlineSubject.digest }, inlineManifest, bindingOptions)).status, 'valid');
+assert.equal((await checkCatalogEntryTrustManifest({ ...inlineEntry, digest: inlineSubject.digest }, inlineManifest, bindingOptions)).status, 'valid');
 const unavailablePublisher = await checkCatalogEntry(inlineEntry, { contributors: [], alwaysCheckPublisherManifests: true });
 assert.deepEqual(unavailablePublisher, { status: 'checked', manifests: [] });
 const invalidEntry = await checkCatalogEntry({ ...inlineEntry, trustManifests: [{ contributor: 'did:example:alice' }] });
@@ -255,7 +273,7 @@ await assert.rejects(signTrustManifest({ contributor: 'did:example:alice', subje
   ...createJws(input, 'flattened'), payload: 'different',
 }), metadata), TypeError);
 for (const [property, status] of [['identifier', 'identifier_mismatch'], ['version', 'version_mismatch']]) {
-  const result = await checkCatalogEntryArtifactBinding({ ...entry, [property]: 'different' }, artifactBytes, derived, bindingOptions);
+  const result = await checkCatalogEntryTrustManifest({ ...entry, [property]: 'different' }, artifactBytes, derived, bindingOptions);
   assert.equal(result.status, 'subject_check_failed');
   assert.equal(result.subjectResult.status, status);
 }
@@ -293,7 +311,7 @@ import { aiCatalogJsonSchema, type JsonSchema } from '${pkg.name}/json-schema';
 import {
   canonicalizeJsonValueToBytes,
   checkCatalogEntry,
-  checkCatalogEntryArtifactBinding,
+  checkCatalogEntryTrustManifest,
   checkCatalogSignature,
   checkDigest,
   checkTrustManifestSignature,
@@ -304,7 +322,8 @@ import {
   DigestAlgorithmUnavailableError,
   type DigestAlgorithm,
   type DigestCheckResult,
-  type CatalogEntryArtifactBindingCheckResult,
+  type CatalogEntryTrustManifestCheckOptions,
+  type CatalogEntryTrustManifestCheckResult,
   type CatalogEntryCheckOptions,
   type CatalogEntryCheckResult,
   type SignatureCheckOptions,
@@ -370,18 +389,21 @@ const signatureCheck: Promise<SignatureCheckResult> = checkTrustManifestSignatur
 const catalogSignatureCheck: Promise<SignatureCheckResult> = checkCatalogSignature(authored, signatureOptions);
 const entryWithData: CatalogEntryWithData = { identifier: subject.identifier, type: subject.type, digest: subject.digest, data: null, trustManifests: [trustManifest] };
 const entryWithUrl: CatalogEntryWithUrl = { identifier: subject.identifier, version: '', type: subject.type, digest: subject.digest, url: 'https://example.com/artifact', trustManifests: [trustManifest] };
-const dataBindingCheck: Promise<CatalogEntryArtifactBindingCheckResult> = checkCatalogEntryArtifactBinding(entryWithData, trustManifest, signatureOptions);
-const urlBindingCheck: Promise<CatalogEntryArtifactBindingCheckResult> = checkCatalogEntryArtifactBinding(entryWithUrl, new Uint8Array(), trustManifest, signatureOptions);
+const manifestOptions: CatalogEntryTrustManifestCheckOptions = {
+  ...signatureOptions, nowMs: Date.parse('2026-08-31T00:00:00Z'), clockToleranceMs: 0,
+};
+const dataBindingCheck: Promise<CatalogEntryTrustManifestCheckResult> = checkCatalogEntryTrustManifest(entryWithData, trustManifest, manifestOptions);
+const urlBindingCheck: Promise<CatalogEntryTrustManifestCheckResult> = checkCatalogEntryTrustManifest(entryWithUrl, new Uint8Array(), trustManifest, manifestOptions);
 const unionEntry = authored.entries[0];
 const unionBindingCheck = unionEntry === undefined ? undefined : isCatalogEntryWithData(unionEntry)
-  ? checkCatalogEntryArtifactBinding(unionEntry, trustManifest, signatureOptions)
-  : checkCatalogEntryArtifactBinding(unionEntry, new Uint8Array(), trustManifest, signatureOptions);
+  ? checkCatalogEntryTrustManifest(unionEntry, trustManifest, signatureOptions)
+  : checkCatalogEntryTrustManifest(unionEntry, new Uint8Array(), trustManifest, signatureOptions);
 // @ts-expect-error Entries with url require explicit artifact bytes.
-checkCatalogEntryArtifactBinding(entryWithUrl, trustManifest, signatureOptions);
+checkCatalogEntryTrustManifest(entryWithUrl, trustManifest, signatureOptions);
 // @ts-expect-error Entries with data do not accept separate artifact bytes.
-checkCatalogEntryArtifactBinding(entryWithData, new Uint8Array(), trustManifest, signatureOptions);
+checkCatalogEntryTrustManifest(entryWithData, new Uint8Array(), trustManifest, signatureOptions);
 const options: CatalogEntryCheckOptions = {
-  contributors: ['did:example:alice'], alwaysCheckPublisherManifests: true, clockToleranceMs: 0,
+  contributors: ['did:example:alice'], alwaysCheckPublisherManifests: true, clockToleranceMs: 0, nowMs: 0,
   signal: new AbortController().signal, timeoutMs: 60_000, maxResponseBytes: 16 * 1024 * 1024,
 };
 const dataCheck: Promise<CatalogEntryCheckResult> = checkCatalogEntry(entryWithData);
@@ -394,6 +416,11 @@ checkCatalogEntry(entryWithUrl, options);
 checkCatalogEntry(entryWithData, new Uint8Array(), options);
 // @ts-expect-error Automatic verification selects its own keys.
 checkCatalogEntry(entryWithData, { publicKey: signaturePublicKey });
+const manifestReport = {} as CatalogEntryTrustManifestCheckResult;
+if (manifestReport.status === 'invalid_manifest') {
+  const parseError: import('${pkg.name}').CatalogParseError = manifestReport.error;
+  void parseError;
+}
 const report = {} as CatalogEntryCheckResult;
 if (report.status === 'checked') {
   const uncheckedManifests: TrustManifest[] = report.manifests

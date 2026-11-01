@@ -15,7 +15,10 @@ import {
   checkManifestTime,
   IssuerCheckError,
 } from './internal/publisher-profile.js';
-import { safeParseCatalogEntry } from './internal/parser.js';
+import {
+  safeParseCatalogEntry,
+  safeParseTrustManifest,
+} from './internal/parser.js';
 import type {
   CatalogParseError,
   Signature,
@@ -553,10 +556,22 @@ export type SubjectCheckFailure =
   | Exclude<DigestCheckResult, { status: 'match' }>;
 
 /** The outcome of checking one explicit manifest using a caller-selected key. */
-export type CatalogEntryArtifactBindingCheckResult =
+export type CatalogEntryTrustManifestCheckResult =
   | { status: 'valid' }
+  | { status: 'invalid_manifest'; error: CatalogParseError }
   | { status: 'signature_check_failed'; signatureResult: SignatureCheckFailure }
-  | { status: 'subject_check_failed'; subjectResult: SubjectCheckFailure };
+  | { status: 'subject_check_failed'; subjectResult: SubjectCheckFailure }
+  | { status: 'not_yet_valid' }
+  | { status: 'expired' };
+
+/** Caller-selected key and time controls for one explicit manifest. */
+export interface CatalogEntryTrustManifestCheckOptions
+  extends SignatureCheckOptions {
+  /** Nonnegative safe integer milliseconds of clock skew. Defaults to 60,000. */
+  clockToleranceMs?: number;
+  /** Evaluation instant as safe integer UTC epoch milliseconds; defaults to the clock near completion. */
+  nowMs?: number;
+}
 
 /** Selection, time, and DID-resolution controls for an entry check. */
 export interface CatalogEntryCheckOptions {
@@ -569,6 +584,8 @@ export interface CatalogEntryCheckOptions {
   alwaysCheckPublisherManifests?: boolean;
   /** Nonnegative integer milliseconds of clock skew. Defaults to 60,000. */
   clockToleranceMs?: number;
+  /** Evaluation instant as safe integer UTC epoch milliseconds; defaults to the clock near completion. */
+  nowMs?: number;
   /** Cancels the whole operation; cancellation rejects with the signal reason. */
   signal?: AbortSignal;
   /** Deadline for each DID resolution, including DNS/redirects/body. Defaults to 60,000 ms. */
@@ -867,35 +884,40 @@ export async function checkTrustManifestSignature(
 }
 
 /**
- * Checks one explicit manifest's signature and artifact binding with the
- * caller-selected key. It does not resolve identity or enforce currentness.
+ * Reports the first failure in this order: manifest structure, supplied-key
+ * signature, subject/artifact binding, and time-window acceptance.
+ * An `expired` or `not_yet_valid` result means the preceding checks passed.
+ * The caller selects the signer profile and authenticates/authorizes the key;
+ * this operation performs no network requests or whole-entry validation.
  * URL entries take their supplied artifact bytes adjacent to the entry.
  */
-export function checkCatalogEntryArtifactBinding(
+export function checkCatalogEntryTrustManifest(
   entry: CatalogEntryWithData,
   manifest: TrustManifest,
-  options: SignatureCheckOptions,
-): Promise<CatalogEntryArtifactBindingCheckResult>;
-export function checkCatalogEntryArtifactBinding(
+  options: CatalogEntryTrustManifestCheckOptions,
+): Promise<CatalogEntryTrustManifestCheckResult>;
+export function checkCatalogEntryTrustManifest(
   entry: CatalogEntryWithUrl,
   artifactBytes: Uint8Array,
   manifest: TrustManifest,
-  options: SignatureCheckOptions,
-): Promise<CatalogEntryArtifactBindingCheckResult>;
-export async function checkCatalogEntryArtifactBinding(
+  options: CatalogEntryTrustManifestCheckOptions,
+): Promise<CatalogEntryTrustManifestCheckResult>;
+export async function checkCatalogEntryTrustManifest(
   entry: CatalogEntry,
   bytesOrManifest: Uint8Array | TrustManifest,
-  manifestOrOptions: TrustManifest | SignatureCheckOptions,
-  maybeOptions?: SignatureCheckOptions,
-): Promise<CatalogEntryArtifactBindingCheckResult> {
+  manifestOrOptions: TrustManifest | CatalogEntryTrustManifestCheckOptions,
+  maybeOptions?: CatalogEntryTrustManifestCheckOptions,
+): Promise<CatalogEntryTrustManifestCheckResult> {
   const isDataCall = maybeOptions === undefined;
-  const options = snapshotSignatureCheckOptions(
-    isDataCall ? manifestOrOptions : maybeOptions,
-  );
+  const rawOptions = isDataCall ? manifestOrOptions : maybeOptions;
+  const options = snapshotSignatureCheckOptions(rawOptions);
+  const timeOptions = snapshotTimeCheckOptions(rawOptions as object);
   const artifact = captureArtifactContext(entry, bytesOrManifest, isDataCall);
-  const manifest = (
-    isDataCall ? bytesOrManifest : manifestOrOptions
-  ) as TrustManifest;
+  const input = isDataCall ? bytesOrManifest : manifestOrOptions;
+  assertCanonicalizableJsonObject(input, 'manifest');
+  const parsed = safeParseTrustManifest(input);
+  if (!parsed.success) return { status: 'invalid_manifest', error: parsed.error };
+  const manifest = parsed.data;
   const signature = snapshotSignaturePayload(manifest, 'manifest');
   const subjectResult = checkSubject(artifact.entry, manifest, artifact.bytes);
   const signatureResult = await executeSignatureCheck(
@@ -907,6 +929,14 @@ export async function checkCatalogEntryArtifactBinding(
     return { status: 'signature_check_failed', signatureResult };
   if (subjectResult.status !== 'match')
     return { status: 'subject_check_failed', subjectResult };
+  if (manifest.signature !== undefined) {
+    const time = checkManifestTime(
+      manifest.signature,
+      timeOptions.nowMs ?? Date.now(),
+      timeOptions.clockToleranceMs,
+    );
+    if (time !== undefined) return { status: time };
+  }
   return { status: 'valid' };
 }
 
@@ -989,10 +1019,43 @@ function throwIfCanceled(signal: AbortSignal | undefined): void {
   if (signal !== undefined) AbortSignal.prototype.throwIfAborted.call(signal);
 }
 
-interface CapturedEntryCheckOptions {
+interface CapturedTimeCheckOptions {
+  clockToleranceMs: number;
+  nowMs?: number;
+}
+
+function snapshotTimeCheckOptions(value: object): CapturedTimeCheckOptions {
+  const options: Record<string, unknown> = Object.create(null);
+  for (const name of ['clockToleranceMs', 'nowMs']) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, name);
+    if (!descriptor) continue;
+    if (!('value' in descriptor))
+      throw new TypeError(`options.${name} must be an own data property.`);
+    options[name] = descriptor.value;
+  }
+  const clockToleranceMs =
+    options.clockToleranceMs === undefined ? 60_000 : options.clockToleranceMs;
+  if (
+    typeof clockToleranceMs !== 'number' ||
+    !Number.isSafeInteger(clockToleranceMs) ||
+    clockToleranceMs < 0
+  )
+    throw new TypeError('clockToleranceMs must be a nonnegative safe integer.');
+  const nowMs = options.nowMs;
+  if (
+    nowMs !== undefined &&
+    (typeof nowMs !== 'number' || !Number.isSafeInteger(nowMs))
+  )
+    throw new TypeError('nowMs must be safe integer UTC epoch milliseconds.');
+  return {
+    clockToleranceMs,
+    ...(nowMs === undefined ? {} : { nowMs }),
+  };
+}
+
+interface CapturedEntryCheckOptions extends CapturedTimeCheckOptions {
   contributors?: readonly string[];
   alwaysCheckPublisherManifests: boolean;
-  clockToleranceMs: number;
   signal?: AbortSignal;
   timeoutMs: number;
   maxResponseBytes: number;
@@ -1018,6 +1081,7 @@ function snapshotEntryCheckOptions(value: unknown): CapturedEntryCheckOptions {
     'contributors',
     'alwaysCheckPublisherManifests',
     'clockToleranceMs',
+    'nowMs',
     'signal',
     'timeoutMs',
     'maxResponseBytes',
@@ -1034,8 +1098,7 @@ function snapshotEntryCheckOptions(value: unknown): CapturedEntryCheckOptions {
     options.maxResponseBytes === undefined
       ? 16 * 1024 * 1024
       : options.maxResponseBytes;
-  const clockToleranceMs =
-    options.clockToleranceMs === undefined ? 60_000 : options.clockToleranceMs;
+  const timeOptions = snapshotTimeCheckOptions(options);
   const alwaysCheckPublisherManifests =
     options.alwaysCheckPublisherManifests === undefined
       ? false
@@ -1052,12 +1115,6 @@ function snapshotEntryCheckOptions(value: unknown): CapturedEntryCheckOptions {
     maxResponseBytes <= 0
   )
     throw new TypeError('maxResponseBytes must be a positive safe integer.');
-  if (
-    typeof clockToleranceMs !== 'number' ||
-    !Number.isSafeInteger(clockToleranceMs) ||
-    clockToleranceMs < 0
-  )
-    throw new TypeError('clockToleranceMs must be a nonnegative safe integer.');
   if (typeof alwaysCheckPublisherManifests !== 'boolean')
     throw new TypeError('alwaysCheckPublisherManifests must be a boolean.');
   let contributors: string[] | undefined;
@@ -1097,7 +1154,7 @@ function snapshotEntryCheckOptions(value: unknown): CapturedEntryCheckOptions {
   return {
     ...(contributors === undefined ? {} : { contributors }),
     alwaysCheckPublisherManifests,
-    clockToleranceMs,
+    ...timeOptions,
     timeoutMs,
     maxResponseBytes,
     ...(signal === undefined ? {} : { signal: signal as AbortSignal }),
@@ -1283,7 +1340,7 @@ export async function checkCatalogEntry(
     results.push({ manifest, ...result });
   }
   throwIfCanceled(options.signal);
-  const now = Date.now();
+  const now = options.nowMs ?? Date.now();
   for (let index = 0; index < results.length; index += 1) {
     const evaluation = results[index];
     if (

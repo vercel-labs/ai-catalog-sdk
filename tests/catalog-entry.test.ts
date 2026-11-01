@@ -413,6 +413,38 @@ describe('checkCatalogEntry', () => {
     }
   });
 
+  it('uses an explicit evaluation instant for every selected endorsement', async () => {
+    const entry = entryFor([
+      manifestFor(publisher, { expiresAt: '2026-10-06T00:00:00Z' }),
+      manifestFor(assessor, { issuedAt: '2026-10-06T00:00:30Z' }),
+    ]);
+    const nowMs = Date.parse('2026-10-06T00:00:00Z');
+    expect(await statuses(entry, { nowMs })).toMatchObject([
+      { status: 'valid' },
+      { status: 'valid' },
+    ]);
+    expect(await statuses(entry, { nowMs, clockToleranceMs: 0 })).toMatchObject([
+      { status: 'expired' },
+      { status: 'not_yet_valid' },
+    ]);
+  });
+
+  it('captures the explicit evaluation instant and tolerance before DID resolution', async () => {
+    const entry = entryFor([
+      manifestFor(publisher, { issuedAt: '2026-10-06T00:00:30Z' }),
+    ]);
+    const options = {
+      nowMs: Date.parse('2026-10-06T00:00:00Z'),
+      clockToleranceMs: 60_000,
+    };
+    resolver.mockImplementation(async (identity) => {
+      options.nowMs = Date.parse('2000-01-01T00:00:00Z');
+      options.clockToleranceMs = 0;
+      return documentFor(identity);
+    });
+    expect(await statuses(entry, options)).toMatchObject([{ status: 'valid' }]);
+  });
+
   it('preserves submillisecond currentness at tolerance boundaries', async () => {
     vi.useFakeTimers();
     try {
@@ -521,6 +553,12 @@ describe('checkCatalogEntry', () => {
     { maxResponseBytes: 1.5 },
     { clockToleranceMs: -1 },
     { clockToleranceMs: 0.5 },
+    { clockToleranceMs: Infinity },
+    { nowMs: null },
+    { nowMs: Infinity },
+    { nowMs: NaN },
+    { nowMs: 0.5 },
+    { nowMs: Number.MAX_SAFE_INTEGER + 1 },
     { signal: {} },
     { contributors: [4] },
   ])('rejects invalid options: %j', async (options) => {

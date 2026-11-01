@@ -518,6 +518,15 @@ export function safeParseCatalogEntry(
   );
 }
 
+/** Internal manifest validation with the root parsers' bounded diagnostics. */
+export function safeParseTrustManifest(
+  input: unknown,
+): ParseResult<TrustManifest> {
+  return safeParseWith(input, (manifestInput, collector) =>
+    parseTrustManifest(manifestInput, [], collector),
+  );
+}
+
 /**
  * Validates and returns an already-parsed JSON value as a single AI Catalog
  * entry.

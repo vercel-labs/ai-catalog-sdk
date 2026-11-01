@@ -99,15 +99,15 @@ For example, a report with valid publisher and assessor contributions can look l
 | Manifest status | Meaning |
 | --- | --- |
 | `not_checked` | The contributor options excluded this manifest from verification. |
-| `valid` | Contributor authentication, signature, subject binding, and current acceptance passed. Includes `isPublisherEndorsement`. |
+| `valid` | Contributor authentication, signature, subject binding, and time-window checks passed. Includes `isPublisherEndorsement`. |
 | `missing_signature` | The manifest is unsigned metadata. |
 | `profile_not_implemented` | The exact selected `profile` is not implemented. No fallback profile is tried. |
 | `profile_check_failed` | The manifest or JWS does not satisfy the supported profile. `error` explains the failure. |
 | `issuer_check_failed` | DID resolution, DID document validation, or key authorization failed. `error` explains the failure. |
 | `signature_check_failed` | `signatureResult` contains the lower-level signature failure. |
 | `subject_check_failed` | `subjectResult` contains the lower-level binding failure. |
-| `not_yet_valid` | The authenticated issuance time is later than the current time plus tolerance. |
-| `expired` | The current time has reached expiration plus tolerance. |
+| `not_yet_valid` | The authenticated issuance time is later than the evaluation time plus tolerance. |
+| `expired` | The evaluation time has reached expiration plus tolerance. |
 
 Only `valid` results authenticate an endorsement for this entry. None of these results establish claim accuracy, publisher reputation, attestation validity, or artifact safety. The operation does not authenticate the surrounding catalog or validate the artifact's format-specific schema.
 
@@ -149,7 +149,7 @@ const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {
 
 Each DID resolution has a 60-second default deadline covering DNS, redirects, and body reading, with a 16 MiB decoded body limit. Requests use HTTPS and check resolved addresses, including after redirects. A resolution timeout or size failure becomes that manifest's `issuer_check_failed` result. Selected manifests sharing a signer reuse one DID resolution within the invocation; calls do not share a DID cache. The number of selected contributors therefore affects total latency. Use `signal` to cancel the entire operation or impose an overall deadline.
 
-The SDK samples the machine's UTC clock near completion and applies that same instant to the selected endorsements. `clockToleranceMs` defaults to 60,000 and accepts non-negative safe integer milliseconds, including zero. Issuance beyond the tolerance produces `not_yet_valid`; reaching expiration plus tolerance produces `expired`. Tolerance does not repair an expiration that is at or before issuance. `issuedAt` remains an authenticated assertion by the signer, not an independently trusted timestamp.
+Both `checkCatalogEntry()` and `checkCatalogEntryTrustManifest()` accept `nowMs`, an optional safe integer UTC epoch time in milliseconds used to evaluate the time window. When omitted, the SDK samples the machine's UTC clock near completion; `checkCatalogEntry()` applies the same instant to all selected endorsements. `clockToleranceMs` defaults to 60,000 and accepts non-negative safe integer milliseconds, including zero. Issuance beyond the tolerance produces `not_yet_valid`; reaching expiration plus tolerance produces `expired`. Tolerance does not repair an expiration that is at or before issuance. `issuedAt` remains an authenticated assertion by the signer, not an independently trusted timestamp.
 
 Entry, manifest, option, and artifact inputs are captured before asynchronous work. Later caller mutations do not change what an invocation checks. Returned manifests are the captured values. Expected verification failures return results; invalid call shapes or options, explicit cancellation, and unexpected cryptographic or runtime failures reject. Diagnostic `Error` objects can carry causes, but their message text is not a stable classification API. Branch on result discriminators.
 
@@ -242,32 +242,37 @@ The JWS must use canonical, unpadded base64url segments and a valid UTF-8 protec
 
 These functions validate the materialized JSON value without performing catalog or manifest schema validation. Wrong runtime argument types, incompatible keys, and malformed programmatic inputs reject with `TypeError`; resource limits reject with `RangeError`. Unexpected backend failures reject rather than becoming verification results.
 
-## Check artifact binding with a supplied key
+## Check a Trust Manifest with a supplied key
 
-`checkCatalogEntryArtifactBinding()` checks one explicit signed manifest against an entry and its artifact representation:
+`checkCatalogEntryTrustManifest()` checks one explicit manifest against an entry and its artifact representation using your application's verification key:
 
 ```ts
-import { checkCatalogEntryArtifactBinding } from 'ai-catalog-sdk/verification';
+import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/verification';
 
-const resultForEntryWithUrl = await checkCatalogEntryArtifactBinding(
+const resultForEntryWithUrl = await checkCatalogEntryTrustManifest(
   entryWithUrl,
   artifactBytes,
   manifest,
   { publicKey, expectedAlgorithm: 'ES256' },
 );
 
-const resultForEntryWithData = await checkCatalogEntryArtifactBinding(
+const resultForEntryWithData = await checkCatalogEntryTrustManifest(
   entryWithData,
   manifest,
   { publicKey, expectedAlgorithm: 'ES256' },
 );
 ```
 
-The manifest need not already be attached to the entry. A `valid` result means its signature verifies under the supplied key, its subject identifier and type equal the entry's, version presence and value match, its digest matches the entry's declared digest, and the artifact representation matches that digest. Artifact retrieval URLs do not participate in subject binding, so identical bytes can be served from mirrors.
+The manifest need not already be attached to the entry. The function expects a typed or previously parsed entry and does not rerun whole-entry structural validation. It reports the first failure in this order:
 
-`signature_check_failed` carries the lower-level `signatureResult`; `subject_check_failed` carries `missing_subject`, `identifier_mismatch`, `version_mismatch`, `type_mismatch`, `digest_mismatch`, or a lower-level digest failure as `subjectResult`. Version mismatch includes presence on only one side. A signature failure takes precedence over a subject failure. The function expects a typed or previously parsed entry and does not rerun whole-entry structural validation.
+1. Manifest structure, including signature signer/contributor equality, timestamp syntax, and expiration after issuance. Failure returns `invalid_manifest` with a `CatalogParseError` in `error`.
+2. The signature under the supplied public key and expected algorithm. Failure returns `signature_check_failed` with the lower-level `signatureResult`.
+3. Subject and artifact binding: identifier and type equality, matching version presence and value, matching subject/entry digests, and artifact bytes matching that digest. Failure returns `subject_check_failed` with the lower-level `subjectResult`.
+4. The time window, using the same [`nowMs` and `clockToleranceMs` controls](#network-and-time-controls) as `checkCatalogEntry()`. Failure returns `not_yet_valid` or `expired`.
 
-This utility performs no network requests, contributor authentication, or time-window checks. A custom signer-profile implementation must supply those checks around it. Wrong runtime argument types, hostile programmatic inputs, and shared or detached artifact buffers reject with `TypeError`; canonicalization limits reject with `RangeError`, and unexpected backend errors propagate.
+A `valid` result means all four checks passed. A `not_yet_valid` or `expired` result means the preceding structure, signature, and binding checks passed. Artifact retrieval URLs do not participate in subject binding, so identical bytes can be served from mirrors.
+
+This utility performs no network requests. The caller is responsible for selecting the signer profile and authenticating and authorizing the supplied key. Invalid call shapes or options and unexpected runtime failures reject, as with `checkCatalogEntry()`.
 
 ## Canonicalize a logical JSON value
 
