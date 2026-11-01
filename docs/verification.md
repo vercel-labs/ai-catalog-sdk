@@ -249,14 +249,14 @@ These functions validate the materialized JSON value without performing catalog 
 ```ts
 import { checkCatalogEntryArtifactBinding } from 'ai-catalog-sdk/verification';
 
-const urlResult = await checkCatalogEntryArtifactBinding(
+const resultForEntryWithUrl = await checkCatalogEntryArtifactBinding(
   entryWithUrl,
   artifactBytes,
   manifest,
   { publicKey, expectedAlgorithm: 'ES256' },
 );
 
-const inlineResult = await checkCatalogEntryArtifactBinding(
+const resultForEntryWithData = await checkCatalogEntryArtifactBinding(
   entryWithData,
   manifest,
   { publicKey, expectedAlgorithm: 'ES256' },
