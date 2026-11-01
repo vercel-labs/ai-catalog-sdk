@@ -8,6 +8,7 @@ import {
   signTrustManifest,
   type JwsSigningResult,
   type TrustManifestSigner,
+  type TrustManifestSignatureMetadata,
 } from '../src/internal/signing.js';
 import {
   checkTrustManifestSignature,
@@ -43,13 +44,13 @@ const compactSigner: TrustManifestSigner = ({ payload, typ }) =>
 
 describe('signTrustManifest', () => {
   it.each(['compact', 'detached', 'flattened'] as const)('accepts native %s JWS and returns a verifiable detached manifest', async (format) => {
-    const result = await signTrustManifest(body(), metadata(), async ({ payload, typ }) => {
+    const result = await signTrustManifest(body(), async ({ payload, typ }) => {
       if (format === 'flattened') {
         return new FlattenedSign(payload).setProtectedHeader({ alg: 'ES256', typ }).sign(keys.privateKey);
       }
       const compact = await new CompactSign(payload).setProtectedHeader({ alg: 'ES256', typ }).sign(keys.privateKey);
       return format === 'compact' ? compact : compact.replace(/\.[^.]+\./, '..');
-    });
+    }, metadata());
     expect(result.signature.signer).toBe(body().contributor);
     expect(result.signature.jws.split('.')[1]).toBe('');
     expect(await checkTrustManifestSignature(result, {
@@ -58,9 +59,79 @@ describe('signTrustManifest', () => {
     })).toEqual({ status: 'valid' });
   });
 
+  it('defaults signature fields before asynchronous signing in both forms', async () => {
+    vi.useFakeTimers();
+    try {
+      const issuedAt = '2026-10-31T00:00:00.000Z';
+      vi.setSystemTime(new Date(issuedAt));
+      const result = await signTrustManifest(body(), async ({ payload, typ }) => {
+        const signedPayload = JSON.parse(new TextDecoder().decode(payload));
+        expect(signedPayload.signature).toEqual({
+          signer: body().contributor,
+          profile: 'did-web-v1',
+          issuedAt,
+        });
+        vi.setSystemTime(new Date('2026-11-01T00:00:00.000Z'));
+        return compactSigner({ payload, typ });
+      });
+      expect(result.signature.issuedAt).toBe(issuedAt);
+      expect(result.signature.profile).toBe('did-web-v1');
+      expect(Object.hasOwn(result.signature, 'expiresAt')).toBe(false);
+      expect(await checkTrustManifestSignature(result, {
+        publicKey: keys.publicKey,
+        expectedAlgorithm: 'ES256',
+      })).toEqual({ status: 'valid' });
+
+      vi.setSystemTime(new Date(issuedAt));
+      const entry = { ...body().subject, data: null };
+      const fromEntry = await signTrustManifest(entry, { contributor: body().contributor }, compactSigner);
+      expect(fromEntry.signature.profile).toBe('did-web-v1');
+      expect(fromEntry.signature.issuedAt).toBe(issuedAt);
+      expect(fromEntry.subject).toEqual(body().subject);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('applies independent overrides without mutating signature metadata', async () => {
+    vi.useFakeTimers();
+    try {
+      const now = '2026-10-31T00:00:00.000Z';
+      vi.setSystemTime(new Date(now));
+      const customProfile = { profile: 'custom' };
+      const customTime = { issuedAt: '2026-10-30T01:02:03+00:00' };
+      const expiryOnly = { expiresAt: '2027-01-01T00:00:00Z' };
+      const profileResult = await signTrustManifest(body(), compactSigner, customProfile);
+      expect(profileResult.signature.profile).toBe('custom');
+      expect(profileResult.signature.issuedAt).toBe(now);
+      const timeResult = await signTrustManifest(body(), compactSigner, customTime);
+      expect(timeResult.signature.profile).toBe('did-web-v1');
+      expect(timeResult.signature.issuedAt).toBe(customTime.issuedAt);
+      const expiryResult = await signTrustManifest(body(), compactSigner, expiryOnly);
+      expect(expiryResult.signature.expiresAt).toBe(expiryOnly.expiresAt);
+      expect(expiryResult.signature.issuedAt).toBe(now);
+      expect(customProfile).toEqual({ profile: 'custom' });
+      expect(customTime).toEqual({ issuedAt: '2026-10-30T01:02:03+00:00' });
+      expect(expiryOnly).toEqual({ expiresAt: '2027-01-01T00:00:00Z' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { profile: undefined },
+    { issuedAt: undefined },
+    { profile: null },
+    { issuedAt: null },
+  ])('does not replace explicitly invalid signature metadata with defaults: %j', async (invalidMetadata) => {
+    const signer = vi.fn(compactSigner);
+    await expect(signTrustManifest(body(), signer, invalidMetadata as unknown as TrustManifestSignatureMetadata)).rejects.toThrow(TypeError);
+    expect(signer).not.toHaveBeenCalled();
+  });
+
   it('supports synchronous signing callbacks', async () => {
-    const result = await signTrustManifest(body(), metadata(), ({ payload, typ }) =>
-      nodeJws(payload, { alg: 'ES256', typ }));
+    const result = await signTrustManifest(body(), ({ payload, typ }) =>
+      nodeJws(payload, { alg: 'ES256', typ }), metadata());
     expect(result.signature.jws).toContain('..');
   });
 
@@ -73,7 +144,7 @@ describe('signTrustManifest', () => {
       extensions: { 'example.com': { hidden: true } },
     };
     const before = structuredClone(entry);
-    const signed = await signTrustManifest(entry, { contributor: manifest.contributor }, metadata(), compactSigner);
+    const signed = await signTrustManifest(entry, { contributor: manifest.contributor }, compactSigner, metadata());
     expect(signed.subject).toEqual({ ...manifest.subject, version: '' });
     expect(entry).toEqual(before);
     expect(signed.contributor).toBe('did:web:auditor.example');
@@ -82,7 +153,7 @@ describe('signTrustManifest', () => {
   it('does not traverse unrelated artifact data to project the subject', async () => {
     const entry = { ...body().subject, data: null };
     Object.defineProperty(entry, 'data', { get() { throw new Error('must not read data'); } });
-    const signed = await signTrustManifest(entry, { contributor: body().contributor }, metadata(), compactSigner);
+    const signed = await signTrustManifest(entry, { contributor: body().contributor }, compactSigner, metadata());
     expect(signed.subject).toEqual(body().subject);
   });
 
@@ -90,7 +161,7 @@ describe('signTrustManifest', () => {
     const signer = vi.fn(compactSigner);
     await expect(signTrustManifest({ identifier: 'x', type: 'application/json', data: {} }, {
       contributor: body().contributor,
-    }, metadata(), signer)).rejects.toThrow(TypeError);
+    }, signer, metadata())).rejects.toThrow(TypeError);
     expect(signer).not.toHaveBeenCalled();
   });
 
@@ -98,7 +169,7 @@ describe('signTrustManifest', () => {
     const manifest = { ...body(), extensions: { 'example.com': { value: 1 } }, unknown: { signature: { jws: 'covered' } } };
     const signatureMetadata = metadata();
     let callbackPayload: Uint8Array | undefined;
-    const signed = await signTrustManifest(manifest, signatureMetadata, async ({ payload, typ }) => {
+    const signed = await signTrustManifest(manifest, async ({ payload, typ }) => {
       callbackPayload = payload;
       manifest.extensions['example.com'].value = 2;
       manifest.unknown.signature.jws = 'changed';
@@ -106,7 +177,7 @@ describe('signTrustManifest', () => {
       const compact = await new CompactSign(payload).setProtectedHeader({ alg: 'ES256', typ }).sign(keys.privateKey);
       payload.fill(0);
       return compact;
-    });
+    }, signatureMetadata);
     expect(callbackPayload?.every((byte) => byte === 0)).toBe(true);
     expect((signed.extensions?.['example.com'] as { value: number }).value).toBe(1);
     expect((signed as unknown as { unknown: unknown }).unknown).toEqual({ signature: { jws: 'covered' } });
@@ -115,15 +186,15 @@ describe('signTrustManifest', () => {
   });
 
   it('rejects a payload changed by the callback before signing', async () => {
-    await expect(signTrustManifest(body(), metadata(), ({ payload, typ }) => {
+    await expect(signTrustManifest(body(), ({ payload, typ }) => {
       payload.fill(0);
       return nodeJws(payload, { alg: 'ES256', typ });
-    })).rejects.toThrow(/payload must match/);
+    }, metadata())).rejects.toThrow(/payload must match/);
   });
 
   it('leaves cryptographic agreement to verification for already-detached output', async () => {
-    const signed = await signTrustManifest(body(), metadata(), ({ typ }) =>
-      nodeJws(new Uint8Array([1]), { alg: 'ES256', typ }).replace(/\.[^.]+\./, '..'));
+    const signed = await signTrustManifest(body(), ({ typ }) =>
+      nodeJws(new Uint8Array([1]), { alg: 'ES256', typ }).replace(/\.[^.]+\./, '..'), metadata());
     expect(await checkTrustManifestSignature(signed, { publicKey: keys.publicKey, expectedAlgorithm: 'ES256' })).toEqual({ status: 'invalid_signature' });
   });
 
@@ -138,18 +209,18 @@ describe('signTrustManifest', () => {
     { alg: 'ES256', typ: 'ai-catalog-trust-manifest+jws', crit: ['typ'] },
     { alg: 'ES256', typ: 'ai-catalog-trust-manifest+jws', crit: ['absent'] },
   ] as Record<string, JsonValue>[])('rejects invalid or forbidden protected metadata: %j', async (header) => {
-    await expect(signTrustManifest(body(), metadata(), ({ payload }) => nodeJws(payload, header))).rejects.toThrow(TypeError);
+    await expect(signTrustManifest(body(), ({ payload }) => nodeJws(payload, header), metadata())).rejects.toThrow(TypeError);
   });
 
   it('requires encoded protected fields even when similarly named properties are inherited', async () => {
     Object.defineProperty(Object.prototype, 'alg', { value: 'ES256', configurable: true });
     Object.defineProperty(Object.prototype, 'typ', { value: 'ai-catalog-trust-manifest+jws', configurable: true });
     try {
-      await expect(signTrustManifest(body(), metadata(), ({ payload }) => ({
+      await expect(signTrustManifest(body(), ({ payload }) => ({
         protected: 'e30',
         payload: Buffer.from(payload).toString('base64url'),
         signature: 'AA',
-      }))).rejects.toThrow(TypeError);
+      }), metadata())).rejects.toThrow(TypeError);
     } finally {
       Reflect.deleteProperty(Object.prototype, 'alg');
       Reflect.deleteProperty(Object.prototype, 'typ');
@@ -157,10 +228,10 @@ describe('signTrustManifest', () => {
   });
 
   it('does not restrict authoring to the verification helper algorithm', async () => {
-    const signed = await signTrustManifest(body(), { ...metadata(), profile: 'custom' }, ({ payload, typ }) => {
+    const signed = await signTrustManifest(body(), ({ payload, typ }) => {
       const compact = nodeJws(payload, { alg: 'custom-algorithm', typ });
       return compact;
-    });
+    }, { ...metadata(), profile: 'custom' });
     expect(signed.signature.profile).toBe('custom');
   });
 
@@ -170,12 +241,12 @@ describe('signTrustManifest', () => {
       { protected: 'e30', payload: 'AA', signature: 'AA', header: {} },
       { payload: 'AA', signature: 'AA' },
     ]) {
-      await expect(signTrustManifest(body(), metadata(), () => malformed)).rejects.toThrow(TypeError);
+      await expect(signTrustManifest(body(), () => malformed, metadata())).rejects.toThrow(TypeError);
     }
   });
 
   it.each(['a.b.c.d', 'e30..AA=', 'e31..AA', '.e30.AA', 'e30..', `${Buffer.from('{').toString('base64url')}..AA`])('rejects malformed callback JWS %s', async (jws) => {
-    await expect(signTrustManifest(body(), metadata(), () => jws)).rejects.toThrow(TypeError);
+    await expect(signTrustManifest(body(), () => jws, metadata())).rejects.toThrow(TypeError);
   });
 
   it('does not invoke the signer with invalid, already-signed, or hostile authoring inputs', async () => {
@@ -188,28 +259,28 @@ describe('signTrustManifest', () => {
       new Proxy(body(), {}),
     ];
     for (const invalid of invalidBodies) {
-      await expect(signTrustManifest(invalid as ReturnType<typeof body>, metadata(), signer)).rejects.toThrow(TypeError);
+      await expect(signTrustManifest(invalid as ReturnType<typeof body>, signer, metadata())).rejects.toThrow(TypeError);
     }
-    await expect(signTrustManifest(body(), { ...metadata(), signer: 'other' } as ReturnType<typeof metadata>, signer)).rejects.toThrow(TypeError);
-    await expect(signTrustManifest(body(), { ...metadata(), expiresAt: '2026-10-29T00:00:00Z' }, signer)).rejects.toThrow(TypeError);
+    await expect(signTrustManifest(body(), signer, { ...metadata(), signer: 'other' } as ReturnType<typeof metadata>)).rejects.toThrow(TypeError);
+    await expect(signTrustManifest(body(), signer, { ...metadata(), expiresAt: '2026-10-29T00:00:00Z' })).rejects.toThrow(TypeError);
     expect(signer).not.toHaveBeenCalled();
   });
 
   it('rejects an entry overload body with its own subject', async () => {
     const entry = { ...body().subject, data: null };
-    await expect(signTrustManifest(entry, body() as never, metadata(), compactSigner)).rejects.toThrow(/subject must be absent/);
+    await expect(signTrustManifest(entry, body() as never, compactSigner, metadata())).rejects.toThrow(/subject must be absent/);
   });
 
   it('preserves callback errors', async () => {
     const failure = new Error('signing service unavailable');
-    await expect(signTrustManifest(body(), metadata(), () => { throw failure; })).rejects.toBe(failure);
+    await expect(signTrustManifest(body(), () => { throw failure; }, metadata())).rejects.toBe(failure);
   });
 
   it('accepts non-I-JSON Unicode only in the omitted additionalSignatures value', async () => {
     const signed = await signTrustManifest({
       ...body(),
       additionalSignatures: { arbitrary: '\ud800' },
-    }, metadata(), compactSigner);
+    }, compactSigner, metadata());
     expect((signed.additionalSignatures as { arbitrary: string }).arbitrary).toBe('\ud800');
     expect(await checkTrustManifestSignature(signed, {
       publicKey: keys.publicKey,
@@ -221,14 +292,14 @@ describe('signTrustManifest', () => {
       { ...body(), unknown: '\ud800' },
       { ...body(), extensions: { 'example.com': { additionalSignatures: '\ud800' } } },
     ]) {
-      await expect(signTrustManifest(manifest, metadata(), signer)).rejects.toThrow(TypeError);
+      await expect(signTrustManifest(manifest, signer, metadata())).rejects.toThrow(TypeError);
     }
     expect(signer).not.toHaveBeenCalled();
   });
 
   it('excludes only top-level additional signatures from its signing payload', async () => {
     const manifest = { ...body(), additionalSignatures: { arbitrary: true }, extensions: { 'example.com': { additionalSignatures: 'covered' } } };
-    const signed = await signTrustManifest(manifest, metadata(), compactSigner);
+    const signed = await signTrustManifest(manifest, compactSigner, metadata());
     const payload = JSON.parse(new TextDecoder().decode(createTrustManifestSignaturePayload(signed)));
     expect(payload.additionalSignatures).toBeUndefined();
     expect(payload.extensions['example.com'].additionalSignatures).toBe('covered');

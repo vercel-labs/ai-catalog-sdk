@@ -29,8 +29,10 @@ export type EntryTrustManifest = Omit<TrustManifest, 'signature' | 'subject'> & 
 
 /** Signature metadata; the signer is derived from the manifest's contributor. */
 export interface TrustManifestSignatureMetadata {
-  profile: string;
-  issuedAt: string;
+  /** Defaults to `did-web-v1`. */
+  profile?: string;
+  /** Defaults to the current time, captured before the signing callback. */
+  issuedAt?: string;
   expiresAt?: string;
   signer?: never;
   jws?: never;
@@ -182,6 +184,8 @@ function detachJws(value: unknown, expectedPayload: string): string {
 /**
  * Signs a Trust Manifest using caller-supplied signing code.
  *
+ * Omitted `profile` defaults to `did-web-v1`; omitted `issuedAt` uses the
+ * current time.
  * Inputs are captured before the callback. The callback receives canonical
  * payload bytes and supplies the required protected type in its JWS header.
  * Attached payloads are checked and detached; already-detached JWS values must
@@ -190,8 +194,8 @@ function detachJws(value: unknown, expectedPayload: string): string {
  */
 export function signTrustManifest(
   manifest: UnsignedTrustManifest,
-  metadata: TrustManifestSignatureMetadata,
   createJws: TrustManifestSigner,
+  signatureMetadata?: TrustManifestSignatureMetadata,
 ): Promise<SignedTrustManifest>;
 /**
  * Derives the subject from the entry's identifier, type, declared digest, and
@@ -200,22 +204,25 @@ export function signTrustManifest(
 export function signTrustManifest(
   entry: CatalogEntry,
   manifest: EntryTrustManifest,
-  metadata: TrustManifestSignatureMetadata,
   createJws: TrustManifestSigner,
+  signatureMetadata?: TrustManifestSignatureMetadata,
 ): Promise<SignedTrustManifest>;
 export async function signTrustManifest(
   entryOrManifest: CatalogEntry | UnsignedTrustManifest,
-  manifestOrMetadata: EntryTrustManifest | TrustManifestSignatureMetadata,
-  metadataOrCreateJws: TrustManifestSignatureMetadata | TrustManifestSigner,
-  maybeCreateJws?: TrustManifestSigner,
+  manifestOrCreateJws: EntryTrustManifest | TrustManifestSigner,
+  createJwsOrSignatureMetadata?: TrustManifestSigner | TrustManifestSignatureMetadata,
+  signatureMetadata?: TrustManifestSignatureMetadata,
 ): Promise<SignedTrustManifest> {
-  const entryForm = maybeCreateJws !== undefined;
-  const createJws = entryForm ? maybeCreateJws : metadataOrCreateJws;
+  const entryForm = typeof manifestOrCreateJws !== 'function';
+  const createJws = entryForm ? createJwsOrSignatureMetadata : manifestOrCreateJws;
   if (typeof createJws !== 'function') {
     throw new TypeError('createJws must be a function.');
   }
+  if (!entryForm && signatureMetadata !== undefined) {
+    throw new TypeError('Subject-bearing manifests take signature metadata as the third argument.');
+  }
   const manifest = snapshotObject(
-    entryForm ? manifestOrMetadata : entryOrManifest,
+    entryForm ? manifestOrCreateJws : entryOrManifest,
     'manifest',
     false,
   );
@@ -225,14 +232,14 @@ export async function signTrustManifest(
       ? 'The manifest must contain its own contributor.'
       : 'The manifest must contain its own contributor and subject.');
   }
+  const metadataInput = entryForm ? signatureMetadata : createJwsOrSignatureMetadata;
   const metadata = snapshotObject(
-    entryForm ? metadataOrCreateJws : manifestOrMetadata,
-    'metadata',
+    metadataInput === undefined ? {} : metadataInput,
+    'signatureMetadata',
   );
-  rejectOwn(metadata, ['signer', 'jws'], 'metadata');
-  if (!Object.hasOwn(metadata, 'profile') || !Object.hasOwn(metadata, 'issuedAt')) {
-    throw new TypeError('Signature metadata must contain its own profile and issuedAt.');
-  }
+  rejectOwn(metadata, ['signer', 'jws'], 'signatureMetadata');
+  if (!Object.hasOwn(metadata, 'profile')) metadata.profile = 'did-web-v1';
+  if (!Object.hasOwn(metadata, 'issuedAt')) metadata.issuedAt = new Date().toISOString();
   if (entryForm) {
     const entry = entryOrManifest;
     if (

@@ -63,7 +63,8 @@ const digestImplementations = {
   },
 } as const;
 
-type ImplementedDigestAlgorithm = keyof typeof digestImplementations;
+/** Digest algorithms supported for creating AI Catalog digests. */
+export type DigestAlgorithm = 'sha256' | 'sha384' | 'sha512';
 
 interface ParsedDetachedJws {
   protectedHeader: Record<string, unknown>;
@@ -99,7 +100,7 @@ type TrustSubjectSnapshot =
 
 function isImplementedDigestAlgorithm(
   algorithm: string,
-): algorithm is ImplementedDigestAlgorithm {
+): algorithm is DigestAlgorithm {
   return Object.hasOwn(digestImplementations, algorithm);
 }
 
@@ -1304,6 +1305,43 @@ export async function checkCatalogEntry(
   return { status: 'checked', manifests: results };
 }
 
+function digestHex(bytes: Uint8Array, algorithm: DigestAlgorithm): string {
+  try {
+    return createHash(digestImplementations[algorithm].nodeName)
+      .update(bytes)
+      .digest('hex');
+  } catch (cause) {
+    throw new DigestAlgorithmUnavailableError(algorithm, cause);
+  }
+}
+
+/**
+ * Creates an AI Catalog digest in `algorithm:lowercase-hex` form.
+ *
+ * Uint8Array and Buffer inputs are hashed as their exact byte range. Logical
+ * JSON values are JCS-canonicalized before hashing. Strings are JSON string
+ * values, not JSON source text or raw text; ordinary arrays are JSON arrays.
+ * SHA-256 is the default algorithm.
+ *
+ * @throws {TypeError} If the algorithm is unsupported, byte storage is shared
+ * or detached, or the value cannot be canonicalized as plain I-JSON.
+ * @throws {RangeError} If a JSON value exceeds canonicalization limits.
+ * @throws {DigestAlgorithmUnavailableError} If the runtime cannot execute the
+ * selected algorithm.
+ */
+export function createDigest(
+  value: Uint8Array | JsonValue,
+  algorithm: DigestAlgorithm = 'sha256',
+): string {
+  if (typeof algorithm !== 'string' || !isImplementedDigestAlgorithm(algorithm))
+    throw new TypeError('algorithm must be sha256, sha384, or sha512.');
+  const bytes = utilTypes.isUint8Array(value)
+    ? value
+    : canonicalizeJsonValueToBytes(value);
+  assertStableBytes(bytes);
+  return `${algorithm}:${digestHex(bytes, algorithm)}`;
+}
+
 /**
  * Compares caller-supplied bytes with an AI Catalog digest.
  *
@@ -1345,12 +1383,7 @@ export function checkDigest(
     return { status: 'invalid_digest' };
   }
 
-  let actualHex: string;
-  try {
-    actualHex = createHash(implementation.nodeName).update(bytes).digest('hex');
-  } catch (cause) {
-    throw new DigestAlgorithmUnavailableError(algorithm, cause);
-  }
+  const actualHex = digestHex(bytes, algorithm);
 
   return { status: actualHex === expectedHex ? 'match' : 'mismatch' };
 }

@@ -164,7 +164,6 @@ import { signTrustManifest } from 'ai-catalog-sdk/verification';
 const manifest = await signTrustManifest(
   entry,
   { contributor: 'did:web:example.com' },
-  { profile: 'did-web-v1', issuedAt: new Date().toISOString() },
   ({ payload, typ }) => new CompactSign(payload)
     .setProtectedHeader({ alg: 'ES256', typ, kid: 'did:web:example.com#release-key' })
     .sign(privateKey),
@@ -178,12 +177,14 @@ For a separately distributed manifest or a subject containing additional fields,
 ```ts
 const manifest = await signTrustManifest(
   { contributor, subject, attestations },
-  { profile, issuedAt, expiresAt },
   createJws,
+  { profile, issuedAt, expiresAt },
 );
 ```
 
-Signature metadata supplies `profile`, `issuedAt`, and optional `expiresAt`; the helper sets `signer` to `contributor`. The callback receives `{ payload, typ }`, where `payload` contains the exact canonical UTF-8 bytes and `typ` is `ai-catalog-trust-manifest+jws`. It may return a value synchronously or through a promise:
+The optional trailing `signatureMetadata` supplies `profile`, `issuedAt`, and `expiresAt`. An omitted `profile` defaults to `did-web-v1`; an omitted `issuedAt` uses the current time, captured before the callback. `expiresAt` is absent unless supplied. The helper sets `signer` to `contributor`.
+
+The callback receives `{ payload, typ }`, where `payload` contains the exact canonical UTF-8 bytes and `typ` is `ai-catalog-trust-manifest+jws`. It may return a value synchronously or through a promise:
 
 | Callback result | Handling |
 | --- | --- |
@@ -284,6 +285,20 @@ const result = checkDigest(
 Property names are sorted by UTF-16 code units, array order and Unicode normalization are preserved, and numbers use JCS's ECMAScript representation. The function does not parse source text: passing `'{"x":1}'` canonicalizes a JSON string. It cannot recover duplicate names, original number spelling or precision, or invalid source UTF-8 lost during parsing. It does not omit any signature fields.
 
 Inputs must contain plain JSON objects, arrays, and primitives. Non-finite numbers, lone Unicode surrogates, noncharacters, cycles, sparse or decorated arrays, accessors, proxies, exotic objects, and other non-JSON values throw `TypeError`. Fixed node or nesting-depth limits produce `RangeError`. Canonicalization uses accepted own data properties without invoking inherited `toJSON` hooks or overridden array methods.
+
+## Create a digest
+
+`createDigest(value, algorithm?)` returns an artifact digest in `algorithm:lowercase-hex` form. The algorithm defaults to `sha256`; `sha384` and `sha512` are also supported:
+
+```ts
+import { createDigest } from 'ai-catalog-sdk/verification';
+
+const artifactDigest = createDigest(artifactBytes);
+const inlineDigest = createDigest(entry.data);
+const sha384Digest = createDigest(artifactBytes, 'sha384');
+```
+
+A `Uint8Array` or `Buffer` is hashed as its exact byte range. Other logical JSON values are JCS-canonicalized before hashing. Strings are JSON string values, including their JSON quotes and escapes; ordinary arrays are JSON arrays. To hash text as raw bytes, encode it with `TextEncoder` first.
 
 ## Check a digest
 

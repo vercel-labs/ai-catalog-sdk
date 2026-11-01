@@ -206,24 +206,22 @@ The SDK does not provide a builder abstraction or custom serializer. Authoring t
 To add a signed endorsement, declare the entry's artifact digest, sign a Trust Manifest, and attach the result to `trustManifests` before serializing the catalog. This example reads the artifact from a local file and uses your configured `privateKey` with the separately installed `jose` package:
 
 ```ts
-import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { CompactSign } from 'jose';
 import { mediaTypes, parseCatalog, type AICatalog } from 'ai-catalog-sdk';
-import { signTrustManifest } from 'ai-catalog-sdk/verification';
+import { createDigest, signTrustManifest } from 'ai-catalog-sdk/verification';
 
 const artifactBytes = await readFile('example-agent-plugin.zip');
 const entry = {
   identifier: 'urn:air:example.com:agent:example-plugin',
   type: mediaTypes.agentPluginZip,
   url: 'https://example.com/example-agent-plugin.zip',
-  digest: `sha256:${createHash('sha256').update(artifactBytes).digest('hex')}`,
+  digest: createDigest(artifactBytes),
 };
 
 const manifest = await signTrustManifest(
   entry,
   { contributor: 'did:web:example.com' },
-  { profile: 'did-web-v1', issuedAt: new Date().toISOString() },
   ({ payload, typ }) => new CompactSign(payload)
     .setProtectedHeader({ alg: 'ES256', typ, kid: 'did:web:example.com#release-key' })
     .sign(privateKey),
@@ -241,7 +239,7 @@ const jsonWithEndorsement = JSON.stringify(
 );
 ```
 
-The digest must describe the exact bytes published at `entry.url`. For an inline entry, hash `canonicalizeJsonValueToBytes(entry.data)` instead. The signed Trust Manifest endorses the entry's artifact; the containing catalog remains unsigned. See [Signing](./docs/verification.md#sign-a-trust-manifest) for signing with an explicit subject and supported callback formats.
+The digest must describe the exact bytes published at `entry.url`. For an inline entry, use `createDigest(entry.data)` to hash its JCS-canonicalized JSON value. The signed Trust Manifest endorses the entry's artifact; the containing catalog remains unsigned. See [Signing](./docs/verification.md#sign-a-trust-manifest) for signing with an explicit subject and supported callback formats.
 
 ## Schemas
 

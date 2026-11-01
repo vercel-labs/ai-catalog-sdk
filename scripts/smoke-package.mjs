@@ -90,7 +90,7 @@ import { generateKeyPairSync, sign } from 'node:crypto';
 import { implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
-import { canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryArtifactBinding, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(`${pkg.name}/verification`)};
+import { canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryArtifactBinding, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(`${pkg.name}/verification`)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
 const value = { specVersion: '1.0', entries: [] };
@@ -145,6 +145,16 @@ assert.deepEqual(catalogPayload.extension, payloadCatalog.extension);
 const manifestPayload = JSON.parse(decode(createTrustManifestSignaturePayload({ contributor: 'did:example:alice', signature: { ...signatureMetadata, jws: 'excluded' }, additionalSignatures: null })));
 assert.deepEqual(manifestPayload, { contributor: 'did:example:alice', signature: signatureMetadata });
 assert.equal(checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855').status, 'match');
+assert.equal(createDigest(new Uint8Array()), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+const canonicalDigest = createDigest({ b: 2, a: 1 });
+assert.equal(canonicalDigest, createDigest({ a: 1, b: 2 }));
+assert.equal(checkDigest(new TextEncoder().encode('{"a":1,"b":2}'), canonicalDigest).status, 'match');
+const stringDigest = createDigest('abc');
+assert.notEqual(stringDigest, createDigest(new TextEncoder().encode('abc')));
+assert.equal(checkDigest(new TextEncoder().encode('"abc"'), stringDigest).status, 'match');
+const sha384Digest = createDigest(Buffer.from('abc'), 'sha384');
+assert.ok(sha384Digest.startsWith('sha384:'));
+assert.equal(checkDigest(Buffer.from('abc'), sha384Digest).status, 'match');
 
 const keys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 function createJws({ payload, typ }, representation = 'compact') {
@@ -176,18 +186,29 @@ const manifests = [];
 for (const representation of ['compact', 'detached', 'flattened']) {
   const manifest = await signTrustManifest(
     { contributor: 'did:example:alice', subject },
-    metadata,
     input => createJws(input, representation),
+    metadata,
   );
   assert.equal(manifest.signature.jws.split('.')[1], '');
   assert.equal((await checkTrustManifestSignature(manifest, bindingOptions)).status, 'valid');
   assert.equal((await checkCatalogEntryArtifactBinding(entry, artifactBytes, manifest, bindingOptions)).status, 'valid');
   manifests.push(manifest);
 }
-const derived = await signTrustManifest(entry, { contributor: 'did:example:alice' }, metadata, createJws);
+const derived = await signTrustManifest(entry, { contributor: 'did:example:alice' }, createJws, metadata);
 assert.deepEqual(derived.subject, subject);
 assert.equal(Object.hasOwn(entry, 'trustManifests'), false);
 assert.equal(Object.hasOwn(derived.subject, 'url'), false);
+const defaultManifest = await signTrustManifest({ contributor: 'did:web:example.com', subject }, createJws);
+assert.equal(defaultManifest.signature.profile, 'did-web-v1');
+assert.ok(Number.isFinite(Date.parse(defaultManifest.signature.issuedAt)));
+assert.equal(Object.hasOwn(defaultManifest.signature, 'expiresAt'), false);
+assert.equal((await checkTrustManifestSignature(defaultManifest, bindingOptions)).status, 'valid');
+const defaultEntryManifest = await signTrustManifest(entry, { contributor: 'did:web:example.com' }, createJws, {
+  expiresAt: '2100-01-01T00:00:00Z',
+});
+assert.equal(defaultEntryManifest.signature.profile, 'did-web-v1');
+assert.equal(defaultEntryManifest.signature.expiresAt, '2100-01-01T00:00:00Z');
+assert.equal((await checkCatalogEntryArtifactBinding(entry, artifactBytes, defaultEntryManifest, bindingOptions)).status, 'valid');
 const signedEntry = { ...entry, trustManifests: manifests };
 const parsedManifests = parseCatalog({ ...value, entries: [signedEntry] }).entries[0].trustManifests;
 const report = await checkCatalogEntry(signedEntry, artifactBytes);
@@ -217,7 +238,7 @@ const inlineSubject = {
   type: inlineEntry.type,
   digest: 'sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b',
 };
-const inlineManifest = await signTrustManifest({ contributor: 'did:example:alice', subject: inlineSubject }, metadata, createJws);
+const inlineManifest = await signTrustManifest({ contributor: 'did:example:alice', subject: inlineSubject }, createJws, metadata);
 assert.equal((await checkCatalogEntryArtifactBinding({ ...inlineEntry, digest: inlineSubject.digest }, inlineManifest, bindingOptions)).status, 'valid');
 const unavailablePublisher = await checkCatalogEntry(inlineEntry, { contributors: [], alwaysCheckPublisherManifests: true });
 assert.deepEqual(unavailablePublisher, { status: 'checked', manifests: [] });
@@ -230,9 +251,9 @@ assert.deepEqual(await checkCatalogEntry({ ...inlineEntry, digest: 'sha256:00' }
 assert.deepEqual(await checkCatalogEntry({ ...inlineEntry, digest: 'blake3:00' }), {
   status: 'digest_algorithm_not_implemented', algorithm: 'blake3',
 });
-await assert.rejects(signTrustManifest({ contributor: 'did:example:alice', subject }, metadata, input => ({
+await assert.rejects(signTrustManifest({ contributor: 'did:example:alice', subject }, input => ({
   ...createJws(input, 'flattened'), payload: 'different',
-})), TypeError);
+}), metadata), TypeError);
 for (const [property, status] of [['identifier', 'identifier_mismatch'], ['version', 'version_mismatch']]) {
   const result = await checkCatalogEntryArtifactBinding({ ...entry, [property]: 'different' }, artifactBytes, derived, bindingOptions);
   assert.equal(result.status, 'subject_check_failed');
@@ -254,6 +275,7 @@ import {
   type CatalogEntryWithData,
   type CatalogEntryWithUrl,
   type HostInfo,
+  type JsonValue,
   type ParseResult,
   type Signature,
   type SignedTrustManifest,
@@ -275,10 +297,12 @@ import {
   checkCatalogSignature,
   checkDigest,
   checkTrustManifestSignature,
+  createDigest,
   createCatalogSignaturePayload,
   createTrustManifestSignaturePayload,
   signTrustManifest,
   DigestAlgorithmUnavailableError,
+  type DigestAlgorithm,
   type DigestCheckResult,
   type CatalogEntryArtifactBindingCheckResult,
   type CatalogEntryCheckOptions,
@@ -322,7 +346,14 @@ aiCatalogSchema.parse(authored);
 const schema: JsonSchema = aiCatalogJsonSchema;
 const digestResult: DigestCheckResult = checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
 const canonicalBytes: Uint8Array = canonicalizeJsonValueToBytes({ b: 2, a: 1 });
-const metadata: TrustManifestSignatureMetadata = { profile: 'custom-v1', issuedAt: '2026-08-31T00:00:00Z' };
+const metadata = { profile: 'custom-v1', issuedAt: '2026-08-31T00:00:00Z' } satisfies TrustManifestSignatureMetadata;
+const expiryMetadata: TrustManifestSignatureMetadata = { expiresAt: '2100-01-01T00:00:00Z' };
+const digestAlgorithm: DigestAlgorithm = 'sha384';
+const generatedDigest: string = createDigest(new Uint8Array(), digestAlgorithm);
+const jsonDigest: string = createDigest({ b: 2, a: 1 });
+const unionDigest: string = createDigest({} as Uint8Array | JsonValue);
+// @ts-expect-error Digest creation supports the SDK's implemented algorithms.
+createDigest(new Uint8Array(), 'md5');
 const signature: Signature = { ...metadata, signer: 'did:example:alice', jws: 'protected..signature' };
 // @ts-expect-error A completed Signature requires jws.
 const incompleteSignature: Signature = { ...metadata, signer: 'did:example:alice' };
@@ -399,19 +430,26 @@ const callback: TrustManifestSigner = ({ payload, typ }) => {
   void bytes; void manifestTyp;
   return 'protected..signature';
 };
-const signed: Promise<SignedTrustManifest> = signTrustManifest({ contributor: 'did:example:alice', subject }, metadata, callback);
-const signedFromEntry: Promise<SignedTrustManifest> = signTrustManifest(entryWithUrl, { contributor: 'did:example:alice' }, metadata, callback);
+const signed: Promise<SignedTrustManifest> = signTrustManifest({ contributor: 'did:example:alice', subject }, callback, metadata);
+const signedFromEntry: Promise<SignedTrustManifest> = signTrustManifest(entryWithUrl, { contributor: 'did:example:alice' }, callback, metadata);
+const signedWithDefaults: Promise<SignedTrustManifest> = signTrustManifest({ contributor: 'did:web:example.com', subject }, callback);
+const signedEntryWithDefaults: Promise<SignedTrustManifest> = signTrustManifest(entryWithData, { contributor: 'did:web:example.com' }, callback);
+const signedWithExpiry: Promise<SignedTrustManifest> = signTrustManifest(entryWithUrl, { contributor: 'did:web:example.com' }, callback, expiryMetadata);
+// @ts-expect-error Signature metadata follows the signing callback.
+signTrustManifest({ contributor: 'did:example:alice', subject }, metadata, callback);
+// @ts-expect-error Signing callbacks supply the JWS, not signature metadata.
+signTrustManifest({ contributor: 'did:example:alice', subject }, callback, { jws: 'protected..signature' });
 const flattened: { protected?: string; payload: string; signature: string; header?: Record<string, unknown> } = { protected: 'header', payload: 'payload', signature: 'signature' };
 const callbackResult: JwsSigningResult = flattened;
-signTrustManifest({ contributor: 'did:example:alice', subject }, metadata, async () => callbackResult);
+signTrustManifest({ contributor: 'did:example:alice', subject }, async () => callbackResult, metadata);
 // @ts-expect-error A manual signing body requires subject.
-signTrustManifest({ contributor: 'did:example:alice' }, metadata, callback);
+signTrustManifest({ contributor: 'did:example:alice' }, callback, metadata);
 // @ts-expect-error Signing constructs the completed signature.
-signTrustManifest({ contributor: 'did:example:alice', subject, signature }, metadata, callback);
+signTrustManifest({ contributor: 'did:example:alice', subject, signature }, callback, metadata);
 // @ts-expect-error The entry overload derives subject rather than accepting it.
-signTrustManifest(entryWithUrl, { contributor: 'did:example:alice', subject }, metadata, callback);
+signTrustManifest(entryWithUrl, { contributor: 'did:example:alice', subject }, callback, metadata);
 // @ts-expect-error Signing derives signer from contributor.
-signTrustManifest({ contributor: 'did:example:alice', subject }, { ...metadata, signer: 'did:example:alice' }, callback);
+signTrustManifest({ contributor: 'did:example:alice', subject }, callback, { ...metadata, signer: 'did:example:alice' });
 if (digestResult.status === 'algorithm_not_implemented') {
   const algorithm: string = digestResult.algorithm;
   void algorithm;
@@ -422,6 +460,8 @@ void pluginType; void entriesWithData; void entriesWithUrl; void schema; void un
 void catalogSignaturePayload; void signaturePayload; void presigningPayload; void signatureCheck; void catalogSignatureCheck;
 void dataBindingCheck; void urlBindingCheck; void unionBindingCheck; void dataCheck; void configuredDataCheck;
 void urlCheck; void configuredUrlCheck; void signed; void signedFromEntry; void rawSchema;
+void signedWithDefaults; void signedEntryWithDefaults; void signedWithExpiry;
+void generatedDigest; void jsonDigest; void unionDigest;
 `,
   );
   await writeFile(
