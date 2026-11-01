@@ -97,84 +97,6 @@ const result = await checkCatalogEntryTrustManifest(
 
 For an entry with `data`, omit `artifactBytes`. A `passed` result means the manifest’s declarations and signature pass the supplied-key checks, its subject matches the entry and artifact, and its time window passes. The caller is responsible for selecting the signer profile and authenticating the key; the function performs no network requests. See [Verification utilities](./docs/verification.md#check-a-trust-manifest-with-a-supplied-key) for details.
 
-## Use lower-level verification utilities
-
-Use the individual utilities when the composed catalog-entry check does not fit
-your workflow:
-
-| API | Use it for | Important boundary |
-| --- | --- | --- |
-| `canonicalizeJsonValueToBytes()` | Encoding a logical JSON value as RFC 8785 JCS UTF-8 bytes | Accepts an already-materialized JSON value, not JSON source text |
-| `createCatalogSignaturePayload()` | Creating the canonical detached-JWS payload for an AI Catalog | Does not validate the catalog, construct or verify a JWS, fetch URL artifacts, or establish trust |
-| `createTrustManifestSignaturePayload()` | Creating the canonical detached-JWS payload for a Trust Manifest | Does not validate the manifest, construct or verify a JWS, or establish trust |
-| `checkTrustManifestSignature()` | Checking a manifest snapshot with one caller-selected public key and expected algorithm | Currently supports ES256; does not check the subject digest, identity, freshness, or trust |
-| `checkDigest()` | Comparing exact caller-supplied bytes with a declared digest | Currently supports `sha256`, `sha384`, and `sha512`; a match does not authenticate the digest declaration |
-
-These utilities do not fetch content or resolve keys. See [Verification utilities](./docs/verification.md) for their inputs, results, errors, security boundaries, and examples.
-
-## Choose a validation API
-
-| Input or goal | API | Import path |
-| --- | --- | --- |
-| Catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `ai-catalog-sdk` |
-| An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
-| An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
-| An assembled catalog before serialization | `assertValidCatalog()` | `ai-catalog-sdk` |
-| A catalog, caller-selected public key, and expected algorithm | `checkCatalogSignature()` | `ai-catalog-sdk/verification` |
-| An entry and its selected contributors' endorsements, with supplied artifact bytes for an entry with `url` | `checkCatalogEntry()` | `ai-catalog-sdk/verification` |
-| An entry, explicit manifest, caller-selected public key, and the artifact representation | `checkCatalogEntryTrustManifest()` | `ai-catalog-sdk/verification` |
-| Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
-| JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
-| Raw JSON Schema for another validator or tool | `ai-catalog.schema.json` | `ai-catalog-sdk/schema/ai-catalog.schema.json` |
-
-The `parse*` functions throw `CatalogParseError` when input is invalid. The matching `safeParse*` functions return a discriminated `ParseResult` instead. All SDK parsers apply defensive input validation that the standalone schemas do not. See [What gets validated](#what-gets-validated) for the parsing, authoring, and schema boundaries.
-
-## Handle invalid input
-
-Use a safe parser when validation failures are expected and should be handled as values:
-
-```ts
-import { safeParseCatalogJson } from 'ai-catalog-sdk';
-
-function parseCatalogInput(source: string) {
-  const result = safeParseCatalogJson(source);
-
-  if (result.success) {
-    return result.data;
-  }
-
-  for (const issue of result.error.issues) {
-    console.error({
-      code: issue.code, // Example: "invalid_value"
-      path: issue.path, // Example: ["entries", 0]
-      message: issue.message,
-    });
-  }
-
-  return undefined;
-}
-```
-
-Use `code` to classify an issue and `path` to locate it in the input. Present `message` to users, but do not branch on its exact wording.
-
-### Diagnostic codes
-
-Parsing errors and authoring-validation errors use `CatalogIssue` diagnostics with these broad categories:
-
-| Code | Meaning |
-| --- | --- |
-| `invalid_json` | Catalog text could not be decoded as JSON. |
-| `invalid_json_value` | A value violates the required JSON or I-JSON representation. |
-| `invalid_type` | A required value is missing or has the wrong JSON type. |
-| `invalid_value` | A value violates a format, range, or allowed representation. |
-| `unsupported_spec_version` | A well-formed catalog version declares an unsupported major. |
-| `duplicate_entry` | Catalog entries violate identifier/version uniqueness. |
-| `inconsistent_value` | Related declarations disagree, such as a Trust Manifest subject and its containing entry. |
-| `resource_limit` | Input exceeds an SDK node or nesting limit. |
-| `diagnostics_truncated` | Additional validation issues were omitted after the reporting limit was reached. |
-
-Codes may be added in future releases. Keep a fallback for unknown codes, and do not depend on issue order or a lower-level `cause` for classification.
-
 ## Author a catalog
 
 Catalogs are ordinary JSON-shaped objects. Use `satisfies AICatalog` to check known fields at compile time, call `assertValidCatalog()` to validate the assembled document, and serialize it with `JSON.stringify()`:
@@ -239,6 +161,84 @@ const jsonWithEndorsement = JSON.stringify(catalogWithEndorsement, null, 2);
 ```
 
 The digest must describe the exact bytes published at `entry.url`. For an inline entry, use `createDigest(entry.data)` to hash its JCS-canonicalized JSON value. The signed Trust Manifest endorses the entry's artifact; the containing catalog remains unsigned. See [Signing](./docs/verification.md#sign-a-trust-manifest) for signing with an explicit subject and supported callback formats.
+
+## Choose a validation API
+
+| Input or goal | API | Import path |
+| --- | --- | --- |
+| Catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `ai-catalog-sdk` |
+| An already-parsed JSON value representing a catalog | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
+| An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
+| An assembled catalog before serialization | `assertValidCatalog()` | `ai-catalog-sdk` |
+| A catalog, caller-selected public key, and expected algorithm | `checkCatalogSignature()` | `ai-catalog-sdk/verification` |
+| An entry and its selected contributors' endorsements, with supplied artifact bytes for an entry with `url` | `checkCatalogEntry()` | `ai-catalog-sdk/verification` |
+| An entry, explicit manifest, caller-selected public key, and the artifact representation | `checkCatalogEntryTrustManifest()` | `ai-catalog-sdk/verification` |
+| Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
+| JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
+| Raw JSON Schema for another validator or tool | `ai-catalog.schema.json` | `ai-catalog-sdk/schema/ai-catalog.schema.json` |
+
+The `parse*` functions throw `CatalogParseError` when input is invalid. The matching `safeParse*` functions return a discriminated `ParseResult` instead. All SDK parsers apply defensive input validation that the standalone schemas do not. See [What gets validated](#what-gets-validated) for the parsing, authoring, and schema boundaries.
+
+## Handle invalid input
+
+Use a safe parser when validation failures are expected and should be handled as values:
+
+```ts
+import { safeParseCatalogJson } from 'ai-catalog-sdk';
+
+function parseCatalogInput(source: string) {
+  const result = safeParseCatalogJson(source);
+
+  if (result.success) {
+    return result.data;
+  }
+
+  for (const issue of result.error.issues) {
+    console.error({
+      code: issue.code, // Example: "invalid_value"
+      path: issue.path, // Example: ["entries", 0]
+      message: issue.message,
+    });
+  }
+
+  return undefined;
+}
+```
+
+Use `code` to classify an issue and `path` to locate it in the input. Present `message` to users, but do not branch on its exact wording.
+
+### Diagnostic codes
+
+Parsing errors and authoring-validation errors use `CatalogIssue` diagnostics with these broad categories:
+
+| Code | Meaning |
+| --- | --- |
+| `invalid_json` | Catalog text could not be decoded as JSON. |
+| `invalid_json_value` | A value violates the required JSON or I-JSON representation. |
+| `invalid_type` | A required value is missing or has the wrong JSON type. |
+| `invalid_value` | A value violates a format, range, or allowed representation. |
+| `unsupported_spec_version` | A well-formed catalog version declares an unsupported major. |
+| `duplicate_entry` | Catalog entries violate identifier/version uniqueness. |
+| `inconsistent_value` | Related declarations disagree, such as a Trust Manifest subject and its containing entry. |
+| `resource_limit` | Input exceeds an SDK node or nesting limit. |
+| `diagnostics_truncated` | Additional validation issues were omitted after the reporting limit was reached. |
+
+Codes may be added in future releases. Keep a fallback for unknown codes, and do not depend on issue order or a lower-level `cause` for classification.
+
+## Use lower-level verification utilities
+
+Use the individual utilities when the composed catalog-entry check does not fit
+your workflow:
+
+| API | Use it for | Important boundary |
+| --- | --- | --- |
+| `canonicalizeJsonValueToBytes()` | Encoding a logical JSON value as RFC 8785 JCS UTF-8 bytes | Accepts an already-materialized JSON value, not JSON source text |
+| `createCatalogSignaturePayload()` | Creating the canonical detached-JWS payload for an AI Catalog | Does not validate the catalog, construct or verify a JWS, fetch URL artifacts, or establish trust |
+| `createTrustManifestSignaturePayload()` | Creating the canonical detached-JWS payload for a Trust Manifest | Does not validate the manifest, construct or verify a JWS, or establish trust |
+| `checkTrustManifestSignature()` | Checking a manifest snapshot with one caller-selected public key and expected algorithm | Currently supports ES256; does not check the subject digest, identity, freshness, or trust |
+| `checkDigest()` | Comparing exact caller-supplied bytes with a declared digest | Currently supports `sha256`, `sha384`, and `sha512`; a match does not authenticate the digest declaration |
+
+These utilities do not fetch content or resolve keys. See [Verification utilities](./docs/verification.md) for their inputs, results, errors, security boundaries, and examples.
 
 ## Schemas
 
