@@ -343,3 +343,21 @@ const result = checkDigest(
 Property names are sorted by UTF-16 code units, array order and Unicode normalization are preserved, and numbers use JCS's ECMAScript representation. The function does not parse source text: passing `'{"x":1}'` canonicalizes a JSON string. It cannot recover duplicate names, original number spelling or precision, or invalid source UTF-8 lost during parsing. It does not omit any signature fields.
 
 Inputs must contain plain JSON objects, arrays, and primitives. Non-finite numbers, lone Unicode surrogates, noncharacters, cycles, sparse or decorated arrays, accessors, proxies, exotic objects, and other non-JSON values throw `TypeError`. Fixed node or nesting-depth limits produce `RangeError`. Canonicalization uses accepted own data properties without invoking inherited `toJSON` hooks or overridden array methods.
+
+## Validation diagnostics
+
+`CatalogParseError` and `CatalogValidationError` use these `CatalogIssue.code` categories for parsing and authoring-validation problems, including validation errors attached to verification results. These codes are distinct from verification result statuses.
+
+| Code | Meaning |
+| --- | --- |
+| `invalid_json` | Catalog text could not be decoded as JSON. |
+| `invalid_json_value` | A value violates the required JSON or I-JSON representation. |
+| `invalid_type` | A required value is missing or has the wrong JSON type. |
+| `invalid_value` | A value violates a format, range, or allowed representation. |
+| `unsupported_spec_version` | A well-formed catalog version declares an unsupported major. |
+| `duplicate_entry` | Catalog entries violate identifier/version uniqueness. |
+| `inconsistent_value` | Related declarations disagree, such as a Trust Manifest subject and its containing entry. |
+| `resource_limit` | Input exceeds an SDK node or nesting limit. |
+| `diagnostics_truncated` | Additional validation issues were omitted after the reporting limit was reached. |
+
+Codes may be added in future releases. Keep a fallback for unknown codes, and do not depend on issue order or a lower-level `cause` for classification.
