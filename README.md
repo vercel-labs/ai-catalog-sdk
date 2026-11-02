@@ -60,7 +60,7 @@ A `valid` result means the exact caller-selected key verified the signature over
 
 ## Check a catalog entry
 
-`checkCatalogEntry()` checks an entry's structure, its declared artifact digest, and each selected Trust Manifest. For the `did-web-v1` profile, it resolves the contributor's current DID document and selects an authorized assertion key:
+`checkCatalogEntry()` checks an entry's fields and declared artifact digest, then evaluates each selected Trust Manifest independently. A malformed selected manifest receives `invalid_manifest` without preventing the other manifests from being checked. For the `did-web-v1` profile, it resolves the contributor's current DID document and selects an authorized assertion key:
 
 ```ts
 import { checkCatalogEntry } from 'ai-catalog-sdk/verification';
@@ -95,7 +95,7 @@ const result = await checkCatalogEntryTrustManifest(
 );
 ```
 
-For an entry with `data`, omit `artifactBytes`. A `passed` result means the manifest’s declarations and signature pass the supplied-key checks, its subject matches the entry and artifact, and its time window passes. The caller is responsible for selecting the signer profile and authenticating the key; the function performs no network requests. See [Verification utilities](./docs/verification.md#check-a-trust-manifest-with-a-supplied-key) for details.
+For an entry with `data`, omit `artifactBytes`. The function validates the entry's fields and the explicit manifest, ignoring the entry's attached `trustManifests`. A `passed` result means the manifest’s declarations and signature pass the supplied-key checks, its subject matches the entry and artifact, and its time window passes. The caller is responsible for selecting the signer profile and authenticating the key; the function performs no network requests. See [Verification utilities](./docs/verification.md#check-a-trust-manifest-with-a-supplied-key) for details.
 
 ## Author a catalog
 

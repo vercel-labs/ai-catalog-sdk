@@ -7,6 +7,7 @@ import {
 } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  CatalogParseError,
   CatalogValidationError,
   type CatalogEntryWithData,
   type CatalogEntryWithUrl,
@@ -230,6 +231,131 @@ describe('checkCatalogEntryTrustManifest', () => {
       checkCatalogEntryTrustManifest(entry, new Uint8Array([0]), manifest, optionsFor()),
     ).resolves.toEqual({ status: 'artifact_digest_mismatch' });
   });
+  it.each([
+    ['type', null],
+    ['displayName', 1],
+    ['description', []],
+    ['tags', ['valid', 1]],
+    ['publisher', { identifier: 'did:example:publisher' }],
+    ['updatedAt', 42],
+    ['extensions', []],
+    ['digest', 1],
+  ])('reports ordinary JSON entry.%s shape errors before artifact and manifest failures', async (property, value) => {
+    const bytes = new TextEncoder().encode('test');
+    const { entry, manifest } = urlFixture(bytes);
+    Object.defineProperty(entry, property, { enumerable: true, value });
+    manifest.signature = { ...metadata, jws: 'not-a-jws' };
+    const result = await checkCatalogEntryTrustManifest(
+      entry, new Uint8Array([0]), manifest, optionsFor(),
+    );
+    expect(result).toMatchObject({
+      status: 'invalid_entry', error: expect.any(CatalogParseError),
+    });
+  });
+  it.each([null, 1, []])('reports an ordinary JSON URL field %j as an invalid entry', async (url) => {
+    const bytes = new TextEncoder().encode('test');
+    const { entry, manifest } = urlFixture(bytes);
+    Object.defineProperty(entry, 'url', { enumerable: true, value: url });
+    await expect(
+      checkCatalogEntryTrustManifest(entry, bytes, manifest, optionsFor()),
+    ).resolves.toMatchObject({
+      status: 'invalid_entry', error: expect.any(CatalogParseError),
+    });
+  });
+  it.each(['missing', 'both'] as const)('reports %s artifact representations as an invalid entry for either overload', async (representation) => {
+    const { entry, manifest } = dataFixture(null);
+    if (representation === 'missing') Reflect.deleteProperty(entry, 'data');
+    else Object.defineProperty(entry, 'url', {
+      enumerable: true, value: 'https://example.com/artifact',
+    });
+    await expect(
+      checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
+    ).resolves.toMatchObject({
+      status: 'invalid_entry', error: expect.any(CatalogParseError),
+    });
+    await expect(
+      checkCatalogEntryTrustManifest(
+        entry as unknown as CatalogEntryWithUrl,
+        new Uint8Array([0]), manifest, optionsFor(),
+      ),
+    ).resolves.toMatchObject({
+      status: 'invalid_entry', error: expect.any(CatalogParseError),
+    });
+  });
+  it('validates options before reporting invalid entry declarations', async () => {
+    const { entry, manifest } = dataFixture(null);
+    Object.defineProperty(entry, 'tags', { enumerable: true, value: 1 });
+    await expect(
+      checkCatalogEntryTrustManifest(entry, manifest, {
+        ...optionsFor(), clockToleranceMs: -1,
+      }),
+    ).rejects.toThrow(TypeError);
+  });
+  it.each([null, [], 1, { contributor, subject: null }])('reports explicit manifest shape %j as invalid_manifest without returning a manifest', async (candidate) => {
+    const { entry } = dataFixture(null);
+    const result = await checkCatalogEntryTrustManifest(
+      entry, candidate as unknown as TrustManifest, optionsFor(),
+    );
+    expect(result).toEqual({
+      status: 'invalid_manifest', error: expect.any(CatalogValidationError),
+    });
+  });
+  it.each([
+    ['wrong type', 'not-an-array'],
+    ['null', null],
+    ['null array item', [null]],
+    ['invalid manifest', [{ contributor }]],
+    ['overlarge array', new Array(100_001).fill(null)],
+  ])('ignores attached trustManifests with %s and checks only the explicit manifest', async (_label, attached) => {
+    const { entry, manifest } = dataFixture(null);
+    Object.defineProperty(entry, 'trustManifests', {
+      enumerable: true, value: attached,
+    });
+    await expect(
+      checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
+    ).resolves.toEqual({ status: 'passed' });
+    await expect(
+      checkCatalogEntryTrustManifest(entry, { contributor }, optionsFor()),
+    ).resolves.toEqual({
+      status: 'invalid_manifest', error: expect.any(CatalogValidationError),
+    });
+  });
+  it('does not read or traverse attached trustManifests', async () => {
+    const cyclic: unknown[] = [];
+    cyclic.push(cyclic);
+    let reads = 0;
+    const proxy = new Proxy([], {
+      getOwnPropertyDescriptor() {
+        reads += 1;
+        throw new Error('must not inspect');
+      },
+      get() {
+        reads += 1;
+        throw new Error('must not read');
+      },
+    });
+    for (const attached of [cyclic, proxy]) {
+      const { entry, manifest } = dataFixture(null);
+      Object.defineProperty(entry, 'trustManifests', {
+        enumerable: true, value: attached,
+      });
+      await expect(
+        checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
+      ).resolves.toEqual({ status: 'passed' });
+    }
+    const { entry, manifest } = dataFixture(null);
+    Object.defineProperty(entry, 'trustManifests', {
+      enumerable: true,
+      get() {
+        reads += 1;
+        throw new Error('must not invoke');
+      },
+    });
+    await expect(
+      checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
+    ).resolves.toEqual({ status: 'passed' });
+    expect(reads).toBe(0);
+  });
   it('reports a signed payload that cannot be canonicalized as an invalid manifest', async () => {
     const { entry, manifest } = dataFixture(null);
     manifest.extensions = { 'example.com': '\ud800' };
@@ -432,6 +558,8 @@ describe('checkCatalogEntryTrustManifest', () => {
   it('captures inline data, entry coordinates, manifest, and options before yielding', async () => {
     const data = { nested: { value: 'original' } };
     const { entry, manifest } = dataFixture(data);
+    entry.tags = ['original'];
+    entry.publisher = { identifier: contributor, displayName: 'Original' };
     const options = optionsFor();
     const pending = checkCatalogEntryTrustManifest(entry, manifest, options);
     data.nested.value = 'mutated';
@@ -440,6 +568,8 @@ describe('checkCatalogEntryTrustManifest', () => {
     entry.type = 'mutated';
     entry.digest = digest(new Uint8Array([2]));
     entry.data = null;
+    Object.defineProperty(entry, 'tags', { value: [1] });
+    Object.defineProperty(entry.publisher, 'displayName', { value: null });
     if (manifest.subject) {
       manifest.subject.identifier = 'mutated';
       manifest.subject.digest = entry.digest;
@@ -513,6 +643,7 @@ describe('checkCatalogEntryTrustManifest', () => {
     ['entry', 'identifier'],
     ['entry', 'version'],
     ['entry', 'data'],
+    ['entry', 'displayName'],
     ['subject', 'identifier'],
     ['subject', 'version'],
   ] as const)('rejects %s.%s accessors without invoking them', async (location, property) => {
@@ -554,10 +685,12 @@ describe('checkCatalogEntryTrustManifest', () => {
         value,
       });
       const pending = checkCatalogEntryTrustManifest(entry, manifest, optionsFor());
-      if (location === 'subject' && value !== undefined)
+      if (value !== undefined)
         await expect(pending).resolves.toMatchObject({
-          status: 'invalid_manifest',
-          error: expect.any(CatalogValidationError),
+          status: location === 'entry' ? 'invalid_entry' : 'invalid_manifest',
+          error: expect.any(
+            location === 'entry' ? CatalogParseError : CatalogValidationError,
+          ),
         });
       else await expect(pending).rejects.toThrow(TypeError);
     }
@@ -567,12 +700,12 @@ describe('checkCatalogEntryTrustManifest', () => {
       'identifier',
     );
     const pending = checkCatalogEntryTrustManifest(entry, manifest, optionsFor());
-    if (location === 'subject')
-      await expect(pending).resolves.toMatchObject({
-        status: 'invalid_manifest',
-        error: expect.any(CatalogValidationError),
-      });
-    else await expect(pending).rejects.toThrow(TypeError);
+    await expect(pending).resolves.toMatchObject({
+      status: location === 'entry' ? 'invalid_entry' : 'invalid_manifest',
+      error: expect.any(
+        location === 'entry' ? CatalogParseError : CatalogValidationError,
+      ),
+    });
   });
   it.each([
     'entry',
@@ -640,6 +773,30 @@ describe('checkCatalogEntryTrustManifest', () => {
     let data: JsonValue = null;
     for (let depth = 0; depth < 130; depth += 1) data = { nested: data };
     entry.data = data;
+    await expect(
+      checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
+    ).rejects.toThrow(RangeError);
+  });
+  it.each([undefined, () => null, Symbol('non-JSON')])('rejects a non-JSON entry field value %s', async (value) => {
+    const { entry, manifest } = dataFixture(null);
+    Object.defineProperty(entry, 'futureField', { enumerable: true, value });
+    await expect(
+      checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
+    ).rejects.toThrow(TypeError);
+  });
+  it('rejects cyclic and overdeep entry metadata outside the artifact', async () => {
+    const { entry, manifest } = dataFixture(null);
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    Object.defineProperty(entry, 'futureField', {
+      configurable: true, enumerable: true, value: cyclic,
+    });
+    await expect(
+      checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
+    ).rejects.toThrow(TypeError);
+    let nested: JsonValue = null;
+    for (let depth = 0; depth < 130; depth += 1) nested = { nested };
+    Object.defineProperty(entry, 'futureField', { value: nested });
     await expect(
       checkCatalogEntryTrustManifest(entry, manifest, optionsFor()),
     ).rejects.toThrow(RangeError);

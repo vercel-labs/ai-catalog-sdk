@@ -267,6 +267,38 @@ assert.ok(malformedReport.manifests[0].error instanceof CatalogValidationError);
 const excludedMalformed = await checkCatalogEntry(malformedEntry, artifactBytes, { contributors: [] });
 assert.equal(excludedMalformed.status, 'checked');
 assert.deepEqual(excludedMalformed.manifests, [{ manifest: declarationErrors, status: 'not_checked' }]);
+const malformedAttachments = [
+  null,
+  { ...derived, signature: { ...derived.signature, issuedAt: 42 } },
+];
+const mixedAttachments = [...malformedAttachments, derived, {
+  contributor: 'did:example:metadata', extensions: { 'example.com': true },
+}];
+const mixedEntry = { ...entry, trustManifests: mixedAttachments };
+assert.throws(() => parseCatalog({ ...value, entries: [mixedEntry] }), CatalogParseError);
+assert.equal(aiCatalogSchema.safeParse({ ...value, entries: [mixedEntry] }).success, false);
+const isolatedReport = await checkCatalogEntry(mixedEntry, artifactBytes);
+assert.equal(isolatedReport.status, 'checked');
+assert.deepEqual(isolatedReport.manifests.map(result => result.status), [
+  'invalid_manifest', 'invalid_manifest', 'profile_not_implemented', 'unsigned',
+]);
+assert.deepEqual(isolatedReport.manifests.map(result => result.manifest), mixedAttachments);
+assert.ok(isolatedReport.manifests.slice(0, 2).every(result => result.error instanceof CatalogValidationError));
+const excludedRawReport = await checkCatalogEntry(mixedEntry, artifactBytes, { contributors: [] });
+assert.equal(excludedRawReport.status, 'checked');
+assert.deepEqual(excludedRawReport.manifests, mixedAttachments.map(manifest => ({ manifest, status: 'not_checked' })));
+for (const trustManifests of [malformedAttachments, null, 'invalid']) {
+  assert.equal((await checkCatalogEntryTrustManifest({ ...entry, trustManifests }, artifactBytes, derived, bindingOptions)).status, 'passed');
+}
+for (const operation of [
+  () => checkCatalogEntry({ ...entry, identifier: 42 }, artifactBytes),
+  () => checkCatalogEntryTrustManifest({ ...entry, identifier: 42 }, artifactBytes, derived, bindingOptions),
+]) {
+  const invalidEntry = await operation();
+  assert.equal(invalidEntry.status, 'invalid_entry');
+  assert.ok(invalidEntry.error instanceof CatalogParseError);
+  assert.ok(invalidEntry.error.issues.length > 0);
+}
 const malformedJwsManifest = { ...derived, signature: { ...derived.signature, jws: 'not-a-jws' } };
 assert.throws(() => assertValidCatalog({
   ...value, entries: [{ ...entry, trustManifests: [malformedJwsManifest] }],
@@ -511,17 +543,19 @@ if (manifestReport.status === 'digest_algorithm_not_implemented' || manifestRepo
 }
 const report = {} as CatalogEntryCheckResult;
 if (report.status === 'checked') {
-  const uncheckedManifests: TrustManifest[] = report.manifests
+  const uncheckedManifests: JsonValue[] = report.manifests
     .filter(evaluation => evaluation.status === 'not_checked')
     .map(evaluation => evaluation.manifest);
   void uncheckedManifests;
   for (const evaluation of report.manifests) {
     // @ts-expect-error Evaluations correspond to input positions without an index field.
     evaluation.index;
-    const manifest: TrustManifest = evaluation.manifest;
+    // @ts-expect-error Unvalidated or excluded manifest values require narrowing.
+    const manifestWithoutNarrowing: TrustManifest = evaluation.manifest;
     if (evaluation.status === 'passed') {
+      const manifest: TrustManifest = evaluation.manifest;
       const publisher: boolean = evaluation.isPublisherEndorsement;
-      void publisher;
+      void manifest; void publisher;
     } else {
       // @ts-expect-error Failed evaluations do not assert a publisher relationship.
       evaluation.isPublisherEndorsement;
@@ -530,7 +564,13 @@ if (report.status === 'checked') {
       const diagnostic: Error = evaluation.error;
       void diagnostic;
     }
-    void manifest;
+    if (evaluation.status === 'invalid_manifest') {
+      const rawInvalidManifest: JsonValue = evaluation.manifest;
+      // @ts-expect-error A structurally invalid manifest may be any JSON value.
+      const invalidManifest: TrustManifest = evaluation.manifest;
+      void rawInvalidManifest; void invalidManifest;
+    }
+    void manifestWithoutNarrowing;
   }
 } else if (report.status === 'digest_algorithm_not_implemented') {
   const algorithm: string = report.algorithm;

@@ -20,7 +20,7 @@ if (report.status === 'checked') {
 
 For an entry with `url`, supply the artifact bytes obtained by your application as a `Uint8Array`. For an entry with `data`, call `checkCatalogEntry(entryWithData)`; the SDK applies JCS canonicalization to `entry.data` when checking the declared digest. Signed manifests require the digest to be present.
 
-The function checks the entry’s field shapes and declared artifact digest before evaluating individual manifests. Invalid declarations or an unusable signed payload in one selected manifest produce that manifest’s failure result while the other contributions are evaluated independently. A `CatalogEntryCheckResult` with `report.status === 'checked'` can look like this:
+The function checks the entry’s field shapes, excluding the contents of `trustManifests`, and declared artifact digest before evaluating individual manifests. `trustManifests` must be an array when present. Selected manifests with invalid field shapes or declarations, or an unusable signed payload, receive `invalid_manifest` while the other contributions are still evaluated. A `CatalogEntryCheckResult` with `report.status === 'checked'` can look like this:
 
 ```ts
 {
@@ -159,7 +159,7 @@ const resultForEntryWithData = await checkCatalogEntryTrustManifest(
 );
 ```
 
-The manifest need not already be attached to the entry. The function expects a typed or previously parsed entry and does not rerun whole-entry structural validation. It checks the entry’s declared artifact digest first, then the supplied manifest’s declarations and subject correspondence, its signature, and its time window. See the shared [check results](#check-results) for statuses and precedence.
+The manifest need not already be attached to the entry. The function validates the entry’s field shapes while ignoring its attached `trustManifests`. It then checks the entry’s declared artifact digest, followed by the supplied manifest’s field shapes, declarations and subject correspondence, signature, and time window. See the shared [check results](#check-results) for statuses and precedence.
 
 A `passed` result means those checks passed under the caller-selected key. A `not_yet_valid` or `expired` result means the preceding declaration, signature, and binding checks passed. Artifact retrieval URLs do not participate in subject binding, so identical bytes can be served from mirrors.
 
@@ -169,16 +169,18 @@ This utility performs no network requests. The caller is responsible for selecti
 
 `checkCatalogEntry()` returns entry-precheck failures directly, or a `checked` report containing the individual results in `manifests`. `checkCatalogEntryTrustManifest()` returns one result directly. After the entry prechecks pass, a failure result for one manifest does not stop `checkCatalogEntry()` from checking the other selected manifests.
 
+In an aggregate report, `manifest` is a `JsonValue` for `invalid_manifest` and `not_checked`, and a parsed `TrustManifest` for all other manifest statuses.
+
 Field paths are relative to each function’s return value; `—` means the function does not return that status. Rows follow failure precedence within the applicable checks.
 
 | Status | `checkCatalogEntry()` | <code>checkCatalogEntry<br>TrustManifest()</code> | Description |
 | --- | --- | --- | --- |
-| `invalid_entry` | `status` | `status` | Inline data cannot satisfy JCS for the declared digest. `checkCatalogEntry()` also reports invalid entry field shapes. `error` is a `CatalogParseError` with path-specific `issues`. |
+| `invalid_entry` | `status` | `status` | Entry fields have invalid shapes, or inline data cannot satisfy JCS for the declared digest. `error` is a `CatalogParseError` with path-specific `issues`. |
 | `invalid_digest` | `status` | `status` | The entry’s declared artifact digest has invalid syntax or an incorrect length for an implemented algorithm. |
 | `digest_algorithm_not_implemented` | `status` | `status` | The entry’s artifact digest names an algorithm the SDK does not implement. Includes `algorithm`. |
 | `artifact_digest_mismatch` | `status` | `status` | The supplied artifact bytes, or JCS-canonicalized inline data, do not match the entry’s declared digest. |
 | `not_checked` | `manifests[i].status` | — | The contributor options excluded this manifest. This is a selection outcome. |
-| `invalid_manifest` | `manifests[i].status` | `status` | The manifest’s metadata, required content, or subject/entry correspondence is invalid, or its signed payload cannot satisfy JCS. `error` is a `CatalogValidationError` with path-specific `issues`. |
+| `invalid_manifest` | `manifests[i].status` | `status` | The manifest or one of its fields has the wrong type, its metadata, required content, or subject/entry correspondence is invalid, or its signed payload cannot satisfy JCS. `error` is a `CatalogValidationError` with path-specific `issues`. |
 | `unsigned` | `manifests[i].status` | `status` | The manifest has no `signature` of its own to verify. |
 | `profile_not_implemented` | `manifests[i].status` | — | The selected signer profile is not implemented. Includes `profile`; no fallback profile is tried. |
 | `invalid_jws` | `manifests[i].status` | `status` | The JWS is malformed or violates its required representation or common headers. |

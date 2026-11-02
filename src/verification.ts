@@ -233,30 +233,6 @@ function readOwnDataProperty(value: object, name: string): unknown {
   return descriptor.value;
 }
 
-function readRequiredEntryProperty(entry: object, name: string): unknown {
-  const descriptor = Object.getOwnPropertyDescriptor(entry, name);
-  if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
-    throw new TypeError(
-      `entry.${name} must be an enumerable own data property.`,
-    );
-  }
-  return descriptor.value;
-}
-
-function readOptionalEntryProperty(
-  entry: object,
-  name: string,
-): { present: boolean; value: unknown } {
-  const descriptor = Object.getOwnPropertyDescriptor(entry, name);
-  if (!descriptor) return { present: false, value: undefined };
-  if (!descriptor.enumerable || !('value' in descriptor)) {
-    throw new TypeError(
-      `entry.${name} must be an enumerable own data property when present.`,
-    );
-  }
-  return { present: true, value: descriptor.value };
-}
-
 function assertCatalogEntryObject(
   entry: unknown,
 ): asserts entry is CatalogEntry {
@@ -488,9 +464,12 @@ type ArtifactCheckFailure =
   | { status: 'invalid_digest' }
   | { status: 'digest_algorithm_not_implemented'; algorithm: string };
 
-type EntryCheckFailure =
-  | { status: 'invalid_entry'; error: CatalogParseError }
-  | ArtifactCheckFailure;
+type EntryStructureFailure = {
+  status: 'invalid_entry';
+  error: CatalogParseError;
+};
+
+type EntryCheckFailure = EntryStructureFailure | ArtifactCheckFailure;
 
 /** The outcome of checking one explicit manifest using a caller-selected key. */
 export type CatalogEntryTrustManifestCheckResult =
@@ -543,10 +522,16 @@ export type TrustManifestCheckResult =
   | { status: 'not_yet_valid' }
   | { status: 'expired' };
 
-/** A captured manifest with its individual outcome, in the input array's order. */
-export type TrustManifestEvaluation = TrustManifestCheckResult & {
-  manifest: TrustManifest;
-};
+/** A captured contribution; excluded or invalid input need not have manifest structure. */
+export type TrustManifestEvaluation =
+  | (Extract<
+      TrustManifestCheckResult,
+      { status: 'not_checked' | 'invalid_manifest' }
+    > & { manifest: JsonValue })
+  | (Exclude<
+      TrustManifestCheckResult,
+      { status: 'not_checked' | 'invalid_manifest' }
+    > & { manifest: TrustManifest });
 
 /** A report of the requested checks, without an application acceptance policy. */
 export type CatalogEntryCheckResult =
@@ -823,7 +808,7 @@ export async function checkTrustManifestSignature(
  * supplied-key signature, and time-window failures in that order.
  * An `expired` or `not_yet_valid` result means the preceding checks passed.
  * The caller selects the signer profile and authenticates/authorizes the key;
- * this operation performs no network requests or whole-entry validation.
+ * this operation performs no network requests and ignores attached manifests.
  * URL entries take their supplied artifact bytes adjacent to the entry.
  */
 export function checkCatalogEntryTrustManifest(
@@ -847,10 +832,12 @@ export async function checkCatalogEntryTrustManifest(
   const rawOptions = isDataCall ? manifestOrOptions : maybeOptions;
   const options = snapshotSignatureCheckOptions(rawOptions);
   const timeOptions = snapshotTimeCheckOptions(rawOptions as object);
-  const artifact = precheckArtifact(entry, bytesOrManifest, isDataCall);
-  if ('status' in artifact) return artifact;
+  const captured = captureEntryFields(entry, bytesOrManifest, isDataCall);
+  if ('status' in captured) return captured;
+  const artifact = precheckArtifact(captured.entry, bytesOrManifest);
+  if (artifact !== undefined) return artifact;
   const input = isDataCall ? bytesOrManifest : manifestOrOptions;
-  assertCanonicalizableJsonObject(input, 'manifest');
+  assertJsonInput(input);
   const parsed = safeParseTrustManifest(input);
   if (!parsed.success)
     return {
@@ -861,7 +848,7 @@ export async function checkCatalogEntryTrustManifest(
       ),
     };
   const manifest = parsed.data;
-  const error = validateTrustManifest(manifest, artifact.entry);
+  const error = validateTrustManifest(manifest, captured.entry);
   if (error !== undefined) return { status: 'invalid_manifest', error };
   if (manifest.signature === undefined) return { status: 'unsigned' };
   const signature = snapshotSignaturePayload(manifest, 'manifest');
@@ -882,51 +869,76 @@ export async function checkCatalogEntryTrustManifest(
   return { status: 'passed' };
 }
 
-/** Capture the shared entry coordinates and check its declared artifact once. */
-function precheckArtifact(
+function assertJsonInput(value: unknown): void {
+  const inputIssue = preflightJsonValue(value, {
+    allowOwnProtoMember: true,
+    isDisallowedObject: utilTypes.isProxy,
+    requireIJsonStrings: false,
+  });
+  if (inputIssue)
+    throw new (inputIssue.code === 'resource_limit' ? RangeError : TypeError)(
+      inputIssue.message,
+    );
+}
+
+/** Validate and capture entry-owned fields without reading attachment values. */
+function captureEntryFields(
   entry: CatalogEntry,
   bytes: unknown,
   isDataCall: boolean,
-): { entry: CatalogEntry } | EntryCheckFailure {
+): { entry: CatalogEntry } | EntryStructureFailure {
   assertCatalogEntryObject(entry);
-  const identifier = readRequiredEntryProperty(entry, 'identifier');
-  const type = readRequiredEntryProperty(entry, 'type');
-  const version = readOptionalEntryProperty(entry, 'version');
-  const digest = readOptionalEntryProperty(entry, 'digest');
-  if (
-    typeof identifier !== 'string' ||
-    typeof type !== 'string' ||
-    (version.present && typeof version.value !== 'string') ||
-    (digest.present && typeof digest.value !== 'string')
-  )
-    throw new TypeError(
-      'Entry coordinates and digest must be strings when present.',
-    );
-  const data = readOptionalEntryProperty(entry, 'data');
-  const url = readOptionalEntryProperty(entry, 'url');
-  if (data.present === url.present)
-    throw new TypeError('entry must contain exactly one of data or url.');
-  if (isDataCall !== data.present)
+  const descriptors = Object.getOwnPropertyDescriptors(entry);
+  delete descriptors.trustManifests;
+  const fields = Object.defineProperties(Object.create(null), descriptors);
+  assertJsonInput(fields);
+  const hasData = Object.hasOwn(fields, 'data');
+  const hasUrl = Object.hasOwn(fields, 'url');
+  if (hasData !== hasUrl && hasData !== isDataCall)
     throw new TypeError(
       'URL entries require artifact bytes; inline entries do not accept artifact bytes.',
     );
-  if (url.present && typeof url.value !== 'string')
-    throw new TypeError('entry.url must be a string.');
-  if (!data.present) assertStableBytes(bytes);
-  if (data.present) {
-    const shapeIssue = preflightJsonValue(data.value, {
-      allowOwnProtoMember: true,
-      isDisallowedObject: utilTypes.isProxy,
-      requireIJsonStrings: false,
-    });
-    if (shapeIssue)
-      throw new (shapeIssue.code === 'resource_limit' ? RangeError : TypeError)(
-        shapeIssue.message,
+  if (!isDataCall) assertStableBytes(bytes);
+  const parsed = safeParseCatalogEntry(fields);
+  return parsed.success
+    ? { entry: parsed.data }
+    : { status: 'invalid_entry', error: parsed.error };
+}
+
+/** Copy already preflighted JSON without invoking serialization hooks. */
+function captureJson(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) {
+    const captured: JsonValue[] = [];
+    for (let index = 0; index < value.length; index += 1)
+      captured[index] = captureJson(
+        readOwnDataProperty(value, String(index)) as JsonValue,
       );
+    return captured;
   }
-  if (digest.present) {
-    if (data.present) {
-      const issue = preflightJsonValue(data.value, {
+  if (value !== null && typeof value === 'object') {
+    const captured: Record<string, JsonValue> = {};
+    for (const key of Object.keys(value))
+      Object.defineProperty(captured, key, {
+        value: captureJson(readOwnDataProperty(value, key) as JsonValue),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    return captured;
+  }
+  return value;
+}
+
+/** Check the artifact against the captured entry's declared digest. */
+function precheckArtifact(
+  entry: CatalogEntry,
+  bytes: unknown,
+): EntryCheckFailure | undefined {
+  if (Object.hasOwn(entry, 'digest')) {
+    const hasData = Object.hasOwn(entry, 'data');
+    const data = readOwnDataProperty(entry, 'data');
+    if (hasData) {
+      const issue = preflightJsonValue(data, {
         allowOwnProtoMember: true,
         isDisallowedObject: utilTypes.isProxy,
         requireIJsonStrings: true,
@@ -939,10 +951,13 @@ function precheckArtifact(
           ]),
         };
     }
-    const artifactBytes = data.present
-      ? canonicalizeJsonValueToBytes(data.value as JsonValue)
+    const artifactBytes = hasData
+      ? canonicalizeJsonValueToBytes(data as JsonValue)
       : (bytes as Uint8Array);
-    const result = checkDigest(artifactBytes, digest.value as string);
+    const result = checkDigest(
+      artifactBytes,
+      readOwnDataProperty(entry, 'digest') as string,
+    );
     if (result.status === 'mismatch')
       return { status: 'artifact_digest_mismatch' };
     if (result.status === 'invalid_digest') return result;
@@ -952,15 +967,6 @@ function precheckArtifact(
         algorithm: result.algorithm,
       };
   }
-  return {
-    entry: {
-      identifier,
-      type,
-      ...(version.present ? { version: version.value as string } : {}),
-      ...(digest.present ? { digest: digest.value as string } : {}),
-      ...(data.present ? { data: null } : { url: url.value as string }),
-    } as CatalogEntry,
-  };
 }
 
 function throwIfCanceled(signal: AbortSignal | undefined): void {
@@ -1138,29 +1144,28 @@ export async function checkCatalogEntry(
   );
   throwIfCanceled(options.signal);
   assertCatalogEntryObject(entry);
-  const inputIssue = preflightJsonValue(entry, {
-    allowOwnProtoMember: true,
-    isDisallowedObject: utilTypes.isProxy,
-    requireIJsonStrings: false,
-  });
-  if (inputIssue)
-    throw new (inputIssue.code === 'resource_limit' ? RangeError : TypeError)(
-      inputIssue.message,
-    );
-  // The bounded parser captures known and unknown JSON members synchronously.
-  // Validate overload shape before reporting structural failures.
-  const hasData = Object.hasOwn(entry, 'data');
-  if ((hasData || Object.hasOwn(entry, 'url')) && hasData !== isDataCall)
-    throw new TypeError(
-      'URL entries require artifact bytes; inline entries do not accept artifact bytes.',
-    );
-  if (!isDataCall) assertStableBytes(bytesOrOptions);
-  const parsed = safeParseCatalogEntry(entry);
-  if (!parsed.success) return { status: 'invalid_entry', error: parsed.error };
-  const snapshot = parsed.data;
+  // Preserve the invocation-wide JSON defenses and work limit before copying
+  // raw attachments. Their schema checks belong to individual results below.
+  assertJsonInput(entry);
+  const captured = captureEntryFields(entry, bytesOrOptions, isDataCall);
+  if ('status' in captured) return captured;
+  const attached = readOwnDataProperty(entry, 'trustManifests');
+  if (Object.hasOwn(entry, 'trustManifests') && !Array.isArray(attached))
+    return {
+      status: 'invalid_entry',
+      error: new CatalogParseError([
+        {
+          code: 'invalid_type',
+          path: ['trustManifests'],
+          message: 'The value is not the required JSON array.',
+        },
+      ]),
+    };
+  const manifests = captureJson((attached ?? []) as JsonValue) as JsonValue[];
+  const artifact = precheckArtifact(captured.entry, bytesOrOptions);
+  if (artifact !== undefined) return artifact;
+  const snapshot = captured.entry;
   const publisher = publisherIdentityFor(snapshot.identifier);
-  const artifact = precheckArtifact(snapshot, bytesOrOptions, isDataCall);
-  if ('status' in artifact) return artifact;
   const resolutions = new Map<string, Promise<unknown>>();
   const resolutionOptions = {
     timeoutMs: options.timeoutMs,
@@ -1168,70 +1173,91 @@ export async function checkCatalogEntry(
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   };
   const results: TrustManifestEvaluation[] = [];
-  for (const manifest of snapshot.trustManifests ?? []) {
+  for (const input of manifests) {
+    const contributor =
+      input !== null && typeof input === 'object' && !Array.isArray(input)
+        ? readOwnDataProperty(input, 'contributor')
+        : undefined;
     const selected =
       options.contributors === undefined ||
-      options.contributors.includes(manifest.contributor) ||
+      (typeof contributor === 'string' &&
+        options.contributors.includes(contributor)) ||
       (options.alwaysCheckPublisherManifests &&
-        manifest.contributor === publisher);
-    let result: TrustManifestCheckResult;
-    if (!selected) result = { status: 'not_checked' };
+        contributor !== undefined && contributor === publisher);
+    if (!selected) {
+      results.push({ manifest: input, status: 'not_checked' });
+      continue;
+    }
+    const parsed = safeParseTrustManifest(input);
+    if (!parsed.success) {
+      results.push({
+        manifest: input,
+        status: 'invalid_manifest',
+        error: new CatalogValidationError(
+          parsed.error.issues,
+          parsed.error.cause,
+        ),
+      });
+      continue;
+    }
+    const manifest = parsed.data;
+    let result: Exclude<TrustManifestCheckResult, { status: 'not_checked' }>;
+    const error = validateTrustManifest(manifest, snapshot);
+    if (error !== undefined) result = { status: 'invalid_manifest', error };
+    else if (manifest.signature === undefined)
+      result = { status: 'unsigned' };
+    else if (manifest.signature.profile !== 'did-web-v1')
+      result = {
+        status: 'profile_not_implemented',
+        profile: manifest.signature.profile,
+      };
     else {
-      const error = validateTrustManifest(manifest, snapshot);
-      if (error !== undefined) result = { status: 'invalid_manifest', error };
-      else if (manifest.signature === undefined)
-        result = { status: 'unsigned' };
-      else if (manifest.signature.profile !== 'did-web-v1')
-        result = {
-          status: 'profile_not_implemented',
-          profile: manifest.signature.profile,
-        };
+      const signature = snapshotSignaturePayload(manifest, 'manifest');
+      if ('status' in signature) result = signature;
       else {
-        const signature = snapshotSignaturePayload(manifest, 'manifest');
-        if ('status' in signature) result = signature;
+        const profile = inspectSignerProfile(
+          manifest,
+          signature.jws.protectedHeader,
+        );
+        if (profile instanceof Error)
+          result = { status: 'profile_check_failed', error: profile };
         else {
-          const profile = inspectSignerProfile(
-            manifest,
-            signature.jws.protectedHeader,
-          );
-          if (profile instanceof Error)
-            result = { status: 'profile_check_failed', error: profile };
-          else {
-            try {
-              let document = resolutions.get(profile.identity);
-              if (document === undefined) {
-                document = resolveDidWeb(profile.identity, resolutionOptions);
-                resolutions.set(profile.identity, document);
-              }
-              const publicKey = authorizePublisherKey(
-                await document,
-                profile.identity,
-                profile.kid,
-              );
-              throwIfCanceled(options.signal);
-              const signatureResult = await executeSignatureCheck({
-                ...signature,
-                publicKey,
-              });
-              throwIfCanceled(options.signal);
-              result =
-                signatureResult.status === 'valid'
-                  ? {
-                      status: 'passed',
-                      isPublisherEndorsement:
-                        manifest.contributor === publisher,
-                    }
-                  : signatureResult;
-            } catch (error) {
-              throwIfCanceled(options.signal);
-              if (!(error instanceof IssuerCheckError)) throw error;
-              result = { status: 'issuer_check_failed', error };
+          try {
+            let document = resolutions.get(profile.identity);
+            if (document === undefined) {
+              document = resolveDidWeb(profile.identity, resolutionOptions);
+              resolutions.set(profile.identity, document);
             }
+            const publicKey = authorizePublisherKey(
+              await document,
+              profile.identity,
+              profile.kid,
+            );
+            throwIfCanceled(options.signal);
+            const signatureResult = await executeSignatureCheck({
+              ...signature,
+              publicKey,
+            });
+            throwIfCanceled(options.signal);
+            result =
+              signatureResult.status === 'valid'
+                ? {
+                    status: 'passed',
+                    isPublisherEndorsement:
+                      manifest.contributor === publisher,
+                  }
+                : signatureResult;
+          } catch (error) {
+            throwIfCanceled(options.signal);
+            if (!(error instanceof IssuerCheckError)) throw error;
+            result = { status: 'issuer_check_failed', error };
           }
         }
       }
     }
-    results.push({ manifest, ...result });
+    if (result.status === 'invalid_manifest')
+      results.push({ manifest: input, ...result });
+    else results.push({ manifest, ...result });
   }
   throwIfCanceled(options.signal);
   const now = options.nowMs ?? Date.now();

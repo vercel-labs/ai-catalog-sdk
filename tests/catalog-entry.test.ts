@@ -121,6 +121,10 @@ function entryFor(
   };
 }
 
+function entryWithRawManifests(manifests: unknown[]): CatalogEntryWithUrl {
+  return { ...entryFor([]), trustManifests: manifests as TrustManifest[] };
+}
+
 async function statuses(
   entry = entryFor(),
   options?: CatalogEntryCheckOptions,
@@ -201,22 +205,70 @@ describe('checkCatalogEntry', () => {
     expect(resolver).not.toHaveBeenCalled();
   });
 
-  it('validates structure across unselected manifests and reports the original path', async () => {
-    const entry = entryFor([{
-      contributor: publisher,
-      signature: { signer: publisher, profile: 'did-web-v1', issuedAt: 42, jws: '' },
-    } as unknown as TrustManifest]);
+  it('preserves every attached JSON value when no manifests are selected', async () => {
+    const manifests = [
+      null, 42, 'manifest', false, [],
+      { contributor: assessor, signature: { issuedAt: 42 } },
+      manifestFor(),
+    ];
+    const entry = entryWithRawManifests(manifests);
     const report = await checkCatalogEntry(entry, artifact, {
       contributors: [],
     });
-    expect(report).toMatchObject({
-      status: 'invalid_entry',
-      error: {
-        issues: expect.arrayContaining([
-          expect.objectContaining({ path: ['trustManifests', 0, 'signature', 'issuedAt'] }),
-        ]),
-      },
+    expect(report).toEqual({
+      status: 'checked',
+      manifests: manifests.map(manifest => ({ status: 'not_checked', manifest })),
     });
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['null', null, []],
+    ['number', 42, []],
+    ['string', 'manifest', []],
+    ['boolean', false, []],
+    ['array', [], []],
+    ['contributor', { contributor: 42 }, ['contributor']],
+    ['signature', { contributor: assessor, signature: null }, ['signature']],
+    ['issuedAt', { contributor: assessor, signature: { signer: assessor, profile: 'did-web-v1', issuedAt: 42, jws: '' } }, ['signature', 'issuedAt']],
+    ['expiresAt', { contributor: assessor, signature: { signer: assessor, profile: 'did-web-v1', issuedAt: '2026-01-01T00:00:00Z', expiresAt: 42, jws: '' } }, ['signature', 'expiresAt']],
+    ['subject', { contributor: assessor, subject: { identifier: 42, type, digest: digestOf(artifact) } }, ['subject', 'identifier']],
+    ['attestations', { contributor: assessor, attestations: [null] }, ['attestations', 0]],
+    ['extensions', { contributor: assessor, extensions: 42 }, ['extensions']],
+  ])('isolates a selected malformed %s value and still authenticates the publisher', async (_name, malformed, path) => {
+    const results = await statuses(entryWithRawManifests([malformed, manifestFor()]));
+    expect(results).toMatchObject([
+      {
+        status: 'invalid_manifest',
+        manifest: malformed,
+        error: expect.any(CatalogValidationError),
+      },
+      { status: 'passed', isPublisherEndorsement: true },
+    ]);
+    const result = results[0];
+    if (result?.status !== 'invalid_manifest') throw new Error('Expected invalid manifest');
+    expect(result.error.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path }),
+    ]));
+    expect(() => parseCatalogJson(JSON.stringify({
+      specVersion: '1.0',
+      entries: [entryWithRawManifests([malformed])],
+    }))).toThrow(CatalogParseError);
+    expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
+  });
+
+  it.each([
+    ['entry metadata', { updatedAt: 42 }],
+    ['manifest collection', { trustManifests: {} }],
+  ])('keeps malformed %s an entry-level failure', async (_name, fields) => {
+    const report = await checkCatalogEntry(
+      { ...entryFor(), ...fields } as CatalogEntryWithUrl,
+      artifact,
+      { contributors: [] },
+    );
+    expect(report).toMatchObject({ status: 'invalid_entry', error: expect.any(CatalogParseError) });
+    if (report.status !== 'invalid_entry') throw new Error('Expected invalid entry');
+    expect(report.error.issues.length).toBeGreaterThan(0);
     expect(resolver).not.toHaveBeenCalled();
   });
 
@@ -230,11 +282,8 @@ describe('checkCatalogEntry', () => {
   });
 
   it('reports a shared artifact failure before a malformed manifest', async () => {
-    const malformed = manifestFor(assessor);
-    if (!malformed.signature) throw new Error('Expected signed manifest');
-    malformed.signature.issuedAt = 'yesterday';
     await expect(
-      checkCatalogEntry(entryFor([malformed]), new Uint8Array([4])),
+      checkCatalogEntry(entryWithRawManifests([null]), new Uint8Array([4])),
     ).resolves.toEqual({ status: 'artifact_digest_mismatch' });
     expect(resolver).not.toHaveBeenCalled();
   });
@@ -296,14 +345,23 @@ describe('checkCatalogEntry', () => {
     expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
   });
 
-  it('does not validate excluded contribution declarations', async () => {
-    const malformed = manifestFor(assessor);
-    if (!malformed.signature) throw new Error('Expected signed manifest');
-    malformed.signature.issuedAt = 'yesterday';
-    expect(await statuses(entryFor([malformed, manifestFor()]), {
+  it('does not validate excluded contribution shapes or declarations', async () => {
+    const malformed = {
+      contributor: assessor,
+      signature: { issuedAt: 42 },
+      subject: false,
+    };
+    const invalidDeclaration = manifestFor(assessor);
+    if (!invalidDeclaration.signature) throw new Error('Expected signed manifest');
+    invalidDeclaration.signature.issuedAt = 'yesterday';
+    const entry = entryWithRawManifests([malformed, invalidDeclaration, null, 42, manifestFor()]);
+    expect(await statuses(entry, {
       contributors: [publisher],
     })).toMatchObject([
       { status: 'not_checked', manifest: malformed },
+      { status: 'not_checked', manifest: invalidDeclaration },
+      { status: 'not_checked', manifest: null },
+      { status: 'not_checked', manifest: 42 },
       { status: 'passed', isPublisherEndorsement: true },
     ]);
     expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
@@ -701,6 +759,78 @@ describe('checkCatalogEntry', () => {
     });
   });
 
+  it('captures raw invalid and excluded manifest values before the first await', async () => {
+    const malformed = { contributor: assessor, signature: { issuedAt: 42 } };
+    const excluded = { contributor: 'did:web:excluded.example', subject: false };
+    const manifests = [manifestFor(), malformed, excluded, null];
+    const captured = structuredClone(manifests);
+    let complete: ((value: unknown) => void) | undefined;
+    resolver.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    const pending = checkCatalogEntry(entryWithRawManifests(manifests), artifact, {
+      contributors: [publisher, assessor],
+    });
+    expect(resolver).toHaveBeenCalledTimes(1);
+    malformed.contributor = publisher;
+    malformed.signature.issuedAt = 0;
+    excluded.contributor = publisher;
+    excluded.subject = true;
+    manifests[3] = manifestFor();
+    manifests.push(manifestFor());
+    complete?.(documentFor());
+    await expect(pending).resolves.toEqual({
+      status: 'checked',
+      manifests: [
+        { status: 'passed', manifest: captured[0], isPublisherEndorsement: true },
+        { status: 'invalid_manifest', manifest: captured[1], error: expect.any(CatalogValidationError) },
+        { status: 'not_checked', manifest: captured[2] },
+        { status: 'not_checked', manifest: null },
+      ],
+    });
+    expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
+  });
+
+  it.each([
+    ['non-JSON value', () => undefined, TypeError],
+    ['non-finite number', () => NaN, TypeError],
+    ['non-plain object', () => new Date(), TypeError],
+    ['cycle', () => {
+      const value: Record<string, unknown> = {};
+      value.self = value;
+      return value;
+    }, TypeError],
+    ['excessive depth', () => {
+      let value: unknown = null;
+      for (let depth = 0; depth < 130; depth += 1) value = { nested: value };
+      return value;
+    }, RangeError],
+  ])('rejects an excluded %s before resolving a selected publisher', async (_name, createValue, errorType) => {
+    await expect(checkCatalogEntry(
+      entryWithRawManifests([manifestFor(), createValue()]),
+      artifact,
+      { contributors: [publisher] },
+    )).rejects.toBeInstanceOf(errorType);
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it('rejects excluded proxies and accessors without running caller code', async () => {
+    const read = vi.fn(() => { throw new Error('must not inspect'); });
+    const proxy = new Proxy({}, {
+      get: read,
+      getOwnPropertyDescriptor: read,
+      ownKeys: read,
+    });
+    const accessor = Object.defineProperty({}, 'contributor', { enumerable: true, get: read });
+    for (const value of [proxy, accessor]) {
+      await expect(checkCatalogEntry(
+        entryWithRawManifests([manifestFor(), value]),
+        artifact,
+        { contributors: [publisher] },
+      )).rejects.toBeInstanceOf(TypeError);
+    }
+    expect(read).not.toHaveBeenCalled();
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
   it('rejects existing and in-flight cancellation with the caller reason', async () => {
     const reason = new Error('Stop');
     const controller = new AbortController();
@@ -766,5 +896,27 @@ describe('checkCatalogEntry', () => {
     await expect(
       checkCatalogEntry({ identifier, type } as CatalogEntryWithData),
     ).resolves.toMatchObject({ status: 'invalid_entry', error: expect.any(CatalogParseError) });
+  });
+
+  it('reports both artifact representations as structural failures through either overload', async () => {
+    const entry = { ...entryFor(), data: null };
+    await expect(
+      checkCatalogEntry(entry as unknown as CatalogEntryWithData),
+    ).resolves.toMatchObject({ status: 'invalid_entry', error: expect.any(CatalogParseError) });
+    await expect(
+      checkCatalogEntry(entry as unknown as CatalogEntryWithUrl, artifact),
+    ).resolves.toMatchObject({ status: 'invalid_entry', error: expect.any(CatalogParseError) });
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it('rejects overloads for the opposite unambiguous artifact representation', async () => {
+    await expect(
+      checkCatalogEntry(entryFor() as unknown as CatalogEntryWithData),
+    ).rejects.toBeInstanceOf(TypeError);
+    const inline = { identifier, type, data: null };
+    await expect(
+      checkCatalogEntry(inline as unknown as CatalogEntryWithUrl, artifact),
+    ).rejects.toBeInstanceOf(TypeError);
+    expect(resolver).not.toHaveBeenCalled();
   });
 });
