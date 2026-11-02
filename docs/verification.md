@@ -167,11 +167,11 @@ This utility performs no network requests. The caller is responsible for selecti
 
 ## Check results
 
-**Entry check** is `checkCatalogEntry()`: it returns entry-precheck failures directly, or a `checked` report containing the individual results in `manifests`. **Supplied-key check** is `checkCatalogEntryTrustManifest()`: it returns one result directly. After the entry prechecks pass, a failure result for one manifest does not stop `checkCatalogEntry()` from checking the other selected manifests.
+`checkCatalogEntry()` returns entry-precheck failures directly, or a `checked` report containing the individual results in `manifests`. `checkCatalogEntryTrustManifest()` returns one result directly. After the entry prechecks pass, a failure result for one manifest does not stop `checkCatalogEntry()` from checking the other selected manifests.
 
 Field paths are relative to each function’s return value; `—` means the function does not return that status. Rows follow failure precedence within the applicable checks.
 
-| Status | Entry check | Supplied-key check | Description |
+| Status | `checkCatalogEntry()` | <code>checkCatalogEntry<br>TrustManifest()</code> | Description |
 | --- | --- | --- | --- |
 | `invalid_entry` | `status` | `status` | Inline data cannot satisfy JCS for the declared digest. `checkCatalogEntry()` also reports invalid entry field shapes. `error` is a `CatalogParseError` with path-specific `issues`. |
 | `invalid_digest` | `status` | `status` | The entry’s declared artifact digest has invalid syntax or an incorrect length for an implemented algorithm. |
