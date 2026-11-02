@@ -94,32 +94,7 @@ For example, a report with passing publisher and assessor contributions can look
 }
 ```
 
-### Check results
-
-`checkCatalogEntryTrustManifest()` returns its result directly. `checkCatalogEntry()` returns entry-precheck failures directly, or a `checked` report containing the individual results in `manifests`. Both functions use the following statuses. Rows follow failure precedence within the applicable entry and selected-manifest checks; a failure in one contribution does not stop evaluation of the others.
-
-| Status | Description |
-| --- | --- |
-| `invalid_entry` | The entry’s field shapes are invalid (`checkCatalogEntry()`), or inline data cannot satisfy JCS for the declared digest (either function). `error` is a `CatalogParseError` with path-specific `issues`. |
-| `invalid_digest` | The entry’s declared artifact digest has invalid syntax or an incorrect length for an implemented algorithm. |
-| `digest_algorithm_not_implemented` | The entry’s artifact digest names an algorithm the SDK does not implement. Includes `algorithm`. |
-| `artifact_digest_mismatch` | The supplied artifact bytes, or JCS-canonicalized inline data, do not match the entry’s declared digest. |
-| `not_checked` | `checkCatalogEntry()` only. The contributor options excluded this manifest. This is a selection outcome. |
-| `invalid_manifest` | The manifest’s metadata, required content, or subject/entry correspondence is invalid, or its signed payload cannot satisfy JCS. `error` is a `CatalogValidationError` with path-specific `issues`. |
-| `unsigned` | The manifest has no `signature` of its own to verify. |
-| `profile_not_implemented` | `checkCatalogEntry()` only. The selected signer profile is not implemented. Includes `profile`; no fallback profile is tried. |
-| `invalid_jws` | The JWS is malformed or violates its required representation or common headers. |
-| `algorithm_mismatch` | The protected `alg` differs from the expected algorithm. Includes the claimed `algorithm`. |
-| `jws_feature_not_implemented` | A well-formed critical JWS extension is unsupported. |
-| `profile_check_failed` | `checkCatalogEntry()` only. The manifest or JWS does not satisfy the supported signer profile. `error` explains the failure. |
-| `issuer_check_failed` | `checkCatalogEntry()` only. DID resolution, DID document validation, or key authorization failed. `error` explains the failure. |
-| `invalid_signature` | The signature does not verify under the selected key. |
-| `not_yet_valid` | Issuance is later than the evaluation time plus tolerance. The preceding checks passed. |
-| `expired` | The evaluation time has reached expiration plus tolerance. The preceding checks passed. |
-| `passed` | The individual manifest passed the operation’s checks. In a `checkCatalogEntry()` report, includes `isPublisherEndorsement`. |
-| `checked` | `checkCatalogEntry()` only. The entry report completed, and `manifests` contains its individual outcomes. This can include no passing contributions or no manifests. |
-
-The supplied-key operation relies on the caller to authenticate and authorize its key; the automatic-profile operation performs that authentication itself. Neither establishes claim accuracy, publisher reputation, attestation validity, or artifact safety. These operations do not authenticate the surrounding catalog or validate the artifact’s format-specific schema.
+See [Check results](#check-results) for the complete status reference.
 
 ### Select contributors
 
@@ -159,7 +134,7 @@ const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {
 
 Each DID resolution has a 60-second default deadline covering DNS, redirects, and body reading, with a 16 MiB decoded body limit. Requests use HTTPS and check resolved addresses, including after redirects. A resolution timeout or size failure becomes that manifest's `issuer_check_failed` result. Selected manifests sharing a signer reuse one DID resolution within the invocation; calls do not share a DID cache. The number of selected contributors therefore affects total latency. Use `signal` to cancel the entire operation or impose an overall deadline.
 
-Both `checkCatalogEntry()` and `checkCatalogEntryTrustManifest()` accept `nowMs`, an optional safe integer UTC epoch time in milliseconds used to evaluate the time window. When omitted, the SDK samples the machine's UTC clock near completion; `checkCatalogEntry()` applies the same instant to all selected endorsements. `clockToleranceMs` defaults to 60,000 and accepts non-negative safe integer milliseconds, including zero. Issuance beyond the tolerance produces `not_yet_valid`; reaching expiration plus tolerance produces `expired`. Tolerance does not repair an expiration that is at or before issuance. `issuedAt` remains an authenticated assertion by the signer, not an independently trusted timestamp.
+`checkCatalogEntry()` accepts `nowMs`, an optional safe integer UTC epoch time in milliseconds used to evaluate the time window. When omitted, the SDK samples the machine's UTC clock near completion; `checkCatalogEntry()` applies the same instant to all selected endorsements. `clockToleranceMs` defaults to 60,000 and accepts non-negative safe integer milliseconds, including zero. Issuance beyond the tolerance produces `not_yet_valid`; reaching expiration plus tolerance produces `expired`. Tolerance does not repair an expiration that is at or before issuance. `issuedAt` remains an authenticated assertion by the signer, not an independently trusted timestamp.
 
 Entry, manifest, option, and artifact inputs are captured before asynchronous work. Later caller mutations do not change what an invocation checks. Returned manifests are the captured values. Expected verification failures return results; invalid call shapes or options, explicit cancellation, and unexpected cryptographic or runtime failures reject. Diagnostic `Error` objects can carry causes, but their message text is not a stable classification API. Branch on result discriminators.
 
@@ -189,6 +164,35 @@ The manifest need not already be attached to the entry. The function expects a t
 A `passed` result means those checks passed under the caller-selected key. A `not_yet_valid` or `expired` result means the preceding declaration, signature, and binding checks passed. Artifact retrieval URLs do not participate in subject binding, so identical bytes can be served from mirrors.
 
 This utility performs no network requests. The caller is responsible for selecting the signer profile and authenticating and authorizing the supplied key. It accepts the same [`nowMs` and `clockToleranceMs` controls](#network-and-time-controls) as `checkCatalogEntry()`. Invalid call shapes or options and unexpected runtime failures reject, as with that operation.
+
+## Check results
+
+**Entry check** is `checkCatalogEntry()`: it returns entry-precheck failures directly, or a `checked` report containing the individual results in `manifests`. **Supplied-key check** is `checkCatalogEntryTrustManifest()`: it returns one result directly. After the entry prechecks pass, a failure result for one manifest does not stop `checkCatalogEntry()` from checking the other selected manifests.
+
+Field paths are relative to each function’s return value; `—` means the function does not return that status. Rows follow failure precedence within the applicable checks.
+
+| Status | Entry check | Supplied-key check | Description |
+| --- | --- | --- | --- |
+| `invalid_entry` | `status` | `status` | Inline data cannot satisfy JCS for the declared digest. `checkCatalogEntry()` also reports invalid entry field shapes. `error` is a `CatalogParseError` with path-specific `issues`. |
+| `invalid_digest` | `status` | `status` | The entry’s declared artifact digest has invalid syntax or an incorrect length for an implemented algorithm. |
+| `digest_algorithm_not_implemented` | `status` | `status` | The entry’s artifact digest names an algorithm the SDK does not implement. Includes `algorithm`. |
+| `artifact_digest_mismatch` | `status` | `status` | The supplied artifact bytes, or JCS-canonicalized inline data, do not match the entry’s declared digest. |
+| `not_checked` | `manifests[i].status` | — | The contributor options excluded this manifest. This is a selection outcome. |
+| `invalid_manifest` | `manifests[i].status` | `status` | The manifest’s metadata, required content, or subject/entry correspondence is invalid, or its signed payload cannot satisfy JCS. `error` is a `CatalogValidationError` with path-specific `issues`. |
+| `unsigned` | `manifests[i].status` | `status` | The manifest has no `signature` of its own to verify. |
+| `profile_not_implemented` | `manifests[i].status` | — | The selected signer profile is not implemented. Includes `profile`; no fallback profile is tried. |
+| `invalid_jws` | `manifests[i].status` | `status` | The JWS is malformed or violates its required representation or common headers. |
+| `algorithm_mismatch` | `manifests[i].status` | `status` | The protected `alg` differs from the expected algorithm. Includes the claimed `algorithm`. |
+| `jws_feature_not_implemented` | `manifests[i].status` | `status` | A well-formed critical JWS extension is unsupported. |
+| `profile_check_failed` | `manifests[i].status` | — | The manifest or JWS does not satisfy the supported signer profile. `error` explains the failure. |
+| `issuer_check_failed` | `manifests[i].status` | — | DID resolution, DID document validation, or key authorization failed. `error` explains the failure. |
+| `invalid_signature` | `manifests[i].status` | `status` | The signature does not verify under the selected key. |
+| `not_yet_valid` | `manifests[i].status` | `status` | Issuance is later than the evaluation time plus tolerance. The preceding checks passed. |
+| `expired` | `manifests[i].status` | `status` | The evaluation time has reached expiration plus tolerance. The preceding checks passed. |
+| `passed` | `manifests[i].status` | `status` | The individual manifest passed the operation’s checks. In a `checkCatalogEntry()` report, includes `isPublisherEndorsement`. |
+| `checked` | `status` | — | The entry report completed, and `manifests` contains its individual outcomes. This can include no passing contributions or no manifests. |
+
+`checkCatalogEntryTrustManifest()` relies on the caller to authenticate and authorize its key; `checkCatalogEntry()` performs that authentication itself. Neither establishes claim accuracy, publisher reputation, attestation validity, or artifact safety. These operations do not authenticate the surrounding catalog or validate the artifact’s format-specific schema.
 
 ## Check signatures with a supplied key
 
