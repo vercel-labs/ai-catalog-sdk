@@ -20,7 +20,7 @@ if (report.status === 'checked') {
 
 For an entry with `url`, supply the artifact bytes obtained by your application as a `Uint8Array`. For an entry with `data`, call `checkCatalogEntry(entryWithData)`; the SDK applies JCS canonicalization to `entry.data` when checking the declared digest. Signed manifests require the digest to be present.
 
-The function checks the entry’s field shapes, excluding the contents of `trustManifests`, and declared artifact digest before evaluating individual manifests. `trustManifests` must be an array when present. Selected manifests with invalid field shapes or declarations, or an unusable signed payload, receive `invalid_manifest` while the other contributions are still evaluated. A `CatalogEntryCheckResult` with `report.status === 'checked'` can look like this:
+The function checks the entry’s fields and declared artifact digest, then evaluates each selected Trust Manifest independently. `trustManifests` must be an array when present. A selected manifest with invalid field shapes or declarations, or an unusable signed payload, receives `invalid_manifest` without preventing the other selected manifests from being checked. A `CatalogEntryCheckResult` with `report.status === 'checked'` can look like this:
 
 ```ts
 {
