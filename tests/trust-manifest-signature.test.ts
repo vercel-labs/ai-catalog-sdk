@@ -157,7 +157,7 @@ describe('checkTrustManifestSignature', () => {
         { contributor: 'did:example:unsigned' },
         fixedOptions,
       ),
-    ).resolves.toEqual({ status: 'missing_signature' });
+    ).resolves.toEqual({ status: 'unsigned' });
 
     await expect(
       checkTrustManifestSignature(

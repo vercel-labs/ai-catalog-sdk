@@ -477,7 +477,7 @@ export interface SignatureCheckOptions {
  */
 export type SignatureCheckResult =
   | { status: 'valid' }
-  | { status: 'missing_signature' }
+  | { status: 'unsigned' }
   | { status: 'invalid_jws' }
   | { status: 'algorithm_mismatch'; algorithm: string }
   | { status: 'jws_feature_not_implemented' }
@@ -672,7 +672,7 @@ function snapshotSignaturePayload(
   const payload = createDetachedJwsPayload(value, valueName);
   const signature = readOwnDataProperty(value, 'signature');
 
-  if (signature === undefined) return { status: 'missing_signature' };
+  if (signature === undefined) return { status: 'unsigned' };
   if (
     signature === null ||
     typeof signature !== 'object' ||
@@ -863,7 +863,7 @@ export async function checkCatalogEntryTrustManifest(
   const manifest = parsed.data;
   const error = validateTrustManifest(manifest, artifact.entry);
   if (error !== undefined) return { status: 'invalid_manifest', error };
-  if (manifest.signature === undefined) return { status: 'missing_signature' };
+  if (manifest.signature === undefined) return { status: 'unsigned' };
   const signature = snapshotSignaturePayload(manifest, 'manifest');
   const signatureResult = await executeSignatureCheck(
     'status' in signature
@@ -1180,7 +1180,7 @@ export async function checkCatalogEntry(
       const error = validateTrustManifest(manifest, snapshot);
       if (error !== undefined) result = { status: 'invalid_manifest', error };
       else if (manifest.signature === undefined)
-        result = { status: 'missing_signature' };
+        result = { status: 'unsigned' };
       else if (manifest.signature.profile !== 'did-web-v1')
         result = {
           status: 'profile_not_implemented',

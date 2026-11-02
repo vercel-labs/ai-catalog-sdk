@@ -31,15 +31,15 @@ The function checks the entry’s field shapes and declared artifact digest befo
         contributor: 'did:web:example.com',
         extensions: { 'example.com': true },
       },
-      status: 'missing_signature',
+      status: 'unsigned',
     },
   ],
 }
 ```
 
-The outer `report.status` of `checked` means the requested checks completed; it does not require a passing endorsement. In this example, `report.manifests[0].status` is `missing_signature`, so the manifest is unsigned metadata.
+The outer `report.status` of `checked` means the requested checks completed; it does not require a passing endorsement. `report.manifests` contains one result per attached manifest, in the same order, including repeated contributors. An entry without manifests produces an empty array.
 
-`report.manifests` contains one result per attached manifest, in the same order, including repeated contributors. Manifests excluded by the contributor options receive `not_checked`. An entry without manifests produces an empty array.
+In this example, `report.manifests[0].status` is `unsigned`, so the manifest is unsigned metadata. Manifests excluded by the contributor options receive `not_checked`.
 
 If structural validation fails, the result has `report.status === 'invalid_entry'`:
 
@@ -50,7 +50,7 @@ If structural validation fails, the result has `report.status === 'invalid_entry
 }
 ```
 
-Here, `parseError` is the returned `CatalogParseError` instance. Its `issues` identify the validation problems and their input paths; see [Handle invalid input](../README.md#handle-invalid-input).
+`parseError` is a `CatalogParseError`. Its `issues` identify the validation problems and their input paths.
 
 When the entry declares a digest, the SDK checks it against the supplied artifact bytes for a URL entry or JCS-canonicalized `data` for an inline entry. These failures also return before manifest verification:
 
@@ -106,7 +106,7 @@ For example, a report with passing publisher and assessor contributions can look
 | `artifact_digest_mismatch` | The supplied artifact bytes, or JCS-canonicalized inline data, do not match the entry’s declared digest. |
 | `not_checked` | `checkCatalogEntry()` only. The contributor options excluded this manifest. This is a selection outcome. |
 | `invalid_manifest` | The manifest’s metadata, required content, or subject/entry correspondence is invalid, or its signed payload cannot satisfy JCS. `error` is a `CatalogValidationError` with path-specific `issues`. |
-| `missing_signature` | The manifest is unsigned metadata. |
+| `unsigned` | The manifest has no `signature` of its own to verify. |
 | `profile_not_implemented` | `checkCatalogEntry()` only. The selected signer profile is not implemented. Includes `profile`; no fallback profile is tried. |
 | `invalid_jws` | The JWS is malformed or violates its required representation or common headers. |
 | `algorithm_mismatch` | The protected `alg` differs from the expected algorithm. Includes the claimed `algorithm`. |
@@ -140,7 +140,7 @@ const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {
 | `contributors: [], alwaysCheckPublisherManifests: true` | Publisher manifests only. |
 | `contributors: [contributor], alwaysCheckPublisherManifests: true` | Listed contributors plus publisher manifests. |
 
-`alwaysCheckPublisherManifests: true` adds publisher manifests to the selection. False or omission leaves the contributor selection unchanged; it does not exclude a publisher already selected. Publisher selection includes unsigned manifests attributed to that contributor, which receive `missing_signature`.
+`alwaysCheckPublisherManifests: true` adds publisher manifests to the selection. False or omission leaves the contributor selection unchanged; it does not exclude a publisher already selected. Publisher selection includes unsigned manifests attributed to that contributor, which receive `unsigned`.
 
 Publisher-only selection does not require such a manifest to exist: when none match, every attached manifest receives `not_checked`. If the SDK cannot derive a publisher identity from the entry identifier, the option adds no manifests to the contributor selection.
 
@@ -212,7 +212,7 @@ The JWS must use canonical, unpadded base64url segments and a valid UTF-8 protec
 | Signature status | Meaning |
 | --- | --- |
 | `valid` | The supplied key verifies the signature over the captured payload. |
-| `missing_signature` | The containing object has no signature. |
+| `unsigned` | The containing catalog or manifest has no `signature` of its own to verify. |
 | `invalid_jws` | The JWS is malformed or violates its required representation or headers. |
 | `algorithm_mismatch` | The protected `alg` differs from the caller's expectation. Includes the claimed algorithm for diagnostics. |
 | `jws_feature_not_implemented` | A well-formed critical extension is unsupported. |

@@ -195,7 +195,7 @@ describe('checkCatalogEntry', () => {
     const failed = manifestFor(assessor);
     if (failed.signature) failed.signature.jws = 'not-jws';
     expect(await statuses(entryFor([unsigned, failed]))).toMatchObject([
-      { status: 'missing_signature' },
+      { status: 'unsigned' },
       { status: 'invalid_jws' },
     ]);
     expect(resolver).not.toHaveBeenCalled();
@@ -325,7 +325,7 @@ describe('checkCatalogEntry', () => {
       extensions: { 'assessor.example': '\ud800' },
     };
     expect(await statuses(entryFor([unsigned, manifestFor()]))).toMatchObject([
-      { status: 'missing_signature' },
+      { status: 'unsigned' },
       { status: 'passed', isPublisherEndorsement: true },
     ]);
     expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
@@ -349,7 +349,7 @@ describe('checkCatalogEntry', () => {
     delete entry.digest;
     expect(await statuses(entry)).toMatchObject([
       { status: 'invalid_manifest', error: expect.any(CatalogValidationError) },
-      { status: 'missing_signature' },
+      { status: 'unsigned' },
     ]);
     expect(resolver).not.toHaveBeenCalled();
   });
@@ -408,17 +408,17 @@ describe('checkCatalogEntry', () => {
       [{ contributors: [assessor] }, ['not_checked', 'passed', 'not_checked', 'not_checked'], [assessor]],
       [
         { contributors: [], alwaysCheckPublisherManifests: true },
-        ['passed', 'not_checked', 'passed', 'missing_signature'],
+        ['passed', 'not_checked', 'passed', 'unsigned'],
         [publisher],
       ],
       [
         { contributors: [assessor, publisher], alwaysCheckPublisherManifests: true },
-        ['passed', 'passed', 'passed', 'missing_signature'],
+        ['passed', 'passed', 'passed', 'unsigned'],
         [publisher, assessor],
       ],
       [
         { alwaysCheckPublisherManifests: false },
-        ['passed', 'passed', 'passed', 'missing_signature'],
+        ['passed', 'passed', 'passed', 'unsigned'],
         [publisher, assessor],
       ],
     ];

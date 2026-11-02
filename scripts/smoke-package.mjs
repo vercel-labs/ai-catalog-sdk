@@ -117,7 +117,7 @@ assert.deepEqual(parseCatalog(futureContentCatalog), futureContentCatalog);
 assert.equal(aiCatalogSchema.safeParse(futureContentCatalog).success, true);
 const futureContentReport = await checkCatalogEntry(futureContentCatalog.entries[0]);
 assert.equal(futureContentReport.status, 'checked');
-assert.deepEqual(futureContentReport.manifests.map(result => result.status), ['missing_signature']);
+assert.deepEqual(futureContentReport.manifests.map(result => result.status), ['unsigned']);
 for (const futureFields of [{}, { futureEvidence: null }]) {
   const malformedCatalog = {
     ...value,
@@ -316,7 +316,7 @@ const selectedPublisher = await checkCatalogEntry({ ...signedEntry, trustManifes
 assert.equal(selectedPublisher.status, 'checked');
 assert.deepEqual(selectedPublisher.manifests, [
   ...parsedManifests.map(manifest => ({ manifest, status: 'not_checked' })),
-  { manifest: publisherMetadata, status: 'missing_signature' },
+  { manifest: publisherMetadata, status: 'unsigned' },
 ]);
 const inlineEntry = { identifier: 'inline', type: 'application/json', data: null };
 assert.deepEqual(await checkCatalogEntry(inlineEntry), { status: 'checked', manifests: [] });

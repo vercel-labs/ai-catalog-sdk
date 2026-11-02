@@ -164,7 +164,7 @@ describe('checkCatalogSignature', () => {
   it('integrates missing and malformed signature classification', async () => {
     await expect(
       checkCatalogSignature(unsignedCatalog, optionsFor()),
-    ).resolves.toEqual({ status: 'missing_signature' });
+    ).resolves.toEqual({ status: 'unsigned' });
     await expect(
       checkCatalogSignature(
         { ...unsignedCatalog, future: Number.NaN } as unknown as AICatalog,

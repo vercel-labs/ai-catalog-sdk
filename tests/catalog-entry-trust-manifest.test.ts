@@ -179,7 +179,7 @@ describe('checkCatalogEntryTrustManifest', () => {
           contributor,
           extensions: { 'example.com': value },
         }, optionsFor()),
-      ).resolves.toEqual({ status: 'missing_signature' });
+      ).resolves.toEqual({ status: 'unsigned' });
   });
   it('applies the same explicit instant and tolerance to issuance and expiration', async () => {
     const { entry, manifest } = dataFixture(null);
@@ -288,7 +288,7 @@ describe('checkCatalogEntryTrustManifest', () => {
     const { signature: _signature, ...unsignedManifest } = manifest;
     const unsigned = { ...unsignedManifest, extensions: { 'example.com': true } };
     const cases: [TrustManifest, object][] = [
-      [unsigned, { status: 'missing_signature' }],
+      [unsigned, { status: 'unsigned' }],
       [
         { ...manifest, signature: { ...metadata, jws: 'not-a-jws' } },
         { status: 'invalid_jws' },
