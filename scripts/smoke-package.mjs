@@ -516,7 +516,7 @@ checkCatalogEntryTrustManifest(entryWithUrl, trustManifest, signatureOptions);
 checkCatalogEntryTrustManifest(entryWithData, new Uint8Array(), trustManifest, signatureOptions);
 const options: CatalogEntryCheckOptions = {
   contributors: ['did:example:alice'], alwaysCheckPublisherManifests: true, clockToleranceMs: 0, nowMs: 0,
-  signal: new AbortController().signal, timeoutMs: 60_000, maxResponseBytes: 16 * 1024 * 1024,
+  signal: new AbortController().signal, resolutionTimeoutMs: 60_000, maxResponseBytes: 16 * 1024 * 1024,
 };
 const dataCheck: Promise<CatalogEntryCheckResult> = checkCatalogEntry(entryWithData);
 const configuredDataCheck: Promise<CatalogEntryCheckResult> = checkCatalogEntry(entryWithData, options);

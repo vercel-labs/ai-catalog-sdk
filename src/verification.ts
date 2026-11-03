@@ -505,7 +505,7 @@ export interface CatalogEntryCheckOptions {
   /** Cancels the whole operation; cancellation rejects with the signal reason. */
   signal?: AbortSignal;
   /** Deadline for each DID resolution, including DNS/redirects/body. Defaults to 60,000 ms. */
-  timeoutMs?: number;
+  resolutionTimeoutMs?: number;
   /** Maximum decoded body size per DID document. Defaults to 16 MiB. */
   maxResponseBytes?: number;
 }
@@ -807,7 +807,7 @@ export async function checkTrustManifestSignature(
  * Checks entry/artifact preconditions, then reports manifest declaration,
  * supplied-key signature, and time-window failures in that order.
  * An `expired` or `not_yet_valid` result means the preceding checks passed.
- * The caller selects the signer profile and authenticates/authorizes the key;
+ * The caller selects and applies the signer profile and authenticates/authorizes the key;
  * this operation performs no network requests and ignores attached manifests.
  * URL entries take their supplied artifact bytes adjacent to the entry.
  */
@@ -1011,7 +1011,7 @@ interface CapturedEntryCheckOptions extends CapturedTimeCheckOptions {
   contributors?: readonly string[];
   alwaysCheckPublisherManifests: boolean;
   signal?: AbortSignal;
-  timeoutMs: number;
+  resolutionTimeoutMs: number;
   maxResponseBytes: number;
 }
 
@@ -1020,7 +1020,7 @@ function snapshotEntryCheckOptions(value: unknown): CapturedEntryCheckOptions {
     return {
       alwaysCheckPublisherManifests: false,
       clockToleranceMs: 60_000,
-      timeoutMs: 60_000,
+      resolutionTimeoutMs: 60_000,
       maxResponseBytes: 16 * 1024 * 1024,
     };
   if (
@@ -1037,7 +1037,7 @@ function snapshotEntryCheckOptions(value: unknown): CapturedEntryCheckOptions {
     'clockToleranceMs',
     'nowMs',
     'signal',
-    'timeoutMs',
+    'resolutionTimeoutMs',
     'maxResponseBytes',
   ]) {
     const descriptor = Object.getOwnPropertyDescriptor(value, name);
@@ -1046,8 +1046,8 @@ function snapshotEntryCheckOptions(value: unknown): CapturedEntryCheckOptions {
       throw new TypeError(`options.${name} must be an own data property.`);
     options[name] = descriptor.value;
   }
-  const timeoutMs =
-    options.timeoutMs === undefined ? 60_000 : options.timeoutMs;
+  const resolutionTimeoutMs =
+    options.resolutionTimeoutMs === undefined ? 60_000 : options.resolutionTimeoutMs;
   const maxResponseBytes =
     options.maxResponseBytes === undefined
       ? 16 * 1024 * 1024
@@ -1058,11 +1058,11 @@ function snapshotEntryCheckOptions(value: unknown): CapturedEntryCheckOptions {
       ? false
       : options.alwaysCheckPublisherManifests;
   if (
-    typeof timeoutMs !== 'number' ||
-    !Number.isFinite(timeoutMs) ||
-    timeoutMs <= 0
+    typeof resolutionTimeoutMs !== 'number' ||
+    !Number.isFinite(resolutionTimeoutMs) ||
+    resolutionTimeoutMs <= 0
   )
-    throw new TypeError('timeoutMs must be a positive finite number.');
+    throw new TypeError('resolutionTimeoutMs must be a positive finite number.');
   if (
     typeof maxResponseBytes !== 'number' ||
     !Number.isSafeInteger(maxResponseBytes) ||
@@ -1109,7 +1109,7 @@ function snapshotEntryCheckOptions(value: unknown): CapturedEntryCheckOptions {
     ...(contributors === undefined ? {} : { contributors }),
     alwaysCheckPublisherManifests,
     ...timeOptions,
-    timeoutMs,
+    resolutionTimeoutMs,
     maxResponseBytes,
     ...(signal === undefined ? {} : { signal: signal as AbortSignal }),
   };
@@ -1168,7 +1168,7 @@ export async function checkCatalogEntry(
   const publisher = publisherIdentityFor(snapshot.identifier);
   const resolutions = new Map<string, Promise<unknown>>();
   const resolutionOptions = {
-    timeoutMs: options.timeoutMs,
+    resolutionTimeoutMs: options.resolutionTimeoutMs,
     maxResponseBytes: options.maxResponseBytes,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   };

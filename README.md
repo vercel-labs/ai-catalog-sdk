@@ -95,7 +95,7 @@ const result = await checkCatalogEntryTrustManifest(
 );
 ```
 
-For an entry with `data`, omit `artifactBytes`. The function validates the entry's fields and the explicit manifest, ignoring the entry's attached `trustManifests`. A `passed` result means the manifest’s declarations and signature pass the supplied-key checks, its subject matches the entry and artifact, and its time window passes. The caller is responsible for selecting the signer profile and authenticating the key; the function performs no network requests. See [Verification utilities](./docs/verification.md#check-a-trust-manifest-with-a-supplied-key) for details.
+For an entry with `data`, omit `artifactBytes`. The function validates the entry's fields and the explicit manifest, ignoring the entry's attached `trustManifests`. A `passed` result means the manifest’s declarations and signature pass the supplied-key checks, its subject matches the entry and artifact, and its time window passes. The caller is responsible for selecting and applying the signer profile and authenticating and authorizing the key; the function performs no network requests. See [Verification utilities](./docs/verification.md#check-a-trust-manifest-with-a-supplied-key) for details.
 
 ## Author a catalog
 

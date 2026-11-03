@@ -55,7 +55,7 @@ import {
 } from '../src/verification.js';
 import type { CatalogEntryWithData } from '../src/types.js';
 
-const options = { timeoutMs: 2_000, maxResponseBytes: 1024 * 1024 };
+const options = { resolutionTimeoutMs: 2_000, maxResponseBytes: 1024 * 1024 };
 const document = { id: 'did:web:publisher.example', assertionMethod: [] };
 let server: Server;
 let respond: (request: IncomingMessage, response: ServerResponse) => void;
@@ -259,7 +259,7 @@ describe('native did:web transport', () => {
   it('enforces the deadline during DNS, and does not connect after a late answer', async () => {
     let finish: (addresses: unknown) => void = () => {};
     network.resolve.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
-    await expect(resolveDidWeb('did:web:publisher.example', { ...options, timeoutMs: 20 })).rejects.toThrow('timeoutMs');
+    await expect(resolveDidWeb('did:web:publisher.example', { ...options, resolutionTimeoutMs: 20 })).rejects.toThrow('resolutionTimeoutMs');
     finish([{ address: '8.8.8.8', family: 4 }]);
     await Promise.resolve();
     expect(network.options).toHaveLength(0);
@@ -270,7 +270,7 @@ describe('native did:web transport', () => {
       response.writeHead(200);
       response.write('{');
     };
-    await expect(resolveDidWeb('did:web:publisher.example', { ...options, timeoutMs: 80 })).rejects.toThrow('timeoutMs');
+    await expect(resolveDidWeb('did:web:publisher.example', { ...options, resolutionTimeoutMs: 80 })).rejects.toThrow('resolutionTimeoutMs');
   });
 
   it.each([undefined, 'gzip'])('handles an interrupted response with content encoding %s', async (encoding) => {

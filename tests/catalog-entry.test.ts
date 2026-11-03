@@ -156,7 +156,7 @@ describe('checkCatalogEntry', () => {
     });
     expect(resolver).toHaveBeenCalledTimes(2);
     expect(resolver).toHaveBeenCalledWith(publisher, {
-      timeoutMs: 60_000,
+      resolutionTimeoutMs: 60_000,
       maxResponseBytes: 16 * 1024 * 1024,
     });
   });
@@ -722,7 +722,7 @@ describe('checkCatalogEntry', () => {
     const contributors = [publisher];
     const options = {
       contributors,
-      timeoutMs: 123_456,
+      resolutionTimeoutMs: 123_456,
       maxResponseBytes: 789_012,
     };
     let complete: ((value: unknown) => void) | undefined;
@@ -743,9 +743,9 @@ describe('checkCatalogEntry', () => {
     uncheckedManifest.contributor = publisher;
     bytes.fill(0);
     contributors.length = 0;
-    options.timeoutMs = 1;
+    options.resolutionTimeoutMs = 1;
     expect(resolver).toHaveBeenCalledWith(publisher, {
-      timeoutMs: 123_456,
+      resolutionTimeoutMs: 123_456,
       maxResponseBytes: 789_012,
     });
     complete?.(documentFor());
@@ -850,13 +850,13 @@ describe('checkCatalogEntry', () => {
   });
 
   it.each([
-    { timeoutMs: 0 },
-    { timeoutMs: null },
+    { resolutionTimeoutMs: 0 },
+    { resolutionTimeoutMs: null },
     { maxResponseBytes: null },
     { clockToleranceMs: null },
     { alwaysCheckPublisherManifests: null },
-    { timeoutMs: -1 },
-    { timeoutMs: Infinity },
+    { resolutionTimeoutMs: -1 },
+    { resolutionTimeoutMs: Infinity },
     { maxResponseBytes: 0 },
     { maxResponseBytes: 1.5 },
     { clockToleranceMs: -1 },

@@ -125,14 +125,14 @@ The SDK supports the [`did-web-v1` Signer Profile](https://github.com/Agent-Card
 
 ```ts
 const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {
-  timeoutMs: 60_000,
+  resolutionTimeoutMs: 60_000,
   maxResponseBytes: 16 * 1024 * 1024,
   clockToleranceMs: 60_000,
   signal: abortController.signal,
 });
 ```
 
-Each DID resolution has a 60-second default deadline covering DNS, redirects, and body reading, with a 16 MiB decoded body limit. Requests use HTTPS and check resolved addresses, including after redirects. A resolution timeout or size failure becomes that manifest's `issuer_check_failed` result. Selected manifests sharing a signer reuse one DID resolution within the invocation; calls do not share a DID cache. The number of selected contributors therefore affects total latency. Use `signal` to cancel the entire operation or impose an overall deadline.
+`resolutionTimeoutMs` sets the deadline for each DID resolution, covering DNS, redirects, and reading and parsing the response; it defaults to 60,000 ms. The decoded body limit defaults to 16 MiB. Requests use HTTPS and check resolved addresses, including after redirects. A resolution timeout or size failure becomes that manifest's `issuer_check_failed` result. Selected manifests sharing a signer reuse one DID resolution within the invocation; calls do not share a DID cache. The number of selected contributors therefore affects total latency. Use `signal` to cancel the entire operation or impose an overall deadline.
 
 `checkCatalogEntry()` accepts `nowMs`, an optional safe integer UTC epoch time in milliseconds used to evaluate the time window. When omitted, the SDK samples the machine's UTC clock near completion; `checkCatalogEntry()` applies the same instant to all selected endorsements. `clockToleranceMs` defaults to 60,000 and accepts non-negative safe integer milliseconds, including zero. Issuance beyond the tolerance produces `not_yet_valid`; reaching expiration plus tolerance produces `expired`. Tolerance does not repair an expiration that is at or before issuance. `issuedAt` remains an authenticated assertion by the signer, not an independently trusted timestamp.
 
@@ -163,7 +163,7 @@ The manifest need not already be attached to the entry. The function validates t
 
 A `passed` result means those checks passed under the caller-selected key. A `not_yet_valid` or `expired` result means the preceding declaration, signature, and binding checks passed. Artifact retrieval URLs do not participate in subject binding, so identical bytes can be served from mirrors.
 
-This utility performs no network requests. The caller is responsible for selecting the signer profile and authenticating and authorizing the supplied key. It accepts the same [`nowMs` and `clockToleranceMs` controls](#network-and-time-controls) as `checkCatalogEntry()`. Invalid call shapes or options and unexpected runtime failures reject, as with that operation.
+This utility performs no network requests. The caller is responsible for selecting and applying the signer profile and authenticating and authorizing the supplied key. It accepts the same [`nowMs` and `clockToleranceMs` controls](#network-and-time-controls) as `checkCatalogEntry()`. Invalid call shapes or options and unexpected runtime failures reject, as with that operation.
 
 ## Check results
 
@@ -194,7 +194,7 @@ Field paths are relative to each function’s return value; `—` means the func
 | `passed` | `manifests[i].status` | `status` | The individual manifest passed the operation’s checks. In a `checkCatalogEntry()` report, includes `isPublisherEndorsement`. |
 | `checked` | `status` | — | The entry report completed, and `manifests` contains its individual outcomes. This can include no passing contributions or no manifests. |
 
-`checkCatalogEntryTrustManifest()` relies on the caller to authenticate and authorize its key; `checkCatalogEntry()` performs that authentication itself. Neither establishes claim accuracy, publisher reputation, attestation validity, or artifact safety. These operations do not authenticate the surrounding catalog or validate the artifact’s format-specific schema.
+`checkCatalogEntry()` selects and applies the supported signer profile and authenticates and authorizes the verification key. With `checkCatalogEntryTrustManifest()`, the caller selects and applies the signer profile and authenticates and authorizes the supplied key. Neither establishes claim accuracy, publisher reputation, attestation validity, or artifact safety. These operations do not authenticate the surrounding catalog or validate the artifact’s format-specific schema.
 
 ## Check signatures with a supplied key
 
