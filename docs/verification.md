@@ -362,7 +362,7 @@ Inputs must contain plain JSON objects, arrays, and primitives. Non-finite numbe
 
 ## Validation diagnostics
 
-`CatalogParseError` and `CatalogValidationError` use these `CatalogIssue.code` categories for parsing and authoring-validation problems, including validation errors attached to verification results. These codes are distinct from verification result statuses.
+`CatalogParseError` and `CatalogValidationError` contain `CatalogIssue` objects in their `issues` arrays. The table below describes the values of `error.issues[i].code`, including for validation errors attached to verification results. These codes are distinct from verification result statuses.
 
 | Code | Meaning |
 | --- | --- |
