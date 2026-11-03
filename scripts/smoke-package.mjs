@@ -327,6 +327,30 @@ const assessorManifest = await signTrustManifest(
   input => createJws(input, 'compact', { kid: assessor + '#release-key' }),
 );
 assertValidCatalog({ ...value, entries: [{ ...entry, trustManifests: [assessorManifest] }] });
+const idnContributor = 'did:web:xn--bcher-kva.example';
+const idnManifest = await signTrustManifest(
+  entry,
+  { contributor: idnContributor },
+  input => createJws(input, 'compact', { kid: idnContributor + '#release-key' }),
+);
+assertValidCatalog({ ...value, entries: [{ ...entry, trustManifests: [idnManifest] }] });
+const invalidIdn = 'did:web:xn--a';
+const invalidIdnHeader = Buffer.from(JSON.stringify({
+  alg: 'ES256', typ: 'ai-catalog-trust-manifest+jws', kid: invalidIdn + '#release-key',
+})).toString('base64url');
+const invalidIdnManifest = {
+  ...idnManifest,
+  contributor: invalidIdn,
+  signature: {
+    ...idnManifest.signature,
+    signer: invalidIdn,
+    jws: invalidIdnHeader + '..' + idnManifest.signature.jws.split('.')[2],
+  },
+};
+assert.throws(() => assertValidCatalog({
+  ...value, entries: [{ ...entry, trustManifests: [invalidIdnManifest] }],
+}), error => error instanceof CatalogValidationError &&
+  error.issues.some(issue => issue.path.at(-1) === 'signer'));
 const wrongKidHeader = Buffer.from(JSON.stringify({
   alg: 'ES256', typ: 'ai-catalog-trust-manifest+jws', kid: 'did:web:other.example#key',
 })).toString('base64url');

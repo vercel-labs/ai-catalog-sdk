@@ -1,9 +1,8 @@
 import { Buffer } from 'node:buffer';
 import { createPublicKey, type KeyObject } from 'node:crypto';
-import { isIP } from 'node:net';
-import { domainToASCII } from 'node:url';
 
 import type { Signature, TrustManifest } from '../types.js';
+import { isDidWebDomain } from './did-web-domain.js';
 import { compareRfc3339DateTimes, isRfc3339DateTime } from './rfc3339.js';
 
 export class IssuerCheckError extends Error {
@@ -31,33 +30,6 @@ function own(value: Record<string, unknown>, name: string): unknown {
   return Object.hasOwn(value, name) ? value[name] : undefined;
 }
 
-function validPublisherDomain(domain: string): boolean {
-  if (
-    domain.length > 253 ||
-    !/^[a-z0-9.-]+$/.test(domain) ||
-    domainToASCII(domain) !== domain ||
-    isIP(domain) !== 0
-  )
-    return false;
-
-  if (
-    !domain
-      .split('.')
-      .every(
-        (label) =>
-          label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label),
-      )
-  )
-    return false;
-
-  // WHATWG also recognizes shortened, hexadecimal, and integer IPv4 forms.
-  try {
-    return isIP(new URL(`https://${domain}/`).hostname) === 0;
-  } catch {
-    return false;
-  }
-}
-
 /** Derives the publisher selected by the standard urn:air Publisher Profile. */
 export function publisherIdentityFor(identifier: string): string | undefined {
   const components = identifier.split(':');
@@ -66,7 +38,7 @@ export function publisherIdentityFor(identifier: string): string | undefined {
     !identifier.startsWith('urn:air:') ||
     components.length < 5 ||
     publisher === undefined ||
-    !validPublisherDomain(publisher) ||
+    !isDidWebDomain(publisher) ||
     !components.slice(3).every((component) => airTail.test(component))
   )
     return undefined;
@@ -83,7 +55,7 @@ export function inspectSignerProfile(
     throw new TypeError('Trust Manifest contributor must be a string.');
   if (
     !identity.startsWith('did:web:') ||
-    !validPublisherDomain(identity.slice('did:web:'.length))
+    !isDidWebDomain(identity.slice('did:web:'.length))
   )
     return new Error(
       'The did:web Signer Profile requires a root DID with a supported lowercase domain.',

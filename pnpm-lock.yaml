@@ -11,6 +11,9 @@ importers:
       canonicalize:
         specifier: 4.0.0
         version: 4.0.0
+      idn-hostname:
+        specifier: 15.1.19
+        version: 15.1.19
       jose:
         specifier: ~6.2.10
         version: 6.2.10
@@ -413,6 +416,10 @@ packages:
   highlight.js@10.7.3:
     resolution: {integrity: sha512-tzcUFauisWKNHaRkN4Wjl/ZA07gENAjFl3J/c480dprkGTg5EQstgaNFqBfUqCq54kZRIEcreTsAgF/m2quD7A==}
 
+  idn-hostname@15.1.19:
+    resolution: {integrity: sha512-pRGRbFpQWCptOBWw9Gn5DXtPdern5/XtdkcXdoEavjd+sh72jNm2eVI1eeysp64UisXPfaqoQrnLUKpSN4hJWw==}
+    engines: {node: '>=20.12.0 <21 || >=22.0.0'}
+
   is-fullwidth-code-point@3.0.0:
     resolution: {integrity: sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==}
     engines: {node: '>=8'}
@@ -569,6 +576,10 @@ packages:
     resolution: {integrity: sha512-14/VNBvWsrBeqWNDw8c/DK5ERcZBUwL1rnkVx18cQnF3zadr3GfoYtvD8mxi1dhkWpaPHp8kfi92MDbjMeW3qw==}
     engines: {node: '>=18'}
     hasBin: true
+
+  punycode@2.3.1:
+    resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
+    engines: {node: '>=6'}
 
   require-directory@2.1.1:
     resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
@@ -1066,6 +1077,10 @@ snapshots:
 
   highlight.js@10.7.3: {}
 
+  idn-hostname@15.1.19:
+    dependencies:
+      punycode: 2.3.1
+
   is-fullwidth-code-point@3.0.0: {}
 
   jose@6.2.10: {}
@@ -1189,6 +1204,8 @@ snapshots:
       package-manager-detector: 1.8.0
       picocolors: 1.1.1
       sade: 1.8.1
+
+  punycode@2.3.1: {}
 
   require-directory@2.1.1: {}
 

@@ -158,6 +158,15 @@ describe('static signature declarations', () => {
     'did:web:example.com.',
     'did:web:example.com:path',
     'did:web:xn--a',
+    'did:web:xn--a.example',
+    'did:web:xn--g6h.example',
+    'did:web:xn--e28h.example',
+    'did:web:xn--u-ccb.example',
+    'did:web:xn--u-bcb.example',
+    'did:web:xn--ab-j1t.example',
+    'did:web:xn--ab-0ea.example',
+    'did:web:xn--a-0hc.example',
+    'did:web:xn--0.example',
   ])('rejects signer syntax outside the known profile: %s', (identity) => {
     const value = manifest();
     value.signature = {

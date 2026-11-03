@@ -1,5 +1,6 @@
 import type { CatalogIssue, JsonValue } from '../types.js';
 import { preflightJsonValue } from './json-value.js';
+import { isDidWebDomain } from './did-web-domain.js';
 import { absoluteUriSchema } from './schemas.js';
 
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
@@ -82,24 +83,7 @@ function inspectJws(value: JsonValue | undefined):
 
 function isRootDidWeb(signer: string): boolean {
   if (!signer.startsWith('did:web:')) return false;
-  const domain = signer.slice('did:web:'.length);
-  if (
-    domain.length > 253 ||
-    !/^[a-z0-9.-]+$/.test(domain) ||
-    !domain
-      .split('.')
-      .every(
-        (label) =>
-          label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label),
-      )
-  )
-    return false;
-  try {
-    const hostname = new URL(`https://${domain}`).hostname;
-    return hostname === domain && !/^(?:[0-9]+\.){3}[0-9]+$/.test(hostname);
-  } catch {
-    return false;
-  }
+  return isDidWebDomain(signer.slice('did:web:'.length));
 }
 
 /** Check the captured object's exact signed payload, without producing bytes. */
