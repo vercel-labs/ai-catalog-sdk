@@ -58,7 +58,6 @@
   },
   "dependencies": {
     "canonicalize": "4.0.0",
-    "idn-hostname": "15.1.19",
     "jose": "~6.2.10"
   },
   "peerDependencies": {

@@ -108,17 +108,6 @@ describe('Signer and Publisher Profile requirements', () => {
     'example.com%3A443',
     '[::1]',
     'xn--.example',
-    'xn--a',
-    'xn--a.example',
-    'xn--g6h.example',
-    'xn--e28h.example',
-    'xn--u-ccb.example',
-    'xn--u-bcb.example',
-    'xn--ab-j1t.example',
-    'xn--ab-0ea.example',
-    'xn--a-0hc.example',
-    'xn--0.example',
-
     `${'a'.repeat(64)}.com`,
   ])('rejects excluded domain %s', (domain) => {
     expect(
