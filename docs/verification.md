@@ -203,15 +203,23 @@ The table below describes each status and shows where it appears in each functio
 `checkCatalogSignature()` and `checkTrustManifestSignature()` verify a detached compact JWS with one caller-selected public key and expected algorithm:
 
 ```ts
-import { checkCatalogSignature } from 'ai-catalog-sdk/verification';
+import {
+  checkCatalogSignature,
+  checkTrustManifestSignature,
+} from 'ai-catalog-sdk/verification';
 
-const result = await checkCatalogSignature(catalog, {
+const catalogResult = await checkCatalogSignature(catalog, {
+  publicKey,
+  expectedAlgorithm: 'ES256',
+});
+
+const manifestResult = await checkTrustManifestSignature(manifest, {
   publicKey,
   expectedAlgorithm: 'ES256',
 });
 ```
 
-They share `SignatureCheckOptions` and `SignatureCheckResult`. The SDK implements the exact algorithm token `ES256`; supply a native public P-256 `KeyObject` or a P-256 `CryptoKey` usable for verification. Typed consumers of this Node-only subpath need compatible Node.js declarations, such as `@types/node`.
+They share `SignatureCheckOptions` and `SignatureCheckResult`. The SDK implements the exact algorithm token `ES256`; supply a native public P-256 `KeyObject` or a P-256 `CryptoKey` usable for verification.
 
 A `valid` result establishes only that the supplied key verifies the captured payload. It does not authenticate the claimed contributor or catalog operator, enforce issuance or expiration, check artifact binding, or establish trust. Header fields do not select a key or trigger network requests.
 
