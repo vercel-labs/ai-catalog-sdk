@@ -167,9 +167,11 @@ This utility performs no network requests. The caller is responsible for selecti
 
 ## Check results
 
-`checkCatalogEntry()` returns entry-precheck failures directly, or a `checked` report containing the individual results in `manifests`. `checkCatalogEntryTrustManifest()` returns one result directly. After the entry prechecks pass, a failure result for one manifest does not stop `checkCatalogEntry()` from checking the other selected manifests.
+`checkCatalogEntry()` returns entry-precheck failures directly, or a `checked` report containing the individual results in `manifests`. After the entry prechecks pass, a failure result for one manifest does not stop `checkCatalogEntry()` from checking the other selected manifests.
 
 In a `checked` report, `report.manifests[i].manifest` has type `JsonValue` for `invalid_manifest` and `not_checked`, and type `TrustManifest` for all other manifest statuses.
+
+For a single explicit manifest, `checkCatalogEntryTrustManifest()` returns one result directly.
 
 Field paths are relative to each function’s return value; `—` means the function does not return that status. Rows follow failure precedence within the applicable checks.
 
