@@ -125,6 +125,96 @@ describe('checkDigest', () => {
     });
   });
 
+  it.each(['sha256', 'sha384', 'sha512'] as const)(
+    'checks canonical JSON with %s and detects a different value',
+    (algorithm) => {
+      const expected = `${algorithm}:${createNodeHash(algorithm)
+        .update('{"a":1,"b":2}')
+        .digest('hex')}`;
+      const value = Object.freeze({ b: 2, a: 1 });
+      expect(checkDigest(value, expected)).toEqual({ status: 'match' });
+      expect(checkDigest({ a: 1, b: 3 }, expected)).toEqual({
+        status: 'mismatch',
+      });
+    },
+  );
+
+  it('checks strings, ordinary arrays, and primitives as JSON values', () => {
+    const cases: [JsonValue, string][] = [
+      ['abc', '"abc"'],
+      ['{"a":1}', '"{\\"a\\":1}"'],
+      [[97, 98, 99], '[97,98,99]'],
+      [null, 'null'],
+      [true, 'true'],
+      [false, 'false'],
+      [-0, '0'],
+      [1.5, '1.5'],
+    ];
+    for (const [value, canonicalJson] of cases) {
+      const expected = `sha256:${createNodeHash('sha256')
+        .update(canonicalJson)
+        .digest('hex')}`;
+      expect(checkDigest(value, expected)).toEqual({ status: 'match' });
+    }
+    expect(checkDigest('abc', abcSha256)).toEqual({ status: 'mismatch' });
+    expect(checkDigest([97, 98, 99], abcSha256)).toEqual({
+      status: 'mismatch',
+    });
+  });
+
+  it('rejects invalid JSON without executing accessors or proxy traps', () => {
+    const forbidden = vi.fn(() => {
+      throw new Error('must not execute');
+    });
+    const accessor = Object.defineProperty({}, 'value', {
+      enumerable: true,
+      get: forbidden,
+    });
+    const proxy = new Proxy(
+      {},
+      {
+        get: forbidden,
+        getPrototypeOf: forbidden,
+        getOwnPropertyDescriptor: forbidden,
+        ownKeys: forbidden,
+      },
+    );
+    const cyclic: JsonValue[] = [];
+    cyclic.push(cyclic);
+    for (const value of [
+      undefined,
+      Number.NaN,
+      '\ud800',
+      new Date(),
+      Array(1),
+      cyclic,
+      accessor,
+      proxy,
+    ]) {
+      expect(() => checkDigest(value as JsonValue, emptySha256)).toThrow(
+        TypeError,
+      );
+    }
+    expect(forbidden).not.toHaveBeenCalled();
+  });
+
+  it('validates the value before classifying malformed or unsupported digests', () => {
+    let tooDeep: JsonValue = null;
+    for (let index = 0; index < 129; index += 1) tooDeep = [tooDeep];
+    const detached = new Uint8Array([1]);
+    structuredClone(detached.buffer, { transfer: [detached.buffer] });
+    const shared = new Uint8Array(new SharedArrayBuffer(1));
+    for (const digest of ['sha256:abc', 'future:a']) {
+      for (const value of [Number.NaN, detached, shared]) {
+        expect(() => checkDigest(value, digest)).toThrow(TypeError);
+      }
+      expect(() => checkDigest(tooDeep, digest)).toThrow(RangeError);
+    }
+    expect(() => checkDigest(Array(100_000).fill(null), emptySha256)).toThrow(
+      RangeError,
+    );
+  });
+
   it('accepts Buffer, cross-realm arrays, and the exact range of subviews', () => {
     expect(checkDigest(Buffer.from('abc'), abcSha256).status).toBe('match');
 
@@ -241,5 +331,25 @@ describe('checkDigest', () => {
       status: 'algorithm_not_implemented',
       algorithm: 'sha3-256',
     });
+  });
+
+  it('preserves JSON digest backend failures and skips hashing invalid declarations', () => {
+    const cause = new Error('backend failure');
+    backend.failure = cause;
+    expect(checkDigest({ a: 1 }, 'sha256:abc')).toEqual({
+      status: 'invalid_digest',
+    });
+    expect(checkDigest({ a: 1 }, 'future:a')).toEqual({
+      status: 'algorithm_not_implemented',
+      algorithm: 'future',
+    });
+    let thrown: unknown;
+    try {
+      checkDigest({ a: 1 }, abcSha384);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(DigestAlgorithmUnavailableError);
+    expect(thrown).toMatchObject({ algorithm: 'sha384', cause });
   });
 });

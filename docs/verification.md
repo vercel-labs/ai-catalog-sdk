@@ -228,7 +228,7 @@ These functions validate the materialized JSON value without performing catalog 
 
 ## Check a digest
 
-`checkDigest(bytes, expectedDigest)` compares the exact byte range supplied by the caller with an AI Catalog digest:
+`checkDigest(value, expectedDigest)` compares exact bytes or a JCS-canonicalized JSON value with an AI Catalog digest:
 
 ```ts
 import { checkDigest } from 'ai-catalog-sdk/verification';
@@ -241,24 +241,26 @@ const result = checkDigest(
 if (result.status !== 'match') {
   // Do not use the bytes as the declared artifact.
 }
+
+const resultForInlineData = checkDigest(entry.data, expectedDigest);
 ```
 
-The function hashes bytes verbatim. It does not fetch content, decode a representation, serialize JSON, or apply JCS canonicalization. In particular, callers must not pass an ordinary JSON serialization for an entry with `data`, whose inline artifact digest is defined over JCS-canonicalized `data`.
+`Uint8Array` and `Buffer` inputs are hashed as their exact byte range. Other JSON values are JCS-canonicalized before hashing. Pass retrieved bytes for a URL artifact and `entry.data` for an inline artifact. Strings are JSON string values, including their JSON quotes and escapes; to check raw text bytes, encode them with `TextEncoder` first.
 
 The result statuses have deliberately narrow meanings:
 
 | Status | Meaning |
 | --- | --- |
-| `match` | The supplied bytes match the declared digest. |
-| `mismatch` | The digest is implemented and well-formed, but the bytes do not match. |
+| `match` | The supplied bytes or JCS-canonicalized JSON value match the declared digest. |
+| `mismatch` | The digest is implemented and well-formed, but the supplied bytes or JCS-canonicalized JSON value do not match. |
 | `invalid_digest` | The declaration is malformed, or a known algorithm has an invalid output length. |
 | `algorithm_not_implemented` | The declaration is syntactically valid, but the SDK does not implement its exact algorithm token. |
 
 The SDK currently implements the exact, case-sensitive `sha256`, `sha384`, and `sha512` tokens with 64, 96, and 128 lowercase hexadecimal characters, respectively. This is an SDK capability boundary, not a claim that other algorithms are forbidden or insecure. If the runtime cannot execute a registered implementation, the function throws `DigestAlgorithmUnavailableError` and preserves the underlying error as `cause`.
 
-`Buffer` values and `Uint8Array` subviews are accepted. Shared or detached backing buffers are rejected because they cannot provide a stable byte view for the check. Wrong JavaScript argument types and shared or detached byte views throw `TypeError`.
+`Buffer` values and `Uint8Array` subviews are accepted. Shared or detached backing buffers are rejected because they cannot provide a stable byte view for the check. Wrong JavaScript argument types, shared or detached byte views, and JSON values that cannot satisfy JCS throw `TypeError`. JSON values beyond the SDK's node or nesting-depth limits throw `RangeError`.
 
-A `match` result establishes only equality between caller-supplied bytes and a declared digest. It does not establish who made the declaration, whether the digest is authoritative, or whether the content is trustworthy.
+A `match` result establishes only that the supplied bytes or JCS-canonicalized JSON value match a declared digest. It does not establish who made the declaration, whether the digest is authoritative, or whether the content is trustworthy.
 
 ## Create a digest
 
@@ -333,22 +335,20 @@ const manifestPayload = createTrustManifestSignaturePayload(manifest);
 
 Each helper omits only the immediate `signature.jws` and immediate `additionalSignatures`. Signature metadata, unknown fields, extensions, and nested members with those names remain covered. A catalog payload includes complete nested manifest signatures. Inputs can contain a complete signature or pre-signing metadata without `jws`; the helpers do not mutate them.
 
-The helpers accept materialized values and do not perform schema validation. Their output is the JWS payload, not a complete signing input or base64url-encoded text. They do not select keys or algorithms, fetch content, enforce time windows, or establish trust. Plain-JSON input defenses and resource limits apply to the complete input. JCS's I-JSON constraints apply to the retained payload after the two omissions.
+The helpers accept plain JSON objects and do not perform schema validation. Their output is the JWS payload, not a complete signing input or base64url-encoded text. They do not select keys or algorithms, fetch content, enforce time windows, or establish trust.
 
 ## Canonicalize a logical JSON value
 
 `canonicalizeJsonValueToBytes(value)` produces fresh RFC 8785 JCS UTF-8 bytes from a materialized JSON value:
 
 ```ts
-import { canonicalizeJsonValueToBytes, checkDigest } from 'ai-catalog-sdk/verification';
+import { canonicalizeJsonValueToBytes } from 'ai-catalog-sdk/verification';
 
-const result = checkDigest(
-  canonicalizeJsonValueToBytes(entry.data),
-  expectedDigest,
-);
+const bytes = canonicalizeJsonValueToBytes({ b: 2, a: 1 });
+// UTF-8 bytes for {"a":1,"b":2}
 ```
 
-Property names are sorted by UTF-16 code units, array order and Unicode normalization are preserved, and numbers use JCS's ECMAScript representation. The function does not parse source text: passing `'{"x":1}'` canonicalizes a JSON string. It cannot recover duplicate names, original number spelling or precision, or invalid source UTF-8 lost during parsing. It does not omit any signature fields.
+Property names are sorted by UTF-16 code units, array order and Unicode normalization are preserved, and numbers use JCS's ECMAScript representation. Strings are canonicalized as JSON string values; parse JSON source text before passing it.
 
 Inputs must contain plain JSON objects, arrays, and primitives. Non-finite numbers, lone Unicode surrogates, noncharacters, cycles, sparse or decorated arrays, accessors, proxies, exotic objects, and other non-JSON values throw `TypeError`. Fixed node or nesting-depth limits produce `RangeError`. Canonicalization uses accepted own data properties without invoking inherited `toJSON` hooks or overridden array methods.
 
