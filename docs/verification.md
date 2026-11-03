@@ -161,7 +161,7 @@ const resultForEntryWithData = await checkCatalogEntryTrustManifest(
 
 The manifest need not already be attached to the entry. The function validates the entry’s field shapes while ignoring its attached `trustManifests`. It then checks the entry’s declared artifact digest, followed by the supplied manifest’s field shapes, declarations and subject correspondence, signature, and time window. See the shared [check results](#check-results) for statuses and precedence.
 
-A `passed` result means those checks passed under the caller-selected key. A `not_yet_valid` or `expired` result means the preceding declaration, signature, and binding checks passed. Artifact retrieval URLs do not participate in subject binding, so identical bytes can be served from mirrors.
+A `passed` result means those checks passed under the caller-selected key. A `not_yet_valid` or `expired` result means the preceding declaration, signature, and binding checks passed.
 
 This utility performs no network requests. The caller is responsible for selecting and applying the signer profile and authenticating and authorizing the supplied key. It accepts the same [`nowMs` and `clockToleranceMs` controls](#network-and-time-controls) as `checkCatalogEntry()`. Invalid call shapes or options and unexpected runtime failures reject, as with that operation.
 
@@ -169,7 +169,7 @@ This utility performs no network requests. The caller is responsible for selecti
 
 `checkCatalogEntry()` returns entry-precheck failures directly, or a `checked` report containing the individual results in `manifests`. `checkCatalogEntryTrustManifest()` returns one result directly. After the entry prechecks pass, a failure result for one manifest does not stop `checkCatalogEntry()` from checking the other selected manifests.
 
-In an aggregate report, `manifest` is a `JsonValue` for `invalid_manifest` and `not_checked`, and a parsed `TrustManifest` for all other manifest statuses.
+In a `checked` report, `report.manifests[i].manifest` has type `JsonValue` for `invalid_manifest` and `not_checked`, and type `TrustManifest` for all other manifest statuses.
 
 Field paths are relative to each function’s return value; `—` means the function does not return that status. Rows follow failure precedence within the applicable checks.
 
