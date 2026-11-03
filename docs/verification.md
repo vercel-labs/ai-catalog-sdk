@@ -244,18 +244,16 @@ These functions validate the materialized JSON value without performing catalog 
 import { checkDigest } from 'ai-catalog-sdk/verification';
 
 const result = checkDigest(
-  artifactBytes,
+  artifactBytes, // or entry.data for an inline artifact
   'sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
 );
 
 if (result.status !== 'match') {
-  // Do not use the bytes as the declared artifact.
+  // Do not use this content as the declared artifact.
 }
-
-const resultForInlineData = checkDigest(entry.data, expectedDigest);
 ```
 
-`Uint8Array` and `Buffer` inputs are hashed as their exact byte range. Other JSON values are JCS-canonicalized before hashing. Pass retrieved bytes for a URL artifact and `entry.data` for an inline artifact. Strings are JSON string values, including their JSON quotes and escapes; to check raw text bytes, encode them with `TextEncoder` first.
+Pass retrieved bytes for a URL artifact and `entry.data` for an inline artifact. `Uint8Array` and `Buffer` inputs are hashed as their exact byte range. Other JSON values are JCS-canonicalized before hashing. Strings are JSON string values, including their JSON quotes and escapes; to check raw text bytes, encode them with `TextEncoder` first.
 
 The result statuses have deliberately narrow meanings:
 
