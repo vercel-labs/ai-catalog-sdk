@@ -291,6 +291,8 @@ const manifest = await signTrustManifest(
 );
 ```
 
+The callback receives `{ payload, typ }`, where `payload` contains the exact canonical UTF-8 bytes and `typ` is `ai-catalog-trust-manifest+jws`.
+
 The entry-based overload copies only `identifier`, `type`, `digest`, and a present `version` into the subject. The entry must already declare a digest; the helper does not retrieve or hash the artifact or attach the result to the entry. The contributor can be an assessor or any other signer, independent of the entry's publisher.
 
 For a separately distributed manifest or a subject containing additional fields, supply the subject explicitly:
@@ -303,9 +305,9 @@ const manifest = await signTrustManifest(
 );
 ```
 
-The optional trailing `signatureMetadata` supplies `profile`, `issuedAt`, and `expiresAt`. An omitted `profile` defaults to `did-web-v1`; an omitted `issuedAt` uses the current time, captured before the callback. `expiresAt` is absent unless supplied. The helper sets `signer` to `contributor`.
+Both overloads accept an optional trailing `signatureMetadata` argument supplying `profile`, `issuedAt`, and `expiresAt`. An omitted `profile` defaults to `did-web-v1`; an omitted `issuedAt` uses the current time, captured before the callback. `expiresAt` is absent unless supplied. The helper sets `signer` to `contributor`.
 
-The callback receives `{ payload, typ }`, where `payload` contains the exact canonical UTF-8 bytes and `typ` is `ai-catalog-trust-manifest+jws`. It may return a value synchronously or through a promise:
+The callback may return any of these JWS representations, synchronously or through a promise:
 
 | Callback result | Handling |
 | --- | --- |
