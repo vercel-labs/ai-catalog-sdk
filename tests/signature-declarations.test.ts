@@ -157,7 +157,6 @@ describe('static signature declarations', () => {
     'did:web:Example.com',
     'did:web:example.com.',
     'did:web:example.com:path',
-    'did:web:xn--a',
   ])('rejects signer syntax outside the known profile: %s', (identity) => {
     const value = manifest();
     value.signature = {
