@@ -375,6 +375,7 @@ export function safeParseCatalogJson(json: string): ParseResult<AICatalog> {
   try {
     value = JSON.parse(json);
   } catch (cause) {
+    if (!(cause instanceof SyntaxError)) throw cause;
     return {
       success: false,
       error: new CatalogParseError(

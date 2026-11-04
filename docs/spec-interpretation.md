@@ -17,3 +17,9 @@ For forward compatibility, an unrecognized Trust Manifest field satisfies the SD
 The default 60-second clock tolerance for `checkCatalogEntry()` and `checkCatalogEntryTrustManifest()` is an SDK choice permitted by the snapshot; callers can override it, including with zero.
 
 Automatic catalog-signer authentication is not implemented. The supplied-key catalog checker establishes snapshot integrity under the caller's selected key, without assigning catalog-operator authority.
+
+## Website discovery
+
+The pinned snapshot's recommended agent-driven discovery procedure includes inspecting HTML `<link>` elements when no HTTP `Link` header is present. `discoverCatalog()` intentionally inspects HTTP headers and well-known locations only; catalogs advertised solely through HTML are not discovered. The procedure is a `SHOULD` recommendation, not a requirement for every catalog consumer.
+
+The recommended discovery procedure expects a JSON media type for the catalog response. The SDK instead parses catalog responses as JSON regardless of their `Content-Type`, accepting catalogs from hosts that serve them without a JSON media type.

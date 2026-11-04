@@ -33,6 +33,10 @@
       "types": "./dist/verification.d.ts",
       "default": "./dist/verification.js"
     },
+    "./discovery": {
+      "types": "./dist/discovery.d.ts",
+      "default": "./dist/discovery.js"
+    },
     "./zod": {
       "types": "./dist/zod.d.ts",
       "default": "./dist/zod.js"

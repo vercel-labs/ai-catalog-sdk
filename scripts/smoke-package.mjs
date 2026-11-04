@@ -90,10 +90,32 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { assertValidCatalog, CatalogParseError, CatalogValidationError, implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
+import { discoverCatalog } from ${JSON.stringify(`${pkg.name}/discovery`)};
 import { canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryTrustManifest, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(`${pkg.name}/verification`)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
 const value = { specVersion: '1.0', entries: [] };
+assert.equal(Object.hasOwn(await import(${JSON.stringify(pkg.name)}), 'discoverCatalog'), false);
+const blockedDiscoveryUrl = 'https://127.0.0.1/catalog.json';
+const blockedDiscovery = await discoverCatalog(blockedDiscoveryUrl);
+assert.equal(blockedDiscovery.status, 'fetch_failed');
+assert.equal(blockedDiscovery.url, blockedDiscoveryUrl);
+assert.ok(blockedDiscovery.error instanceof Error);
+for (const input of ['/catalog.json', 'http://example.com/', new URL(blockedDiscoveryUrl), null]) {
+  await assert.rejects(discoverCatalog(input));
+}
+for (const discoveryOptions of [
+  { resourceTimeoutMs: 0 }, { resourceTimeoutMs: Infinity },
+  { maxResponseBytes: 0 }, { maxResponseBytes: 1.5 },
+]) {
+  await assert.rejects(discoverCatalog(blockedDiscoveryUrl, discoveryOptions));
+}
+const discoveryCancellation = new AbortController();
+const discoveryCancellationReason = { message: 'Packed discovery cancellation' };
+discoveryCancellation.abort(discoveryCancellationReason);
+await assert.rejects(discoverCatalog('https://example.com/', {
+  signal: discoveryCancellation.signal,
+}), error => error === discoveryCancellationReason);
 assert.deepEqual(parseCatalog(value).entries, []);
 assert.equal(assertValidCatalog(value), undefined);
 assert.throws(() => parseCatalog({ ...value, entries: [null] }), CatalogParseError);
@@ -420,10 +442,18 @@ import {
   safeParseCatalog,
   assertValidCatalog,
   CatalogValidationError,
+  CatalogParseError,
   type CatalogIssue,
 } from '${pkg.name}';
 import { aiCatalogSchema } from '${pkg.name}/zod';
 import { aiCatalogJsonSchema, type JsonSchema } from '${pkg.name}/json-schema';
+import {
+  discoverCatalog,
+  type DiscoverCatalogOptions,
+  type CatalogDiscoveryResult,
+} from '${pkg.name}/discovery';
+// @ts-expect-error Discovery is available through its dedicated Node.js subpath.
+import { discoverCatalog as rootDiscovery } from '${pkg.name}';
 import {
   canonicalizeJsonValueToBytes,
   checkCatalogEntry,
@@ -451,6 +481,60 @@ import {
 import rawSchema from '${pkg.name}/schema/ai-catalog.schema.json' with { type: 'json' };
 
 const authored: AICatalog = { specVersion: '1.0', entries: [] };
+const discoveryOptions: DiscoverCatalogOptions = {
+  signal: new AbortController().signal,
+  resourceTimeoutMs: 120_000,
+  maxResponseBytes: 64 * 1024 * 1024,
+};
+const discovery: Promise<CatalogDiscoveryResult> = discoverCatalog('https://example.com/', discoveryOptions);
+const defaultDiscovery: Promise<CatalogDiscoveryResult> = discoverCatalog('https://example.com/');
+// @ts-expect-error Discovery accepts URL strings, not URL objects.
+discoverCatalog(new URL('https://example.com/'));
+// @ts-expect-error Discovery owns its transport rather than accepting a fetch implementation.
+discoverCatalog('https://example.com/', { fetch: globalThis.fetch });
+const discoveryResults: CatalogDiscoveryResult[] = [
+  { status: 'found', catalog: authored, url: 'https://example.com/catalog.json' },
+  { status: 'not_found' },
+  { status: 'invalid_catalog', url: 'https://example.com/catalog.json', error: {} as CatalogParseError },
+  { status: 'fetch_failed', url: 'https://example.com/', error: new Error('Unavailable') },
+];
+for (const discoveryResult of discoveryResults) {
+  // @ts-expect-error A catalog is only available after narrowing to found.
+  const catalogWithoutNarrowing: AICatalog = discoveryResult.catalog;
+  switch (discoveryResult.status) {
+    case 'found': {
+      const catalog: AICatalog = discoveryResult.catalog;
+      const url: string = discoveryResult.url;
+      // @ts-expect-error Successful discovery has no failure diagnostic.
+      discoveryResult.error;
+      void catalog; void url;
+      break;
+    }
+    case 'not_found':
+      // @ts-expect-error Not finding a catalog has no catalog URL.
+      discoveryResult.url;
+      break;
+    case 'invalid_catalog': {
+      const diagnostic: CatalogParseError = discoveryResult.error;
+      const issues: readonly CatalogIssue[] = diagnostic.issues;
+      const url: string = discoveryResult.url;
+      void diagnostic; void issues; void url;
+      break;
+    }
+    case 'fetch_failed': {
+      const diagnostic: Error = discoveryResult.error;
+      const url: string = discoveryResult.url;
+      void diagnostic; void url;
+      break;
+    }
+    default: {
+      const exhaustive: never = discoveryResult;
+      void exhaustive;
+    }
+  }
+  void catalogWithoutNarrowing;
+}
+void discovery; void defaultDiscovery; void rootDiscovery;
 const candidate: unknown = authored;
 assertValidCatalog(candidate);
 const assertedCatalog: AICatalog = candidate;
