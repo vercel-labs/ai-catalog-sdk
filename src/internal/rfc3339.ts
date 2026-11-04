@@ -53,3 +53,40 @@ export function isRfc3339DateTime(value: string): boolean {
     utc.getUTCMinutes() === 59
   );
 }
+
+/** Compare valid RFC 3339 instants without truncating fractional seconds. */
+export function compareRfc3339DateTimes(left: string, right: string): number {
+  const parts = (
+    value: string,
+  ): { second: number; leap: boolean; fraction: string } => {
+    if (!isRfc3339DateTime(value))
+      throw new TypeError('Expected a valid RFC 3339 timestamp.');
+    const match = rfc3339Pattern.exec(value);
+    if (!match) throw new TypeError('Expected a valid RFC 3339 timestamp.');
+    const offset =
+      (match[8] === '-' ? -1 : 1) *
+      (Number(match[9] ?? 0) * 60 + Number(match[10] ?? 0));
+    const leap = match[6] === '60';
+    const instant = new Date(0);
+    instant.setUTCFullYear(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+    );
+    instant.setUTCHours(
+      Number(match[4]),
+      Number(match[5]) - offset,
+      Math.min(Number(match[6]), 59),
+      0,
+    );
+    return { second: instant.getTime() / 1000, leap, fraction: match[7] ?? '' };
+  };
+  const a = parts(left);
+  const b = parts(right);
+  if (a.second !== b.second) return a.second < b.second ? -1 : 1;
+  if (a.leap !== b.leap) return a.leap ? 1 : -1;
+  const width = Math.max(a.fraction.length, b.fraction.length);
+  const af = a.fraction.padEnd(width, '0');
+  const bf = b.fraction.padEnd(width, '0');
+  return af === bf ? 0 : af < bf ? -1 : 1;
+}

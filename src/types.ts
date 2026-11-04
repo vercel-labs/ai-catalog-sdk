@@ -26,15 +26,11 @@ export interface AICatalog {
    */
   extensions?: JsonObject;
 
-  /**
-   * Detached JWS over the JCS-canonicalized catalog without this field.
-   *
-   * When verified, it covers every other catalog member, including entry order,
-   * URLs, and inline `data`, but not artifact bytes fetched from an entry URL.
-   * SDK validation checks only that this value is a string; it does not parse or
-   * verify the JWS.
-   */
-  signature?: string;
+  /** Signature over this catalog, excluding signature.jws and additionalSignatures. */
+  signature?: Signature;
+
+  /** Reserved signature data; ignored by this version. */
+  additionalSignatures?: JsonValue;
 }
 
 /** Information identifying the operator of an AI Catalog. */
@@ -54,8 +50,8 @@ interface CatalogEntryFields {
    * its format.
    *
    * Within a catalog, multiple entries may share an identifier only when every
-   * entry provides a distinct `version`. Whole-catalog parsing enforces this
-   * rule; standalone entry and schema validation do not.
+   * entry provides a distinct `version`. Authoring validation enforces this
+   * rule; ordinary parsing preserves entries in their supplied order.
    */
   identifier: string;
   displayName?: string;
@@ -76,7 +72,10 @@ interface CatalogEntryFields {
   publisher?: Publisher;
 
   /** Trust metadata for this artifact. SDK validation does not verify its claims. */
-  trustManifest?: TrustManifest;
+  trustManifests?: TrustManifest[];
+
+  /** Artifact digest in `algorithm:lowercase-hex` form; required for signed contributions. */
+  digest?: string;
 
   /** RFC 3339 timestamp indicating when this catalog entry was last modified. */
   updatedAt?: string;
@@ -122,52 +121,42 @@ export interface Publisher {
   identityType?: string;
 }
 
+/** Signature metadata and a detached compact JWS. Parsing does not authenticate it. */
+export interface Signature {
+  /** Claimed absolute URI identifying the signer. */
+  signer: string;
+  /** Exact identifier of the verification profile. */
+  profile: string;
+  /** RFC 3339 issuance timestamp. */
+  issuedAt: string;
+  /** RFC 3339 expiration timestamp, strictly after issuedAt. */
+  expiresAt?: string;
+  /** Detached compact JWS over the signature payload. */
+  jws: string;
+}
+
 /**
- * Structured but unverified identity and trust metadata for an artifact.
- *
- * SDK validation requires `identity` plus at least one of `signature`,
- * `trustSchema`, non-empty `attestations`, or non-empty `provenance`. A
- * `signature` also requires `subject` and `issuedAt`.
- *
- * Validation does not verify signatures, digests, identities, trust anchors,
- * attestations, provenance, expiration policy, or artifact content.
+ * One contributor's unverified artifact claims. Requires a signature,
+ * trustSchema, non-empty attestations, provenance, or extensions, or an
+ * unrecognized JSON-valued field.
  */
 export interface TrustManifest {
-  /** Claimed globally unique URI identifying the manifest issuer. */
-  identity: string;
-
-  /** Descriptive type hint for `identity`; the identity URI determines the mechanism. */
-  identityType?: string;
+  /** Absolute URI identifying this contributor; preserved and compared exactly. */
+  contributor: string;
   trustSchema?: TrustSchema;
   attestations?: Attestation[];
   provenance?: ProvenanceLink[];
-  privacyPolicyUrl?: string;
-  termsOfServiceUrl?: string;
 
-  /** Content description included in the signed payload; required with `signature`. */
+  /** Release description; required with signature and compared with its entry. */
   subject?: TrustSubject;
 
-  /** RFC 3339 issuance timestamp; required with `signature`. */
-  issuedAt?: string;
+  /** Authenticates this manifest alone; signer must exactly equal contributor. */
+  signature?: Signature;
 
-  /** RFC 3339 timestamp after which the manifest is stale; parsing does not enforce expiration. */
-  expiresAt?: string;
+  /** Reserved signature data; ignored by this version. */
+  additionalSignatures?: JsonValue;
 
-  /**
-   * Detached JWS over the JCS-canonicalized manifest without this field.
-   *
-   * SDK validation does not parse or verify the JWS. This signature does not
-   * cover the surrounding catalog.
-   */
-  signature?: string;
-
-  /**
-   * Custom trust data included in the signed payload when `signature` is present.
-   *
-   * The specification requires each key to be a valid URL or reverse-DNS
-   * string. SDK validation preserves the JSON values but does not validate key
-   * syntax or interpret their contents.
-   */
+  /** Namespaced contributor claims included in the signed payload. */
   extensions?: JsonObject;
 }
 
@@ -176,13 +165,13 @@ export interface TrustManifest {
  * payload when a signature is present.
  */
 export interface TrustSubject {
-  /** Logical artifact identifier; catalog-entry parsing requires it to match the containing entry's `identifier`. */
+  /** Logical artifact identifier; authoring validation requires it to match the containing entry's `identifier`. */
   identifier: string;
 
-  /** Release version; signed manifests require it to be present and equal exactly when the containing entry has `version`. */
+  /** Release version; present and equal exactly when the containing entry has `version`. */
   version?: string;
 
-  /** Type identifier for the content; catalog-entry parsing requires it to match the containing entry's `type`. */
+  /** Type identifier for the content; authoring validation requires it to match the containing entry's `type`. */
   type: string;
 
   /**
@@ -190,13 +179,11 @@ export interface TrustSubject {
    *
    * For an artifact provided through an entry's `url`, this covers the exact
    * bytes served. For inline `data`, it covers the JCS-canonicalized JSON
-   * value. SDK validation checks syntax only, not algorithm strength or
-   * artifact content.
+   * value. Authoring validation checks the declaration's syntax and known
+   * digest lengths; verification checks artifact content.
    */
   digest: string;
 
-  /** Content URL; catalog-entry parsing requires it to match the containing entry's `url`. */
-  url?: string;
 }
 
 /**
@@ -280,7 +267,7 @@ export interface ProvenanceLink {
   signatureRef?: string;
 }
 
-/** A parsing or validation issue reported by an SDK parser. */
+/** A parsing or validation issue with its location in the supplied value. */
 export interface CatalogIssue {
   /** Machine-readable category for programmatic classification. */
   code: string;
@@ -314,6 +301,22 @@ export class CatalogParseError extends Error {
   constructor(issues: readonly CatalogIssue[], cause?: unknown) {
     super('The value is not a valid AI Catalog document.');
     this.name = 'CatalogParseError';
+    this.issues = issues;
+    if (cause !== undefined) this.cause = cause;
+  }
+}
+
+/** A failure of explicit catalog authoring or manifest declaration validation. */
+export class CatalogValidationError extends Error {
+  /** Bounded diagnostics identifying invalid declarations and their paths. */
+  readonly issues: readonly CatalogIssue[];
+
+  /** The underlying error, when a lower-level check supplied one. */
+  readonly cause?: unknown;
+
+  constructor(issues: readonly CatalogIssue[], cause?: unknown) {
+    super('The supplied declarations failed validation.');
+    this.name = 'CatalogValidationError';
     this.issues = issues;
     if (cause !== undefined) this.cause = cause;
   }

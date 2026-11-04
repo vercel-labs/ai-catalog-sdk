@@ -1,10 +1,7 @@
+import { Buffer } from 'node:buffer';
 import { createPublicKey } from 'node:crypto';
 
-import {
-  JOSEAlgNotAllowed,
-  JOSEError,
-  JOSENotSupported,
-} from 'jose/errors';
+import { JOSEAlgNotAllowed, JOSEError, JOSENotSupported } from 'jose/errors';
 import { describe, expect, it, vi } from 'vitest';
 
 const backend = vi.hoisted(() => ({ failure: undefined as unknown }));
@@ -19,17 +16,19 @@ import type { TrustManifest } from '../src/index.js';
 import { checkTrustManifestSignature } from '../src/verification.js';
 
 const manifest: TrustManifest = {
-  identity: 'did:example:alice',
-  issuedAt: '2026-03-15T10:00:00Z',
+  contributor: 'did:example:alice',
   subject: {
     identifier: 'example-artifact',
     digest:
       'sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
     type: 'application/json',
   },
-  signature:
-    'eyJhbGciOiJFUzI1NiJ9..' +
-    'NKmmKrtfVExTyrPwimVozLDtLRAZP0r29iJYkrBRAR7rFsM3UqsXFFH3htDDVUKWPJ-UjvgFQqOWDT97iDzT0A',
+  signature: {
+    signer: 'did:example:alice',
+    profile: 'custom-profile',
+    issuedAt: '2026-03-15T10:00:00Z',
+    jws: `${Buffer.from(JSON.stringify({ alg: 'ES256', typ: 'ai-catalog-trust-manifest+jws' })).toString('base64url')}..${'A'.repeat(86)}`,
+  },
 };
 const publicKey = createPublicKey({
   key: {

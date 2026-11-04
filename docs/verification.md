@@ -1,186 +1,219 @@
 # Verification utilities
 
-Verification utilities are available from the `ai-catalog-sdk/verification` subpath. They are separate from parsing so applications can distinguish structural validation from checks performed against external content.
+Verification and signing utilities are available from `ai-catalog-sdk/verification`. Parsing validates document structure and declarations; verification checks signatures, artifact binding, and the applicable authentication and time requirements. Applications decide which endorsements satisfy their requirements.
 
 ## Canonicalize a logical JSON value
 
-`canonicalizeJsonValueToBytes(value)` encodes an already-materialized logical JSON value as fresh RFC 8785 JSON Canonicalization Scheme (JCS) UTF-8 bytes:
+`canonicalizeJsonValueToBytes(value)` produces fresh RFC 8785 JCS UTF-8 bytes from a materialized JSON value:
+
+```ts
+import { canonicalizeJsonValueToBytes } from 'ai-catalog-sdk/verification';
+
+const bytes = canonicalizeJsonValueToBytes({ b: 2, a: 1 });
+// UTF-8 bytes for {"a":1,"b":2}
+```
+
+Property names are sorted by UTF-16 code units, array order and Unicode normalization are preserved, and numbers use JCS's ECMAScript representation. Strings are canonicalized as JSON string values; parse JSON source text before passing it.
+
+Inputs must contain plain JSON objects, arrays, and primitives. Non-finite numbers, lone Unicode surrogates, noncharacters, cycles, sparse or decorated arrays, accessors, proxies, exotic objects, and other non-JSON values throw `TypeError`. Fixed node or nesting-depth limits produce `RangeError`. Canonicalization uses accepted own data properties without invoking inherited `toJSON` hooks or overridden array methods.
+
+## Create signature payloads
+
+`createCatalogSignaturePayload(catalog)` and `createTrustManifestSignaturePayload(manifest)` return the exact RFC 8785 JCS UTF-8 payload bytes for their containing object:
 
 ```ts
 import {
-  canonicalizeJsonValueToBytes,
-  checkDigest,
+  createCatalogSignaturePayload,
+  createTrustManifestSignaturePayload,
 } from 'ai-catalog-sdk/verification';
 
-const result = checkDigest(
-  canonicalizeJsonValueToBytes(entry.data),
-  expectedDigest,
-);
+const catalogPayload = createCatalogSignaturePayload(catalog);
+const manifestPayload = createTrustManifestSignaturePayload(manifest);
 ```
 
-The function sorts object property names by UTF-16 code units, recursively, while preserving array order and Unicode normalization form. It uses the JCS ECMAScript number representation; for example, the JavaScript value `-0` canonicalizes as `0`.
+Each helper omits only the immediate `signature.jws` and immediate `additionalSignatures`. Signature metadata, unknown fields, extensions, and nested members with those names remain covered. A catalog payload includes complete nested manifest signatures. Inputs can contain a complete signature or pre-signing metadata without `jws`; the helpers do not mutate them.
 
-The input is a value, not source text. Passing `'{"x":1}'` canonicalizes a JSON string value; it does not parse an object. By the time a normal JSON parser has produced a value, duplicate member names, original number spelling and precision, invalid source UTF-8, and a source spelling of negative zero can no longer be recovered. Callers that need to authenticate those source-level properties need a separate I-JSON-aware parsing boundary.
+The helpers accept plain JSON objects and do not perform schema validation. Their output is the JWS payload, not a complete signing input or base64url-encoded text. They do not select keys or algorithms, fetch content, enforce time windows, or establish trust.
 
-Programmatic input must consist of plain JSON objects, arrays, and JSON primitives. The function rejects non-finite numbers, lone Unicode surrogates, noncharacters, cycles, sparse or decorated arrays, accessors, proxies, exotic objects, and other non-JSON values with `TypeError`. Inputs beyond the SDK's fixed node or nesting-depth limits throw `RangeError`. Canonicalization uses only the accepted own data properties; it does not invoke inherited `toJSON` hooks or overridden array methods.
+## Check signatures with a supplied key
 
-Canonicalization does not remove or reinterpret any member. In particular, this function does not remove a `signature` member. Use `createCatalogSignaturePayload()` or `createTrustManifestSignaturePayload()` for the corresponding AI Catalog signature-payload rule described below.
-
-## Create a catalog signature payload
-
-`createCatalogSignaturePayload(catalog)` returns the exact RFC 8785 UTF-8 payload covered by an AI Catalog's top-level detached JWS:
+`checkCatalogSignature()` and `checkTrustManifestSignature()` verify a detached compact JWS with one caller-selected public key and expected algorithm:
 
 ```ts
-import { createCatalogSignaturePayload } from 'ai-catalog-sdk/verification';
+import {
+  checkCatalogSignature,
+  checkTrustManifestSignature,
+} from 'ai-catalog-sdk/verification';
 
-const payload = createCatalogSignaturePayload(catalog);
-```
+const catalogResult = await checkCatalogSignature(catalog, {
+  publicKey,
+  expectedAlgorithm: 'ES256',
+});
 
-The function omits exactly an own, top-level member whose name is the case-sensitive string `signature`. It preserves every other member, including unknown future fields, extensions, the `entries` array and its order, inline `data`, a differently cased top-level name such as `Signature`, and nested fields named `signature`. It does not mutate the input, and signed and otherwise-identical unsigned catalogs produce the same bytes.
-
-The input is an already-materialized AI Catalog value. This function does not parse or structurally validate it, so validate untrusted catalog input at the appropriate boundary first. It cannot recover source-level information already lost during parsing, such as duplicate member names or original number spellings. The same programmatic I-JSON restrictions and fixed resource limits as `canonicalizeJsonValueToBytes()` apply, producing `TypeError` or `RangeError` respectively. Those restrictions apply to the entire input, including the omitted `signature` member. Accessors and proxies are rejected without invoking them; non-enumerable and non-JSON `signature` values are rejected rather than silently ignored.
-
-The result is only the detached JWS payload. It is not base64url-encoded and is not the complete JWS signing input. The function does not create or verify a JWS, select or evaluate keys, algorithms, or key identifiers, fetch artifacts, or establish trust. The payload covers an entry's URL string but not the artifact bytes retrieved from that URL.
-
-## Create a Trust Manifest signature payload
-
-`createTrustManifestSignaturePayload(manifest)` returns the exact RFC 8785 UTF-8 payload covered by a Trust Manifest's detached JWS:
-
-```ts
-import { createTrustManifestSignaturePayload } from 'ai-catalog-sdk/verification';
-
-const payload = createTrustManifestSignaturePayload(trustManifest);
-```
-
-The function omits exactly an own, top-level member whose name is the case-sensitive string `signature`. It preserves every other member, including unknown future fields, extensions, a differently cased top-level name such as `Signature`, and nested fields named `signature`. It does not mutate the input, and signed and otherwise-identical unsigned manifests produce the same bytes.
-
-The input is an already-materialized Trust Manifest value. This function does not parse or structurally validate it, so validate untrusted catalog input at the appropriate boundary first. It cannot recover source-level information already lost during parsing, such as duplicate member names or original number spellings. The same programmatic I-JSON restrictions and fixed resource limits as `canonicalizeJsonValueToBytes()` apply, producing `TypeError` or `RangeError` respectively. Those restrictions apply to the entire input, including the omitted `signature` member. Accessors and proxies are rejected without invoking them; non-enumerable and non-JSON `signature` values are rejected rather than silently ignored.
-
-The result is only the detached JWS payload. It is not base64url-encoded and is not the complete JWS signing input. The function does not create or verify a JWS, select or evaluate keys, algorithms, or key identifiers, check a subject digest, enforce timestamps, resolve an identity, or establish trust.
-
-## Check signatures
-
-`checkCatalogSignature()` and `checkTrustManifestSignature()` check a detached JWS with one public key and expected algorithm selected by the caller. They share the `SignatureCheckOptions` and `SignatureCheckResult` types.
-
-### Check a catalog signature
-
-`checkCatalogSignature(catalog, options)` checks the top-level catalog signature over one captured catalog snapshot:
-
-```ts
-import { createPublicKey } from 'node:crypto';
-import { checkCatalogSignature } from 'ai-catalog-sdk/verification';
-
-const publicKey = createPublicKey(configuredCatalogPublicKeyPem);
-const result = await checkCatalogSignature(catalog, {
+const manifestResult = await checkTrustManifestSignature(manifest, {
   publicKey,
   expectedAlgorithm: 'ES256',
 });
 ```
 
-A `valid` result means the exact caller-selected key verified the signature over the exact canonical catalog snapshot captured by this invocation. That snapshot includes `host`, entry membership and ordering, metadata, URL strings, inline data, extensions, unknown fields, and nested Trust Manifest signatures.
+They share `SignatureCheckOptions` and `SignatureCheckResult`. The SDK implements the exact algorithm token `ES256`; supply a native public P-256 `KeyObject` or a P-256 `CryptoKey` usable for verification.
 
-It does not authenticate the key as belonging to the catalog operator, fetch or authenticate artifacts referenced by URLs, verify entry Trust Manifests, establish freshness, or decide trust.
+A `valid` result establishes only that the supplied key verifies the captured payload. It does not authenticate the claimed contributor or catalog operator, enforce issuance or expiration, check artifact binding, or establish trust. Header fields do not select a key or trigger network requests.
 
-### Check a Trust Manifest signature
+The JWS must use canonical, unpadded base64url segments and a valid UTF-8 protected header. The required `typ` is exactly `ai-catalog+jws` for catalogs or `ai-catalog-trust-manifest+jws` for manifests. Any protected `b64` is forbidden. The expected algorithm is trusted caller input; the unverified `alg` is compared against it and never selects an algorithm.
 
-`checkTrustManifestSignature(manifest, options)` checks a Trust Manifest's signature over one captured manifest snapshot:
+| Signature status | Meaning |
+| --- | --- |
+| `valid` | The supplied key verifies the signature over the captured payload. |
+| `unsigned` | The containing catalog or manifest has no `signature` of its own to verify. |
+| `invalid_jws` | The JWS is malformed or violates its required representation or headers. |
+| `algorithm_mismatch` | The protected `alg` differs from the caller's expectation. Includes the claimed algorithm for diagnostics. |
+| `jws_feature_not_implemented` | A well-formed critical extension is unsupported. |
+| `invalid_signature` | The signature representation or cryptographic check failed. |
+
+These functions validate the materialized JSON value without performing catalog or manifest schema validation. Wrong runtime argument types, incompatible keys, and malformed programmatic inputs reject with `TypeError`; resource limits reject with `RangeError`. Unexpected backend failures reject rather than becoming verification results.
+
+## Check a catalog entry
+
+`checkCatalogEntry()` validates one captured entry and evaluates its selected Trust Manifests:
 
 ```ts
-import { createPublicKey } from 'node:crypto';
-import { checkTrustManifestSignature } from 'ai-catalog-sdk/verification';
+import { checkCatalogEntry } from 'ai-catalog-sdk/verification';
 
-const publicKey = createPublicKey(configuredPublisherPublicKeyPem);
-const result = await checkTrustManifestSignature(trustManifest, {
-  publicKey,
-  expectedAlgorithm: 'ES256',
+const report = await checkCatalogEntry(entryWithUrl, artifactBytes);
+
+if (report.status === 'checked') {
+  const passingManifests = report.manifests
+    .filter(result => result.status === 'passed')
+    .map(result => result.manifest);
+}
+```
+
+For an entry with `url`, supply the artifact bytes obtained by your application as a `Uint8Array`. For an entry with `data`, call `checkCatalogEntry(entryWithData)`; the SDK applies JCS canonicalization to `entry.data` when checking the declared digest. Signed manifests require the digest to be present.
+
+The function validates the entry’s fields and declaration constraints and checks its declared artifact digest, then evaluates each selected Trust Manifest independently. `trustManifests` must be an array when present. A selected manifest with invalid field shapes or declarations, or an unusable signed payload, receives `invalid_manifest` without preventing the other selected manifests from being checked. A `CatalogEntryCheckResult` with `report.status === 'checked'` can look like this:
+
+```ts
+{
+  status: 'checked',
+  manifests: [
+    {
+      manifest: {
+        contributor: 'did:web:example.com',
+        extensions: { 'example.com': true },
+      },
+      status: 'unsigned',
+    },
+  ],
+}
+```
+
+The outer `report.status` of `checked` means the requested checks completed; it does not require a passing endorsement. `report.manifests` contains one result per attached manifest, in the same order, including repeated contributors. An entry without manifests produces an empty array.
+
+In this example, `report.manifests[0].status` is `unsigned`, so the manifest is unsigned metadata. Manifests excluded by the contributor options receive `not_checked`.
+
+If structural validation fails, the result has `report.status === 'invalid_entry'`:
+
+```ts
+{
+  status: 'invalid_entry',
+  error: parseError,
+}
+```
+
+`parseError` is a `CatalogParseError`. Its `issues` identify the validation problems and their input paths.
+
+When the entry declares a digest, the SDK checks it against the supplied artifact bytes for a URL entry or JCS-canonicalized `data` for an inline entry. These failures also return before manifest verification:
+
+```ts
+// The artifact bytes do not match the declared digest.
+{ status: 'artifact_digest_mismatch' }
+
+// The digest has an incorrect length for an implemented algorithm.
+{ status: 'invalid_digest' }
+
+// The digest names an algorithm the SDK does not implement.
+{
+  status: 'digest_algorithm_not_implemented',
+  algorithm: 'blake3',
+}
+```
+
+Malformed digest syntax, such as `sha256:zz`, fails entry validation and produces `invalid_entry`.
+
+### Interpret manifest results
+
+In a `checkCatalogEntry()` report, `passed` means the selected signer profile authenticated the contributor, the signed subject matches the entry and artifact, and the endorsement satisfies its time window with the configured tolerance. The result's `isPublisherEndorsement` is true only when that contribution also satisfies the `did:web` Publisher Profile. For example, the publisher for `urn:air:example.com:agent:billing` is exactly `did:web:example.com`. The SDK does not infer this relationship from an artifact URL or informational publisher metadata.
+
+A passing assessor contribution, or a passing contribution for an entry outside the Publisher Profile's identifier syntax, has `isPublisherEndorsement: false`. That value means the SDK did not establish the profile-defined publisher relationship. Applications can require a passing publisher result, particular assessors, or their own combination of evidence by inspecting the report.
+
+For example, a report with passing publisher and assessor contributions can look like this. `publisherManifest` and `assessorManifest` represent their captured manifest objects:
+
+```ts
+{
+  status: 'checked',
+  manifests: [
+    {
+      manifest: publisherManifest,
+      status: 'passed',
+      isPublisherEndorsement: true,
+    },
+    {
+      manifest: assessorManifest,
+      status: 'passed',
+      isPublisherEndorsement: false,
+    },
+  ],
+}
+```
+
+See [Check results](#check-results) for the complete status reference.
+
+### Select contributors
+
+Ordinary calls evaluate all contributors. Use `CatalogEntryCheckOptions` to limit which manifests are verified:
+
+```ts
+const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {
+  contributors: ['did:web:assessor.example'],
+  alwaysCheckPublisherManifests: true,
 });
 ```
 
-A `valid` result means the exact caller-selected key verified the signature over the exact canonical manifest snapshot captured by this invocation. It does not prove who owns the public key or connect it with the manifest's claimed identity. It also does not establish a trust anchor, check the subject digest or surrounding catalog, validate timestamps, or decide whether the manifest should be trusted.
-
-### Shared signature-checking behavior
-
-The SDK currently implements only the exact `ES256` algorithm token. A key must be a native public P-256 `KeyObject` or verification-capable `CryptoKey`. The expected algorithm and key are trusted caller inputs. The unverified `alg` header is compared with that expectation; it never selects an algorithm. Typed consumers of this Node-only subpath need compatible Node.js declarations, such as `@types/node`.
-
-Each checker accepts the ordinary RFC 7515 detached compact form `protected..signature` and reconstructs the signing input using the base64url encoding of the corresponding payload creator's result. Compact segments must use canonical, unpadded base64url, and the protected header must be valid UTF-8 JSON. RFC 7797 unencoded payloads (`b64: false`) and other well-formed unknown critical extensions produce `jws_feature_not_implemented`; malformed critical declarations produce `invalid_jws`. An explicit `b64` parameter must be protected and named by `crit`; `b64: true` then retains the ordinary encoded payload behavior.
-
-The result statuses have deliberately narrow meanings:
-
-| Status | Meaning |
+| Options | Manifests to verify |
 | --- | --- |
-| `valid` | The supplied public key verifies the signature over the exact canonical catalog or manifest snapshot. |
-| `missing_signature` | The catalog or manifest has no own `signature` member. |
-| `invalid_jws` | The signature is not a supported, well-formed detached compact JWS. |
-| `algorithm_mismatch` | The protected header's untrusted `alg` string does not equal the caller's expected algorithm. The result includes that claimed string for diagnostics only. |
-| `jws_feature_not_implemented` | The JWS makes a well-formed critical request the SDK does not implement. |
-| `invalid_signature` | The signature has the wrong ES256 representation or does not verify under the supplied key and payload. |
+| `contributors` omitted | All manifests. |
+| `contributors: []` | None. |
+| `contributors: [contributor]` | Every exact, case-sensitive contributor match. |
+| `contributors: [], alwaysCheckPublisherManifests: true` | Publisher manifests only. |
+| `contributors: [contributor], alwaysCheckPublisherManifests: true` | Listed contributors plus publisher manifests. |
 
-Wrong runtime argument types, options without own data properties, a non-public or incompatible key, and a non-string present `signature` reject with `TypeError`. The payload creator's programmatic I-JSON `TypeError` and resource-limit `RangeError` behavior is retained. Each checker validates the complete materialized value before reporting `missing_signature`; neither performs catalog or Trust Manifest schema validation. Backend failures surfaced distinctly by the JOSE implementation reject instead of being converted to an input-status result.
+`alwaysCheckPublisherManifests: true` adds publisher manifests to the selection. False or omission leaves the contributor selection unchanged; it does not exclude a publisher already selected. Publisher selection includes unsigned manifests attributed to that contributor, which receive `unsigned`.
 
-JWS `kid`, `jwk`, `jku`, `x5u`, `x5c`, and similar noncritical header fields do not select or validate a key and never trigger I/O. A caller may use such a field as an untrusted hint in a separate trusted key-resolution layer, then pass the selected native key into the appropriate checker. In particular, an embedded key is not trusted merely because it can verify its own signature.
+Publisher-only selection does not require such a manifest to exist: when none match, every attached manifest receives `not_checked`. If the SDK cannot derive a publisher identity from the entry identifier, the option adds no manifests to the contributor selection.
 
-## Check a catalog entry's Trust Manifest
+### Network and time controls
 
-`checkCatalogEntryTrustManifest()` applies the `did:web` Publisher Profile to one entry, its signed Trust Manifest, and its artifact representation:
+The SDK supports the [`did-web-v1` Signer Profile](https://github.com/Agent-Card/ai-catalog/blob/9aac2c1bfa622356e45a31f3dc1d342bdb329e00/specification/ai-catalog.md#the-did-web-signer-profile) for root `did:web` contributors using ES256. It resolves the contributor's current DID document and checks that the signing key is authorized for assertions.
 
 ```ts
-import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/verification';
-
-const resultForEntryWithUrl = await checkCatalogEntryTrustManifest(
-  entryWithUrl,
-  artifactBytes,
-);
-
-const resultForEntryWithData = await checkCatalogEntryTrustManifest(
-  entryWithData,
-);
-```
-
-An entry with `url` requires caller-supplied `Uint8Array` bytes. The SDK hashes the exact supplied byte range without downloading, decoding, or parsing the artifact. An entry with `data` takes no separate bytes: its inline JSON value is JCS-canonicalized before hashing. Both forms resolve the issuer's current DID document; even an inline artifact requires network access for a successful check. The SDK does not cache DID documents between calls.
-
-The function accepts typed or previously parsed entries without rerunning whole-entry schema validation. It independently enforces every condition needed for the Publisher Profile, including required signed fields and valid timestamps.
-
-The function requires a standard `urn:air` entry identifier whose publisher domain is lowercase ASCII, including IDNA A-labels when needed. The manifest's `identity` must exactly equal `did:web:` followed by that domain, and a present `identityType` must be `did`. The profile supports root DIDs without ports or paths. It requires a detached ES256 signature whose protected `kid` names one method in that issuer's current DID document. The method must be authorized by `assertionMethod`, controlled by the issuer, and contain a suitable public P-256 JWK. Keys named by the signature through `jku`, `jwk`, `x5u`, or `x5c` are rejected, as is any protected `b64` parameter.
-
-A `valid` result means the publisher namespace currently authorized the key that signed the captured manifest, the signed subject matches the captured entry context and artifact representation, and the manifest had not expired when checked. It contains only `{ status: 'valid' }`. The function composes the same subject and digest checks as `checkCatalogEntryArtifactBinding()`; applications do not need to call that function separately.
-
-The result type is `CatalogEntryTrustManifestCheckResult`:
-
-| Status | Meaning |
-| --- | --- |
-| `valid` | Publisher authorization, signature, subject binding, artifact digest, and current expiration checks passed. |
-| `missing_trust_manifest` | The entry has no own `trustManifest` member. |
-| `signature_check_failed` | `signatureResult` contains the lower-level signature failure. |
-| `subject_check_failed` | `subjectResult` contains the lower-level subject or digest failure described below. |
-| `profile_check_failed` | The entry or manifest does not satisfy the Publisher Profile's requirements. `error` explains the failure. |
-| `issuer_check_failed` | DID resolution, document validation, or key authorization did not succeed. `error` explains the failure. |
-| `expired` | The authenticated manifest's `expiresAt` was in the past when expiration was checked. |
-
-Branch on `status` and the nested result discriminators. The `error` fields provide explanatory diagnostics and an underlying `cause` where available; their message text is not a stable classification API. A failure result does not authenticate the subject or any other claim. Expected profile, protocol, and resolution failures return results. Wrong runtime argument types, invalid call shapes or options, hostile programmatic values, canonicalization resource limits, and unexpected runtime or cryptographic backend failures reject the promise.
-
-### Network controls
-
-Ordinary calls need no options. `CatalogEntryTrustManifestCheckOptions` provides cancellation and configurable DID-resolution limits:
-
-```ts
-const result = await checkCatalogEntryTrustManifest(entryWithUrl, artifactBytes, {
-  signal: abortController.signal,
-  timeoutMs: 60_000,
+const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {
+  resolutionTimeoutMs: 60_000,
   maxResponseBytes: 16 * 1024 * 1024,
+  clockToleranceMs: 60_000,
+  signal: abortController.signal,
 });
 ```
 
-The defaults are a 60-second total DID-resolution deadline and a 16 MiB decoded document-body limit. The deadline includes DNS resolution, redirects, and body reading; the body limit is enforced while reading. Requests use HTTPS, reject disallowed resolved addresses, and repeat address checks for redirects. A timeout or response-size failure returns `issuer_check_failed`. Explicit cancellation rejects with the signal's reason.
+`resolutionTimeoutMs` sets the deadline for each DID resolution, covering DNS, redirects, and reading and parsing the response; it defaults to 60,000 ms. The decoded body limit defaults to 16 MiB. Requests use HTTPS and check resolved addresses, including after redirects. A resolution timeout or size failure becomes that manifest's `issuer_check_failed` result. Selected manifests sharing a signer reuse one DID resolution within the invocation; calls do not share a DID cache. The number of selected contributors therefore affects total latency. Use `signal` to cancel the entire operation or impose an overall deadline.
 
-### Time
+`checkCatalogEntry()` accepts `nowMs`, an optional safe integer UTC epoch time in milliseconds used to evaluate the time window. When omitted, the SDK samples the machine's UTC clock near completion; `checkCatalogEntry()` applies the same instant to all selected endorsements. `clockToleranceMs` defaults to 60,000 and accepts non-negative safe integer milliseconds, including zero. Issuance beyond the tolerance produces `not_yet_valid`; reaching expiration plus tolerance produces `expired`. Tolerance does not repair an expiration that is at or before issuance. `issuedAt` remains an authenticated assertion by the signer, not an independently trusted timestamp.
 
-`issuedAt` must be a valid RFC 3339 timestamp, but it is an issuer claim rather than a trusted timestamp. A present `expiresAt` must also be valid and is compared with the machine's UTC clock near completion. Expiration is strict: an instant before the sampled current time produces `expired`, with no grace period or clock-skew allowance. Applications are responsible for maintaining an accurate clock; clock errors can affect expiration decisions.
+Entry, manifest, option, and artifact inputs are captured before asynchronous work. Later caller mutations do not change what an invocation checks. Returned manifests are the captured values. Expected verification failures return results; invalid call shapes or options, explicit cancellation, and unexpected cryptographic or runtime failures reject. Diagnostic `Error` objects can carry causes, but their message text is not a stable classification API. Branch on result discriminators.
 
-This function checks the entry's Trust Manifest in context. It does not verify the entry as a whole, its unsigned publisher or display metadata, a surrounding catalog signature, or the artifact's format-specific schema. It does not prove that supplied bytes came from an entry's URL, evaluate attestations or provenance, establish claim accuracy or publisher reputation, or decide whether an artifact is safe to use. Applications retain those policy decisions.
+## Check artifact binding with a supplied key
 
-## Check a catalog entry's artifact binding
-
-`checkCatalogEntryArtifactBinding()` checks a signed Trust Manifest subject against one catalog-entry context and selected artifact representation:
+`checkCatalogEntryArtifactBinding()` checks one explicit signed manifest against an entry and its artifact representation:
 
 ```ts
 import { checkCatalogEntryArtifactBinding } from 'ai-catalog-sdk/verification';
@@ -188,40 +221,53 @@ import { checkCatalogEntryArtifactBinding } from 'ai-catalog-sdk/verification';
 const resultForEntryWithUrl = await checkCatalogEntryArtifactBinding(
   entryWithUrl,
   artifactBytes,
+  manifest,
   { publicKey, expectedAlgorithm: 'ES256' },
 );
 
 const resultForEntryWithData = await checkCatalogEntryArtifactBinding(
   entryWithData,
+  manifest,
   { publicKey, expectedAlgorithm: 'ES256' },
 );
 ```
 
-The two overloads deliberately reflect the entry representation. An entry with `url` requires caller-supplied `Uint8Array` bytes. They are hashed as the exact byte range supplied, without fetching, decoding, decompressing, parsing, or canonicalizing them. An entry with `data` takes no separate bytes; its `data` value is the inline artifact and is encoded with `canonicalizeJsonValueToBytes()` before hashing.
+The manifest need not already be attached to the entry. A `valid` result means its signature verifies under the supplied key, its subject identifier and type equal the entry's, version presence and value match, its digest matches the entry's declared digest, and the artifact representation matches that digest.
 
-The check succeeds only when all of the following are true:
+`signature_check_failed` carries the lower-level `signatureResult`; `subject_check_failed` carries `missing_subject`, `identifier_mismatch`, `version_mismatch`, `type_mismatch`, `digest_mismatch`, or a lower-level digest failure as `subjectResult`. Version mismatch includes presence on only one side. A signature failure takes precedence over a subject failure. The function expects a typed or previously parsed entry and does not rerun whole-entry structural validation.
 
-- the caller-selected key and expected algorithm produce a `valid` Trust Manifest signature result;
-- the signed subject's `identifier` exactly equals the entry's `identifier`;
-- subject and entry versions are either both absent or both present and exactly equal;
-- the signed subject's `type` exactly equals the entry's `type`;
-- if the subject has a `url`, the entry has `url` and the two values exactly match; and
-- the artifact representation matches the subject's declared digest.
+This utility performs no network requests, contributor authentication, or time-window checks. A custom signer-profile implementation must supply those checks around it. Wrong runtime argument types, hostile programmatic inputs, and shared or detached artifact buffers reject with `TypeError`; canonicalization limits reject with `RangeError`, and unexpected backend errors propagate.
 
-The result preserves the lower-level diagnostic vocabulary:
+## Check results
 
-| Status | Meaning |
-| --- | --- |
-| `valid` | The caller-selected key signed the manifest, its subject digest matches the selected artifact representation, and its identifier, version, type, and any URL are consistent with the entry. |
-| `missing_trust_manifest` | The entry has no own `trustManifest` member. |
-| `signature_check_failed` | Signature checking did not produce `valid`; `signatureResult` contains the complete lower-level result. |
-| `subject_check_failed` | The authenticated subject is absent or does not match the entry or artifact; `subjectResult` is `missing_subject`, `identifier_mismatch`, `version_mismatch`, `type_mismatch`, `url_mismatch`, or the lower-level digest failure. `version_mismatch` covers presence on only one side as well as unequal values. |
+`checkCatalogEntry()` returns entry-precheck failures directly, or a `checked` report containing the individual results in `manifests`. After the entry prechecks pass, a failure result for one manifest does not stop `checkCatalogEntry()` from checking the other selected manifests.
 
-Signature failure takes precedence over subject failure, so an unauthenticated subject cannot produce a successful or independently authoritative binding. Programmer-contract and runtime failures reject rather than being hidden by a protocol status; in particular, the call shape, options, entry identifier and version, and byte view supplied for an entry with `url` are validated before `missing_trust_manifest` can be returned.
+In a `checked` report, `report.manifests[i].manifest` has type `JsonValue` for `invalid_manifest` and `not_checked`, and type `TrustManifest` for all other manifest statuses.
 
-The function expects a typed or previously parsed entry but does not perform schema validation. Wrong runtime types, malformed programmatic JSON, accessors, proxies, and shared or detached supplied byte views reject with `TypeError`. Canonicalization resource limits reject with `RangeError`; digest backend and unexpected signature-backend errors propagate with their existing causes.
+The table below describes each status and shows where it appears in the `checkCatalogEntry()` report. Rows follow failure precedence within the applicable checks.
 
-A `valid` binding remains narrower than a trust decision. The function does not authenticate the entry as a whole, prove that caller-supplied bytes came from the entry's URL, establish who owns the public key, connect it with the manifest identity, fetch content, infer HTTP media types, normalize URLs, enforce timestamps, evaluate provenance or attestations, resolve keys, or perform network I/O.
+| Status | Result fields | Description |
+| --- | --- | --- |
+| `invalid_entry` | `status` | Entry fields or declarations fail parsing, or inline data cannot satisfy JCS for the declared digest. `error` is a `CatalogParseError` with path-specific `issues`. |
+| `invalid_digest` | `status` | The entry’s declared artifact digest has an incorrect length for an implemented algorithm. Malformed syntax produces `invalid_entry`. |
+| `digest_algorithm_not_implemented` | `status` | The entry’s artifact digest names an algorithm the SDK does not implement. Includes `algorithm`. |
+| `artifact_digest_mismatch` | `status` | The supplied artifact bytes, or JCS-canonicalized inline data, do not match the entry’s declared digest. |
+| `not_checked` | `manifests[i].status` | The contributor options excluded this manifest. This is a selection outcome. |
+| `invalid_manifest` | `manifests[i].status` | The manifest or one of its fields has the wrong type, its metadata, required content, or subject/entry correspondence is invalid, or its signed payload cannot satisfy JCS. `error` is a `CatalogValidationError` with path-specific `issues`. |
+| `unsigned` | `manifests[i].status` | The manifest has no `signature` of its own to verify. |
+| `profile_not_implemented` | `manifests[i].status` | The selected signer profile is not implemented. Includes `profile`; no fallback profile is tried. |
+| `invalid_jws` | `manifests[i].status` | The JWS is malformed or violates its required representation or common headers. |
+| `algorithm_mismatch` | `manifests[i].status` | The protected `alg` differs from the expected algorithm. Includes the claimed `algorithm`. |
+| `jws_feature_not_implemented` | `manifests[i].status` | A well-formed critical JWS extension is unsupported. |
+| `profile_check_failed` | `manifests[i].status` | The manifest or JWS does not satisfy the supported signer profile. `error` explains the failure. |
+| `issuer_check_failed` | `manifests[i].status` | DID resolution, DID document validation, or key authorization failed. `error` explains the failure. |
+| `invalid_signature` | `manifests[i].status` | The signature does not verify under the selected key. |
+| `not_yet_valid` | `manifests[i].status` | Issuance is later than the evaluation time plus tolerance. The preceding checks passed. |
+| `expired` | `manifests[i].status` | The evaluation time has reached expiration plus tolerance. The preceding checks passed. |
+| `passed` | `manifests[i].status` | The individual manifest passed the operation’s checks. In a `checkCatalogEntry()` report, includes `isPublisherEndorsement`. |
+| `checked` | `status` | The entry report completed, and `manifests` contains its individual outcomes. This can include no passing contributions or no manifests. |
+
+`checkCatalogEntry()` selects and applies the supported signer profile and authenticates and authorizes the verification key. It does not establish claim accuracy, publisher reputation, attestation validity, or artifact safety. It does not authenticate the surrounding catalog or validate the artifact’s format-specific schema.
 
 ## Check a digest
 
