@@ -33,11 +33,11 @@ const pluginEntries = catalog.entries.filter(
 );
 ```
 
-The parsed result is an ordinary mutable, JSON-shaped object. Parsing validates the catalog and Trust Manifest structure and declaration constraints while preserving unknown JSON-valued properties. It does not fetch or parse referenced artifacts.
+The parsed result is an ordinary mutable, JSON-shaped object. Parsing checks field shapes and primitive types while preserving declaration values and unknown JSON-valued properties. It does not fetch or parse referenced artifacts.
 
 ## Parsing does not verify trust
 
-Parsed catalogs and Trust Manifest data are structurally validated but unauthenticated. Parsing does not verify catalog or Trust Manifest signatures, check artifact digests, resolve identities, fetch attestations, evaluate provenance, or decide whether an artifact, catalog operator, or publisher is trustworthy.
+Parsing provides structurally usable data, including declarations that may fail authoring validation or verification. Use [authoring validation](#author-a-catalog) to check an assembled document’s declarations and consistency, and verification to evaluate its artifacts and endorsements.
 
 ## Check a catalog signature
 
@@ -258,7 +258,7 @@ TypeScript NodeNext consumers also need `compilerOptions.resolveJsonModule: true
 
 ## What gets validated
 
-- The `parse*` and `safeParse*` functions validate document structure and declaration constraints, require an AI Catalog `1.x` version, and enforce catalog entry uniqueness. The catalog and entry parsers also check subject/entry correspondence and signer/contributor equality, timestamp syntax and ordering, digest syntax, and declared size constraints. They reject non-JSON data and limit work on unusually large or deeply nested inputs.
+- The `parse*` and `safeParse*` functions check known field shapes and primitive types and reject non-JSON or excessively large or deeply nested inputs. Catalog parsers accept `1.x` values of `specVersion`, such as `1.0` and `1.1`. Declaration formats, ranges, and relationships are preserved for explicit validation. For example, a timestamp string such as `"yesterday"` is retained, while a number in that field fails parsing.
 - `assertValidCatalog()` checks an assembled catalog’s declaration formats, constraints, and relationships, including entry uniqueness, subject/entry correspondence, signer/contributor equality, and timestamp ordering. It also checks digest declarations, signature representations and signed-payload eligibility, and locally checkable requirements of supported signer profiles. Unfamiliar but well-formed profiles and algorithms do not fail solely because the SDK cannot verify them.
 - The Zod schemas validate their declared structure and constraints with native Zod errors and behavior. They do not apply the root parsers’ defensive input limits or the complete authoring assertion’s checks.
 - The JSON Schema describes portable document constraints. Format enforcement depends on the validator; use `assertValidCatalog()` for the document relationships and signature/payload checks described above.

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CatalogParseError,
   CatalogValidationError,
+  isCatalogEntryWithUrl,
   parseCatalogJson,
   type CatalogEntryWithData,
   type CatalogEntryWithUrl,
@@ -227,13 +228,13 @@ describe('checkCatalogEntry', () => {
     ['string', 'manifest', []],
     ['boolean', false, []],
     ['array', [], []],
-    ['contributor', { contributor: 42 }, []],
-    ['signature', { contributor: assessor, signature: null }, []],
-    ['issuedAt', { contributor: assessor, signature: { signer: assessor, profile: 'did-web-v1', issuedAt: 42, jws: '' } }, []],
-    ['expiresAt', { contributor: assessor, signature: { signer: assessor, profile: 'did-web-v1', issuedAt: '2026-01-01T00:00:00Z', expiresAt: 42, jws: '' } }, []],
-    ['subject', { contributor: assessor, subject: { identifier: 42, type, digest: digestOf(artifact) } }, []],
+    ['contributor', { contributor: 42 }, ['contributor']],
+    ['signature', { contributor: assessor, signature: null }, ['signature']],
+    ['issuedAt', { contributor: assessor, signature: { signer: assessor, profile: 'did-web-v1', issuedAt: 42, jws: '' } }, ['signature', 'issuedAt']],
+    ['expiresAt', { contributor: assessor, signature: { signer: assessor, profile: 'did-web-v1', issuedAt: '2026-01-01T00:00:00Z', expiresAt: 42, jws: '' } }, ['signature', 'expiresAt']],
+    ['subject', { contributor: assessor, subject: { identifier: 42, type, digest: digestOf(artifact) } }, ['subject', 'identifier']],
     ['attestations', { contributor: assessor, attestations: [null] }, ['attestations', 0]],
-    ['extensions', { contributor: assessor, extensions: 42 }, []],
+    ['extensions', { contributor: assessor, extensions: 42 }, ['extensions']],
   ])('isolates a selected malformed %s value and still authenticates the publisher', async (_name, malformed, path) => {
     const results = await statuses(entryWithRawManifests([malformed, manifestFor()]));
     expect(results).toMatchObject([
@@ -296,11 +297,12 @@ describe('checkCatalogEntry', () => {
     const malformed = manifestFor(assessor);
     if (!malformed.signature) throw new Error('Expected signed manifest');
     Object.assign(malformed.signature, fields);
-    const entry = entryFor([malformed, manifestFor()]);
-    expect(() => parseCatalogJson(JSON.stringify({
+    const parsed = parseCatalogJson(JSON.stringify({
       specVersion: '1.0',
-      entries: [entry],
-    }))).toThrow(CatalogParseError);
+      entries: [entryFor([malformed, manifestFor()])],
+    }));
+    const entry = parsed.entries[0];
+    if (!entry || !isCatalogEntryWithUrl(entry)) throw new Error('Expected URL entry');
     const results = await statuses(entry);
     expect(results).toMatchObject([
       { status: 'invalid_manifest', error: expect.any(CatalogValidationError) },
@@ -410,18 +412,40 @@ describe('checkCatalogEntry', () => {
     expect(resolver).not.toHaveBeenCalled();
   });
 
-  it('retains parser validation of entry timestamp declarations', async () => {
+  it('does not apply authoring validation to unrelated entry timestamps', async () => {
     const entry = { ...entryFor(), updatedAt: 'not-a-timestamp' };
-    await expect(checkCatalogEntry(entry, artifact)).resolves.toMatchObject({
-      status: 'invalid_entry', error: expect.any(CatalogParseError),
-    });
-    expect(resolver).not.toHaveBeenCalled();
+    expect(await statuses(entry)).toMatchObject([{ status: 'passed' }]);
+  });
+
+  it('can verify an unaffected entry after parsing a catalog with invalid optional declarations', async () => {
+    const malformed = manifestFor(assessor);
+    if (!malformed.signature || !malformed.subject) throw new Error('Expected signed subject');
+    malformed.signature.issuedAt = 'yesterday';
+    const affected = entryFor([malformed]);
+    affected.identifier = 'urn:air:example.com:agent:other';
+    malformed.subject.identifier = affected.identifier;
+    const catalog = parseCatalogJson(JSON.stringify({
+      specVersion: '1.0',
+      signature: {
+        signer: publisher,
+        profile: 'did-web-v1',
+        issuedAt: 'yesterday',
+        jws: 'not-a-jws',
+      },
+      entries: [affected, entryFor()],
+    }));
+    const entry = catalog.entries[1];
+    if (!entry || !isCatalogEntryWithUrl(entry)) throw new Error('Expected URL entry');
+    expect(await statuses(entry)).toMatchObject([
+      { status: 'passed', isPublisherEndorsement: true },
+    ]);
+    expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
   });
 
   it.each([
     ['sha256:00', { status: 'invalid_digest' }],
     ['blake3:00', { status: 'digest_algorithm_not_implemented', algorithm: 'blake3' }],
-    ['sha256:zz', { status: 'invalid_entry', error: expect.any(CatalogParseError) }],
+    ['sha256:zz', { status: 'invalid_digest' }],
   ])('reports the entry digest failure for %s before manifest checks', async (digest, expected) => {
     const entry = { ...entryFor([]), digest };
     await expect(

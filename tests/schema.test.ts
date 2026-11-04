@@ -20,7 +20,7 @@ function createValidator(validateFormats: boolean) {
   return ajv.compile(rawSchema);
 }
 
-describe('shared structural fixtures', () => {
+describe('schema declaration fixtures', () => {
   const withFormats = createValidator(true);
   const withoutFormats = createValidator(false);
 
@@ -35,8 +35,7 @@ describe('shared structural fixtures', () => {
 
   it.each(
     invalidDeclarationFixtures.map((value, index) => [index, value] as const),
-  )('rejects invalid fixture %s across root, Zod, and JSON Schema', (_index, value) => {
-    expect(safeParseCatalog(value).success).toBe(false);
+  )('rejects invalid declaration fixture %s in Zod and JSON Schema', (_index, value) => {
     expect(aiCatalogSchema.safeParse(value).success).toBe(false);
     expect(withFormats(value)).toBe(false);
     expect(withoutFormats(value)).toBe(false);
@@ -54,7 +53,7 @@ describe('shared structural fixtures', () => {
         },
       ],
     };
-    expect(safeParseCatalog(invalidCalendar).success).toBe(false);
+    expect(safeParseCatalog(invalidCalendar).success).toBe(true);
     expect(aiCatalogSchema.safeParse(invalidCalendar).success).toBe(false);
     expect(withFormats(invalidCalendar)).toBe(false);
     expect(withoutFormats(invalidCalendar)).toBe(true);
@@ -64,7 +63,7 @@ describe('shared structural fixtures', () => {
     ['identifier mismatch', 'other', '1.0.0'],
     ['version mismatch', 'x', '2.0.0'],
     ['version absent', 'x', undefined],
-  ] as const)('leaves contextual %s checks to root parsers', (_name, identifier, version) => {
+  ] as const)('does not apply contextual %s checks during ingestion or schema validation', (_name, identifier, version) => {
     const entry = {
       identifier: 'x',
       version: '1.0.0',
@@ -91,7 +90,7 @@ describe('shared structural fixtures', () => {
       ],
     };
     const value = { specVersion: '1.0', entries: [entry] };
-    expect(safeParseCatalog(value).success).toBe(false);
+    expect(safeParseCatalog(value).success).toBe(true);
     expect(aiCatalogSchema.safeParse(value).success).toBe(true);
     expect(catalogEntrySchema.safeParse(entry).success).toBe(true);
     expect(trustManifestSchema.safeParse(entry.trustManifests[0]).success).toBe(
@@ -250,7 +249,7 @@ describe('signature structure and schema coverage', () => {
           },
         ],
       };
-      expect(safeParseCatalog(value).success).toBe(accepted);
+      expect(safeParseCatalog(value).success).toBe(true);
       expect(aiCatalogSchema.safeParse(value).success).toBe(accepted);
       expect(trustManifestSchema.safeParse(manifest).success).toBe(accepted);
       expect(validate(value)).toBe(accepted);
@@ -258,14 +257,14 @@ describe('signature structure and schema coverage', () => {
   });
 
   it.each([
-    { contributor: 'relative' },
-    { trustSchema: { identifier: 'x' } },
-    { attestations: [{ type: 'evidence', uri: 42 }] },
-    { provenance: [{ relation: 'source', sourceId: 42 }] },
-    { extensions: [] },
-    { subject: { ...subject, digest: false } },
-    { subject, signature: { ...signature, profile: '' } },
-  ])('unknown content does not change rejection of malformed known fields: %j', (malformed) => {
+    [{ contributor: 'relative' }, true],
+    [{ trustSchema: { identifier: 'x' } }, false],
+    [{ attestations: [{ type: 'evidence', uri: 42 }] }, false],
+    [{ provenance: [{ relation: 'source', sourceId: 42 }] }, false],
+    [{ extensions: [] }, false],
+    [{ subject: { ...subject, digest: false } }, false],
+    [{ subject, signature: { ...signature, profile: '' } }, true],
+  ] as const)('unknown content does not change interpretation of known fields: %j', (malformed, parseable) => {
     for (const unknownContent of [{}, { futureEvidence: null }]) {
       const manifest = {
         contributor: 'did:web:example.com',
@@ -280,7 +279,7 @@ describe('signature structure and schema coverage', () => {
         trustManifests: [manifest],
       };
       const value = { specVersion: '1.0', entries: [entry] };
-      expect(safeParseCatalog(value).success).toBe(false);
+      expect(safeParseCatalog(value).success).toBe(parseable);
       expect(aiCatalogSchema.safeParse(value).success).toBe(false);
       expect(catalogEntrySchema.safeParse(entry).success).toBe(false);
       expect(trustManifestSchema.safeParse(manifest).success).toBe(false);
@@ -288,7 +287,7 @@ describe('signature structure and schema coverage', () => {
     }
   });
 
-  it('keeps unknown-content subject binding checks in the root parser', () => {
+  it('preserves unknown-content subject disagreements during ingestion', () => {
     const entry = {
       identifier: 'x',
       type: 'custom',
@@ -303,23 +302,23 @@ describe('signature structure and schema coverage', () => {
       ],
     };
     const value = { specVersion: '1.0', entries: [entry] };
-    expect(safeParseCatalog(value).success).toBe(false);
+    expect(safeParseCatalog(value).success).toBe(true);
     expect(aiCatalogSchema.safeParse(value).success).toBe(true);
     expect(validate(value)).toBe(true);
   });
 
-  it('enforces timestamp ordering in runtime schemas, beyond JSON Schema coverage', () => {
+  it('enforces timestamp ordering in Zod, beyond ingestion and JSON Schema coverage', () => {
     const value = {
       specVersion: '1.0',
       entries: [],
       signature: { ...signature, expiresAt: signature.issuedAt },
     };
-    expect(safeParseCatalog(value).success).toBe(false);
+    expect(safeParseCatalog(value).success).toBe(true);
     expect(aiCatalogSchema.safeParse(value).success).toBe(false);
     expect(validate(value)).toBe(true);
   });
 
-  it('enforces contributor attribution in runtime schemas, beyond JSON Schema coverage', () => {
+  it('enforces contributor attribution in Zod, beyond ingestion and JSON Schema coverage', () => {
     const digest = `sha256:${'a'.repeat(64)}`;
     const value = {
       specVersion: '1.0',
@@ -339,7 +338,7 @@ describe('signature structure and schema coverage', () => {
         },
       ],
     };
-    expect(safeParseCatalog(value).success).toBe(false);
+    expect(safeParseCatalog(value).success).toBe(true);
     expect(aiCatalogSchema.safeParse(value).success).toBe(false);
     expect(validate(value)).toBe(true);
   });

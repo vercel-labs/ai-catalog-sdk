@@ -267,7 +267,7 @@ const declarationErrors = {
 };
 const malformedEntry = { ...entry, trustManifests: [declarationErrors] };
 const malformedCatalog = { ...value, entries: [malformedEntry, malformedEntry] };
-assert.throws(() => parseCatalog(malformedCatalog), CatalogParseError);
+assert.deepEqual(parseCatalog(malformedCatalog), malformedCatalog);
 assert.throws(() => assertValidCatalog(malformedCatalog), error =>
   error instanceof CatalogValidationError && error.issues.length > 0,
 );

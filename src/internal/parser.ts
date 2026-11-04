@@ -17,8 +17,8 @@ import { IssueCollector, issue, type Path } from './issues.js';
 import {
   aiCatalogEnvelopeSchema,
   catalogEntryEnvelopeSchema,
-  concreteAttestationSchema,
-  concreteProvenanceLinkSchema,
+  parsedAttestationSchema,
+  parsedProvenanceLinkSchema,
   hostInfoEnvelopeSchema,
   stringItemSchema,
   trustManifestEnvelopeSchema,
@@ -114,7 +114,7 @@ function parseTrustManifest(
   if (hasOwn(result.data, 'attestations')) {
     const parsed = parseItemArray<Attestation>(
       result.data.attestations as unknown[],
-      concreteAttestationSchema as z.ZodType<Attestation>,
+      parsedAttestationSchema as z.ZodType<Attestation>,
       [...path, 'attestations'],
       collector,
     );
@@ -125,7 +125,7 @@ function parseTrustManifest(
   if (hasOwn(result.data, 'provenance')) {
     const parsed = parseItemArray<ProvenanceLink>(
       result.data.provenance as unknown[],
-      concreteProvenanceLinkSchema as z.ZodType<ProvenanceLink>,
+      parsedProvenanceLinkSchema as z.ZodType<ProvenanceLink>,
       [...path, 'provenance'],
       collector,
     );
@@ -190,55 +190,6 @@ function parseCatalogEntryValue(
         continue;
       }
       manifests.push(manifest);
-      const { subject } = manifest;
-      const mismatch = (field: string, message: string): void => {
-        valid = false;
-        collector.add(
-          issue(
-            'inconsistent_value',
-            [...manifestPath, 'subject', field],
-            message,
-          ),
-        );
-      };
-      if (subject && subject.identifier !== output.identifier) {
-        mismatch(
-          'identifier',
-          'Trust Manifest subject.identifier must match the catalog entry identifier.',
-        );
-      }
-      if (
-        subject &&
-        (hasOwn(subject, 'version') !== hasOwn(output, 'version') ||
-          subject.version !== output.version)
-      ) {
-        mismatch(
-          'version',
-          'Trust Manifest subject.version and entry version must both be absent or both be present and exactly equal.',
-        );
-      }
-      if (subject && subject.type !== output.type) {
-        mismatch(
-          'type',
-          'Trust Manifest subject.type must match the catalog entry type.',
-        );
-      }
-      if (subject && subject.digest !== output.digest) {
-        mismatch(
-          'digest',
-          'Trust Manifest subject.digest must exactly match the catalog entry digest.',
-        );
-      }
-      if (manifest.signature && !hasOwn(output, 'digest')) {
-        valid = false;
-        collector.add(
-          issue(
-            'inconsistent_value',
-            [...path, 'digest'],
-            'A signed Trust Manifest requires an entry digest.',
-          ),
-        );
-      }
     }
     output.trustManifests = manifests;
   }
@@ -247,50 +198,6 @@ function parseCatalogEntryValue(
 
 function normalizedDecimal(value: string): string {
   return value.replace(/^0+(?=[0-9])/, '');
-}
-
-function validateEntryUniqueness(
-  indexedEntries: readonly { entry: CatalogEntry; index: number }[],
-  collector: IssueCollector,
-): void {
-  const seen = new Map<
-    string,
-    { unversioned: boolean; versions: Set<string> }
-  >();
-  for (
-    let index = 0;
-    index < indexedEntries.length && !collector.stopped;
-    index += 1
-  ) {
-    const indexedEntry = indexedEntries[index];
-    if (!indexedEntry) continue;
-    const { entry, index: inputIndex } = indexedEntry;
-    const state = seen.get(entry.identifier) ?? {
-      unversioned: false,
-      versions: new Set<string>(),
-    };
-    const version = entry.version;
-    const duplicate =
-      version === undefined
-        ? state.unversioned || state.versions.size > 0
-        : state.unversioned || state.versions.has(version);
-    if (duplicate) {
-      collector.add(
-        issue(
-          'duplicate_entry',
-          [
-            'entries',
-            inputIndex,
-            version === undefined ? 'identifier' : 'version',
-          ],
-          'Catalog entry identifiers and versions must be unique.',
-        ),
-      );
-    }
-    if (version === undefined) state.unversioned = true;
-    else state.versions.add(version);
-    seen.set(entry.identifier, state);
-  }
 }
 
 function parseCatalogValue(
@@ -330,7 +237,6 @@ function parseCatalogValue(
   if (collector.stopped) return undefined;
 
   const entries: CatalogEntry[] = [];
-  const indexedEntries: { entry: CatalogEntry; index: number }[] = [];
   for (
     let index = 0;
     index < result.data.entries.length && !collector.stopped;
@@ -343,11 +249,9 @@ function parseCatalogValue(
     );
     if (entry) {
       entries.push(entry);
-      indexedEntries.push({ entry, index });
     } else valid = false;
   }
   output.entries = entries;
-  validateEntryUniqueness(indexedEntries, collector);
   return valid ? output : undefined;
 }
 
@@ -385,7 +289,7 @@ function safeParseWith<T>(
 /**
  * Validates an already-parsed JSON value as an AI Catalog.
  *
- * Applies the SDK's defensive input checks and catalog-wide validation.
+ * Applies the SDK's defensive input checks and supported-version handling.
  *
  * @param input - The already-parsed JSON value to validate.
  * @returns A {@link ParseResult} containing the validated catalog or validation

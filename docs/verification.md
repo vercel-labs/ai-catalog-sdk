@@ -134,7 +134,7 @@ if (report.status === 'checked') {
 
 For an entry with `url`, supply the artifact bytes obtained by your application as a `Uint8Array`. For an entry with `data`, call `checkCatalogEntry(entryWithData)`; the SDK applies JCS canonicalization to `entry.data` when checking the declared digest. Signed manifests require the digest to be present.
 
-The function validates the entry’s fields and declaration constraints and checks its declared artifact digest, then evaluates each selected Trust Manifest independently. `trustManifests` must be an array when present. A selected manifest with invalid field shapes or declarations, or an unusable signed payload, receives `invalid_manifest` without preventing the other selected manifests from being checked. A `CatalogEntryCheckResult` with `report.status === 'checked'` can look like this:
+The function checks the entry’s fields and declared artifact digest, then evaluates each selected Trust Manifest independently. `trustManifests` must be an array when present. A selected manifest with invalid field shapes or declarations, or an unusable signed payload, receives `invalid_manifest` without preventing the other selected manifests from being checked. A `CatalogEntryCheckResult` with `report.status === 'checked'` can look like this:
 
 ```ts
 {
@@ -172,7 +172,7 @@ When the entry declares a digest, the SDK checks it against the supplied artifac
 // The artifact bytes do not match the declared digest.
 { status: 'artifact_digest_mismatch' }
 
-// The digest has an incorrect length for an implemented algorithm.
+// The digest syntax or an implemented algorithm’s digest length is invalid.
 { status: 'invalid_digest' }
 
 // The digest names an algorithm the SDK does not implement.
@@ -181,8 +181,6 @@ When the entry declares a digest, the SDK checks it against the supplied artifac
   algorithm: 'blake3',
 }
 ```
-
-Malformed digest syntax, such as `sha256:zz`, fails entry validation and produces `invalid_entry`.
 
 ### Interpret manifest results
 
@@ -275,7 +273,7 @@ const resultForEntryWithData = await checkCatalogEntryTrustManifest(
 );
 ```
 
-The manifest need not already be attached to the entry. The function validates the entry’s field shapes and declaration constraints while ignoring its attached `trustManifests`. It then checks the entry’s declared artifact digest, followed by the supplied manifest’s field shapes, declarations and subject correspondence, signature, and time window. See the shared [check results](#check-results) for statuses and precedence.
+The manifest need not already be attached to the entry. The function validates the entry’s field shapes while ignoring its attached `trustManifests`. It then checks the entry’s declared artifact digest, followed by the supplied manifest’s field shapes, declarations and subject correspondence, signature, and time window. See the shared [check results](#check-results) for statuses and precedence.
 
 A `passed` result means those checks passed under the caller-selected key. A `not_yet_valid` or `expired` result means the preceding declaration, signature, and binding checks passed.
 
@@ -293,8 +291,8 @@ The table below describes each status and shows where it appears in each functio
 
 | Status | Result fields | Description |
 | --- | --- | --- |
-| `invalid_entry` | `status` / `status` | Entry fields or declarations fail parsing, or inline data cannot satisfy JCS for the declared digest. `error` is a `CatalogParseError` with path-specific `issues`. |
-| `invalid_digest` | `status` / `status` | The entry’s declared artifact digest has an incorrect length for an implemented algorithm. Malformed syntax produces `invalid_entry`. |
+| `invalid_entry` | `status` / `status` | Entry fields have invalid shapes, or inline data cannot satisfy JCS for the declared digest. `error` is a `CatalogParseError` with path-specific `issues`. |
+| `invalid_digest` | `status` / `status` | The entry’s declared artifact digest has invalid syntax or an incorrect length for an implemented algorithm. |
 | `digest_algorithm_not_implemented` | `status` / `status` | The entry’s artifact digest names an algorithm the SDK does not implement. Includes `algorithm`. |
 | `artifact_digest_mismatch` | `status` / `status` | The supplied artifact bytes, or JCS-canonicalized inline data, do not match the entry’s declared digest. |
 | `not_checked` | `manifests[i].status` / — | The contributor options excluded this manifest. This is a selection outcome. |

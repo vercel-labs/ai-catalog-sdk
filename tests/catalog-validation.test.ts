@@ -407,12 +407,13 @@ describe('assertValidCatalog', () => {
     expect(issues.at(-1)?.code).toBe('diagnostics_truncated');
   });
 
-  it('diagnoses invalid declarations before serialization', () => {
+  it('does not erase invalid declarations merely because ingestion accepts them', () => {
     const input = catalogFor({
       contributor: 'not a URI',
       extensions: { 'example.com': true },
     });
-    expect(() => parseCatalog(input)).toThrow();
-    expect(validationIssues(input).length).toBeGreaterThan(0);
+    const parsed = parseCatalog(input);
+    expect(parsed).toEqual(input);
+    expect(validationIssues(parsed).length).toBeGreaterThan(0);
   });
 });
