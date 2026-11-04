@@ -35,3 +35,4 @@ export {
   type TrustSchema,
   type TrustSubject,
 } from './types.js';
+export { assertValidCatalog } from './internal/validation.js';

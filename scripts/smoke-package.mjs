@@ -87,7 +87,7 @@ try {
     join(consumerDirectory, 'smoke.mjs'),
     `import { strict as assert } from 'node:assert';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { CatalogParseError, CatalogValidationError, implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
+import { assertValidCatalog, CatalogParseError, CatalogValidationError, implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
 import { canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryTrustManifest, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(`${pkg.name}/verification`)};
@@ -95,6 +95,7 @@ import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.jso
 
 const value = { specVersion: '1.0', entries: [] };
 assert.deepEqual(parseCatalog(value).entries, []);
+assert.equal(assertValidCatalog(value), undefined);
 assert.throws(() => parseCatalog({ ...value, entries: [null] }), CatalogParseError);
 const opaqueHostManifest = { formerField: ['opaque', 1, null] };
 const catalogWithOpaqueHost = parseCatalog({
@@ -183,6 +184,7 @@ const catalogJws = createJws({ payload: createCatalogSignaturePayload(catalogFor
 const signedCatalog = { ...catalogForSignature, signature: { ...signatureMetadata, jws: catalogJws } };
 const bindingOptions = { publicKey: keys.publicKey, expectedAlgorithm: 'ES256' };
 assert.equal((await checkCatalogSignature(signedCatalog, bindingOptions)).status, 'valid');
+assertValidCatalog(signedCatalog);
 
 const artifactBytes = new TextEncoder().encode('test');
 const entry = {
@@ -246,6 +248,16 @@ assert.equal(defaultEntryManifest.signature.profile, 'did-web-v1');
 assert.equal(defaultEntryManifest.signature.expiresAt, '2100-01-01T00:00:00Z');
 assert.equal((await checkCatalogEntryTrustManifest(entry, artifactBytes, defaultEntryManifest, bindingOptions)).status, 'passed');
 const signedEntry = { ...entry, trustManifests: manifests };
+assertValidCatalog({ ...value, entries: [signedEntry] });
+assertValidCatalog({ ...value, entries: [{ ...entry, trustManifests: [expiringManifest] }] });
+const unknownAlgorithm = 'future-256:00';
+const futureAlgorithmCatalog = {
+  ...value,
+  entries: [{ ...entry, digest: unknownAlgorithm, trustManifests: [{
+    ...derived, subject: { ...derived.subject, digest: unknownAlgorithm },
+  }] }],
+};
+assertValidCatalog(futureAlgorithmCatalog);
 const declarationErrors = {
   ...derived,
   contributor: 'not a URI',
@@ -256,6 +268,9 @@ const declarationErrors = {
 const malformedEntry = { ...entry, trustManifests: [declarationErrors] };
 const malformedCatalog = { ...value, entries: [malformedEntry, malformedEntry] };
 assert.throws(() => parseCatalog(malformedCatalog), CatalogParseError);
+assert.throws(() => assertValidCatalog(malformedCatalog), error =>
+  error instanceof CatalogValidationError && error.issues.length > 0,
+);
 const malformedReport = await checkCatalogEntry(malformedEntry, artifactBytes);
 assert.equal(malformedReport.status, 'checked');
 assert.equal(malformedReport.manifests[0].status, 'invalid_manifest');
@@ -296,6 +311,32 @@ for (const operation of [
   assert.ok(invalidEntry.error.issues.length > 0);
 }
 const malformedJwsManifest = { ...derived, signature: { ...derived.signature, jws: 'not-a-jws' } };
+assert.throws(() => assertValidCatalog({
+  ...value, entries: [{ ...entry, trustManifests: [malformedJwsManifest] }],
+}), CatalogValidationError);
+const shortDigest = 'sha256:00';
+assert.throws(() => assertValidCatalog({
+  ...value, entries: [{ ...entry, digest: shortDigest, trustManifests: [{
+    ...derived, subject: { ...derived.subject, digest: shortDigest },
+  }] }],
+}), CatalogValidationError);
+const assessor = 'did:web:auditor.example';
+const assessorManifest = await signTrustManifest(
+  entry,
+  { contributor: assessor },
+  input => createJws(input, 'compact', { kid: assessor + '#release-key' }),
+);
+assertValidCatalog({ ...value, entries: [{ ...entry, trustManifests: [assessorManifest] }] });
+const wrongKidHeader = Buffer.from(JSON.stringify({
+  alg: 'ES256', typ: 'ai-catalog-trust-manifest+jws', kid: 'did:web:other.example#key',
+})).toString('base64url');
+const wrongKidManifest = {
+  ...assessorManifest,
+  signature: { ...assessorManifest.signature, jws: wrongKidHeader + '..' + assessorManifest.signature.jws.split('.')[2] },
+};
+assert.throws(() => assertValidCatalog({
+  ...value, entries: [{ ...entry, trustManifests: [wrongKidManifest] }],
+}), CatalogValidationError);
 const sharedArtifactFailure = { status: 'artifact_digest_mismatch' };
 assert.deepEqual(await checkCatalogEntry({ ...entry, trustManifests: [malformedJwsManifest] }, new Uint8Array([0])), sharedArtifactFailure);
 assert.deepEqual(await checkCatalogEntryTrustManifest(entry, new Uint8Array([0]), malformedJwsManifest, bindingOptions), sharedArtifactFailure);
@@ -377,6 +418,7 @@ import {
   isEntryType,
   mediaTypes,
   safeParseCatalog,
+  assertValidCatalog,
   CatalogValidationError,
   type CatalogIssue,
 } from '${pkg.name}';
@@ -409,6 +451,13 @@ import {
 import rawSchema from '${pkg.name}/schema/ai-catalog.schema.json' with { type: 'json' };
 
 const authored: AICatalog = { specVersion: '1.0', entries: [] };
+const candidate: unknown = authored;
+assertValidCatalog(candidate);
+const assertedCatalog: AICatalog = candidate;
+// @ts-expect-error Assertions do not return the catalog for serialization.
+const assertionResult: AICatalog = assertValidCatalog(authored);
+const validationDiagnostic = {} as CatalogValidationError;
+const validationIssues: readonly CatalogIssue[] = validationDiagnostic.issues;
 const authoredHost: HostInfo = {
   displayName: 'Example',
   // @ts-expect-error Host Trust Manifests are not a recognized authoring field.
@@ -588,6 +637,7 @@ void urlCheck; void configuredUrlCheck; void signed; void signedFromEntry; void 
 void signedWithDefaults; void signedEntryWithDefaults; void signedWithExpiry;
 void generatedDigest; void jsonDigest; void unionDigest;
 void jsonDigestResult; void stringDigestResult; void nullDigestResult; void unionDigestResult;
+void assertedCatalog; void assertionResult; void validationIssues;
 `,
   );
   await writeFile(

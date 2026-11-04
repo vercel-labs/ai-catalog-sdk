@@ -1,6 +1,6 @@
 # Verification utilities
 
-Verification and signing utilities are available from `ai-catalog-sdk/verification`. Parsing validates document structure and declarations; verification checks signatures, artifact binding, and the applicable authentication and time requirements. Applications decide which endorsements satisfy their requirements.
+Verification and signing utilities are available from `ai-catalog-sdk/verification`. Authoring validation checks a catalog’s declarations and internal consistency. Verification checks signatures, artifact binding, and the applicable authentication and time requirements. Applications decide which endorsements satisfy their requirements.
 
 ## Canonicalize a logical JSON value
 
