@@ -1481,3 +1481,13 @@ export function checkDigest(
 
   return { status: actualHex === expectedHex ? 'match' : 'mismatch' };
 }
+
+export {
+  signTrustManifest,
+  type UnsignedTrustManifest,
+  type EntryTrustManifest,
+  type TrustManifestSignatureMetadata,
+  type JwsSigningResult,
+  type TrustManifestSigningInput,
+  type TrustManifestSigner,
+} from './internal/signing.js';

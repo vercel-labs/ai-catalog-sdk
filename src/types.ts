@@ -160,6 +160,12 @@ export interface TrustManifest {
   extensions?: JsonObject;
 }
 
+/** A completed signed contribution with its required release subject. */
+export interface SignedTrustManifest extends TrustManifest {
+  subject: TrustSubject;
+  signature: Signature;
+}
+
 /**
  * Describes content referenced by a Trust Manifest and included in its signed
  * payload when a signature is present.

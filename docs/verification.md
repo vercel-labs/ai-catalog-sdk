@@ -35,6 +35,49 @@ Each helper omits only the immediate `signature.jws` and immediate `additionalSi
 
 The helpers accept plain JSON objects and do not perform schema validation. Their output is the JWS payload, not a complete signing input or base64url-encoded text. They do not select keys or algorithms, fetch content, enforce time windows, or establish trust.
 
+## Sign a Trust Manifest
+
+`signTrustManifest()` prepares the payload, calls your signer, and returns a completed `SignedTrustManifest`:
+
+```ts
+import { CompactSign } from 'jose';
+import { signTrustManifest } from 'ai-catalog-sdk/verification';
+
+const manifest = await signTrustManifest(
+  entry,
+  { contributor: 'did:web:example.com' },
+  ({ payload, typ }) => new CompactSign(payload)
+    .setProtectedHeader({ alg: 'ES256', typ, kid: 'did:web:example.com#release-key' })
+    .sign(privateKey),
+);
+```
+
+The callback receives `{ payload, typ }`, where `payload` contains the exact canonical UTF-8 bytes and `typ` is `ai-catalog-trust-manifest+jws`.
+
+The entry-based overload copies only `identifier`, `type`, `digest`, and a present `version` into the subject. The entry must already declare a digest; the helper does not retrieve or hash the artifact or attach the result to the entry. The contributor can be an assessor or any other signer, independent of the entry's publisher.
+
+For a separately distributed manifest or a subject containing additional fields, supply the subject explicitly:
+
+```ts
+const manifest = await signTrustManifest(
+  { contributor, subject, attestations },
+  createJws,
+  { profile, issuedAt, expiresAt },
+);
+```
+
+Both overloads accept an optional trailing `signatureMetadata` argument supplying `profile`, `issuedAt`, and `expiresAt`. An omitted `profile` defaults to `did-web-v1`; an omitted `issuedAt` uses the current time, captured before the callback. `expiresAt` is absent unless supplied. The helper sets `signer` to `contributor`.
+
+The callback may return any of these JWS representations, synchronously or through a promise:
+
+| Callback result | Handling |
+| --- | --- |
+| Ordinary compact JWS string (`protected.payload.signature`) | Checks that the embedded payload matches and removes it. |
+| Detached compact JWS string (`protected..signature`) | Retains the detached form. The callback is responsible for signing the supplied payload. |
+| Flattened JWS object (`{ protected, payload, signature }`) | Checks the embedded payload and constructs detached compact JWS. |
+
+These are standard JWS representations. The helper rejects unprotected headers, checks the required protected `typ` and `alg`, forbids `alg: 'none'` and any `b64`, and preserves the captured manifest contents. It does not verify the callback's cryptographic signature or authenticate the chosen key. The callback is responsible for selecting the correct algorithm, headers, and signing key for the requested profile.
+
 ## Check signatures with a supplied key
 
 `checkCatalogSignature()` and `checkTrustManifestSignature()` verify a detached compact JWS with one caller-selected public key and expected algorithm:

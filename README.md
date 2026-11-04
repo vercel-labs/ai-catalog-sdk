@@ -200,6 +200,42 @@ const json = JSON.stringify(parseCatalog(catalog), null, 2);
 
 Parsing checks declaration constraints and internal consistency, including entry uniqueness and whether attached manifests describe their containing entries. Unsigned catalogs are allowed. Artifact integrity, cryptographic authenticity, and current endorsement acceptance are evaluated by the [verification utilities](./docs/verification.md).
 
+### Sign a Trust Manifest
+
+To add a signed endorsement, declare the entry's artifact digest, sign a Trust Manifest, and attach the result to `trustManifests` before serializing the catalog. This example reads the artifact from a local file and uses your configured `privateKey` with the separately installed `jose` package:
+
+```ts
+import { readFile } from 'node:fs/promises';
+import { CompactSign } from 'jose';
+import { parseCatalog, mediaTypes, type AICatalog } from 'ai-catalog-sdk';
+import { createDigest, signTrustManifest } from 'ai-catalog-sdk/verification';
+
+const artifactBytes = await readFile('example-agent-plugin.zip');
+const entry = {
+  identifier: 'urn:air:example.com:agent:example-plugin',
+  type: mediaTypes.agentPluginZip,
+  url: 'https://example.com/example-agent-plugin.zip',
+  digest: createDigest(artifactBytes),
+};
+
+const manifest = await signTrustManifest(
+  entry,
+  { contributor: 'did:web:example.com' },
+  ({ payload, typ }) => new CompactSign(payload)
+    .setProtectedHeader({ alg: 'ES256', typ, kid: 'did:web:example.com#release-key' })
+    .sign(privateKey),
+);
+
+const catalogWithEndorsement = {
+  specVersion: '1.0',
+  entries: [{ ...entry, trustManifests: [manifest] }],
+} satisfies AICatalog;
+
+const jsonWithEndorsement = JSON.stringify(parseCatalog(catalogWithEndorsement), null, 2);
+```
+
+The digest must describe the exact bytes published at `entry.url`. For an inline entry, use `createDigest(entry.data)` to hash its JCS-canonicalized JSON value. The signed Trust Manifest endorses the entry's artifact; the containing catalog remains unsigned. See [Signing](./docs/verification.md#sign-a-trust-manifest) for signing with an explicit subject and supported callback formats.
+
 ## Schemas
 
 Use the Zod schemas to compose AI Catalog validation in TypeScript. The package also provides a JSON Schema for other validators and tools. It follows the [2020-12 version of the JSON Schema standard](https://json-schema.org/draft/2020-12). This SDK maintains the schema as an interpretation of the pinned AI Catalog specification; it is not the official AI Catalog schema definition.
