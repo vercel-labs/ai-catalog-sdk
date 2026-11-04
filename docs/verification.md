@@ -2,120 +2,6 @@
 
 Verification and signing utilities are available from `ai-catalog-sdk/verification`. Authoring validation checks a catalog’s declarations and internal consistency. Verification checks signatures, artifact binding, and the applicable authentication and time requirements. Applications decide which endorsements satisfy their requirements.
 
-## Canonicalize a logical JSON value
-
-`canonicalizeJsonValueToBytes(value)` produces fresh RFC 8785 JCS UTF-8 bytes from a materialized JSON value:
-
-```ts
-import { canonicalizeJsonValueToBytes } from 'ai-catalog-sdk/verification';
-
-const bytes = canonicalizeJsonValueToBytes({ b: 2, a: 1 });
-// UTF-8 bytes for {"a":1,"b":2}
-```
-
-Property names are sorted by UTF-16 code units, array order and Unicode normalization are preserved, and numbers use JCS's ECMAScript representation. Strings are canonicalized as JSON string values; parse JSON source text before passing it.
-
-Inputs must contain plain JSON objects, arrays, and primitives. Non-finite numbers, lone Unicode surrogates, noncharacters, cycles, sparse or decorated arrays, accessors, proxies, exotic objects, and other non-JSON values throw `TypeError`. Fixed node or nesting-depth limits produce `RangeError`. Canonicalization uses accepted own data properties without invoking inherited `toJSON` hooks or overridden array methods.
-
-## Create signature payloads
-
-`createCatalogSignaturePayload(catalog)` and `createTrustManifestSignaturePayload(manifest)` return the exact RFC 8785 JCS UTF-8 payload bytes for their containing object:
-
-```ts
-import {
-  createCatalogSignaturePayload,
-  createTrustManifestSignaturePayload,
-} from 'ai-catalog-sdk/verification';
-
-const catalogPayload = createCatalogSignaturePayload(catalog);
-const manifestPayload = createTrustManifestSignaturePayload(manifest);
-```
-
-Each helper omits only the immediate `signature.jws` and immediate `additionalSignatures`. Signature metadata, unknown fields, extensions, and nested members with those names remain covered. A catalog payload includes complete nested manifest signatures. Inputs can contain a complete signature or pre-signing metadata without `jws`; the helpers do not mutate them.
-
-The helpers accept plain JSON objects and do not perform schema validation. Their output is the JWS payload, not a complete signing input or base64url-encoded text. They do not select keys or algorithms, fetch content, enforce time windows, or establish trust.
-
-## Sign a Trust Manifest
-
-`signTrustManifest()` prepares the payload, calls your signer, and returns a completed `SignedTrustManifest`:
-
-```ts
-import { CompactSign } from 'jose';
-import { signTrustManifest } from 'ai-catalog-sdk/verification';
-
-const manifest = await signTrustManifest(
-  entry,
-  { contributor: 'did:web:example.com' },
-  ({ payload, typ }) => new CompactSign(payload)
-    .setProtectedHeader({ alg: 'ES256', typ, kid: 'did:web:example.com#release-key' })
-    .sign(privateKey),
-);
-```
-
-The callback receives `{ payload, typ }`, where `payload` contains the exact canonical UTF-8 bytes and `typ` is `ai-catalog-trust-manifest+jws`.
-
-The entry-based overload copies only `identifier`, `type`, `digest`, and a present `version` into the subject. The entry must already declare a digest; the helper does not retrieve or hash the artifact or attach the result to the entry. The contributor can be an assessor or any other signer, independent of the entry's publisher.
-
-For a separately distributed manifest or a subject containing additional fields, supply the subject explicitly:
-
-```ts
-const manifest = await signTrustManifest(
-  { contributor, subject, attestations },
-  createJws,
-  { profile, issuedAt, expiresAt },
-);
-```
-
-Both overloads accept an optional trailing `signatureMetadata` argument supplying `profile`, `issuedAt`, and `expiresAt`. An omitted `profile` defaults to `did-web-v1`; an omitted `issuedAt` uses the current time, captured before the callback. `expiresAt` is absent unless supplied. The helper sets `signer` to `contributor`.
-
-The callback may return any of these JWS representations, synchronously or through a promise:
-
-| Callback result | Handling |
-| --- | --- |
-| Ordinary compact JWS string (`protected.payload.signature`) | Checks that the embedded payload matches and removes it. |
-| Detached compact JWS string (`protected..signature`) | Retains the detached form. The callback is responsible for signing the supplied payload. |
-| Flattened JWS object (`{ protected, payload, signature }`) | Checks the embedded payload and constructs detached compact JWS. |
-
-These are standard JWS representations. The helper rejects unprotected headers, checks the required protected `typ` and `alg`, forbids `alg: 'none'` and any `b64`, and preserves the captured manifest contents. It does not verify the callback's cryptographic signature or authenticate the chosen key. The callback is responsible for selecting the correct algorithm, headers, and signing key for the requested profile.
-
-## Check signatures with a supplied key
-
-`checkCatalogSignature()` and `checkTrustManifestSignature()` verify a detached compact JWS with one caller-selected public key and expected algorithm:
-
-```ts
-import {
-  checkCatalogSignature,
-  checkTrustManifestSignature,
-} from 'ai-catalog-sdk/verification';
-
-const catalogResult = await checkCatalogSignature(catalog, {
-  publicKey,
-  expectedAlgorithm: 'ES256',
-});
-
-const manifestResult = await checkTrustManifestSignature(manifest, {
-  publicKey,
-  expectedAlgorithm: 'ES256',
-});
-```
-
-They share `SignatureCheckOptions` and `SignatureCheckResult`. The SDK implements the exact algorithm token `ES256`; supply a native public P-256 `KeyObject` or a P-256 `CryptoKey` usable for verification.
-
-A `valid` result establishes only that the supplied key verifies the captured payload. It does not authenticate the claimed contributor or catalog operator, enforce issuance or expiration, check artifact binding, or establish trust. Header fields do not select a key or trigger network requests.
-
-The JWS must use canonical, unpadded base64url segments and a valid UTF-8 protected header. The required `typ` is exactly `ai-catalog+jws` for catalogs or `ai-catalog-trust-manifest+jws` for manifests. Any protected `b64` is forbidden. The expected algorithm is trusted caller input; the unverified `alg` is compared against it and never selects an algorithm.
-
-| Signature status | Meaning |
-| --- | --- |
-| `valid` | The supplied key verifies the signature over the captured payload. |
-| `unsigned` | The containing catalog or manifest has no `signature` of its own to verify. |
-| `invalid_jws` | The JWS is malformed or violates its required representation or headers. |
-| `algorithm_mismatch` | The protected `alg` differs from the caller's expectation. Includes the claimed algorithm for diagnostics. |
-| `jws_feature_not_implemented` | A well-formed critical extension is unsupported. |
-| `invalid_signature` | The signature representation or cryptographic check failed. |
-
-These functions validate the materialized JSON value without performing catalog or manifest schema validation. Wrong runtime argument types, incompatible keys, and malformed programmatic inputs reject with `TypeError`; resource limits reject with `RangeError`. Unexpected backend failures reject rather than becoming verification results.
-
 ## Check a catalog entry
 
 `checkCatalogEntry()` validates one captured entry and evaluates its selected Trust Manifests:
@@ -312,6 +198,44 @@ The table below describes each status and shows where it appears in each functio
 
 `checkCatalogEntry()` selects and applies the supported signer profile and authenticates and authorizes the verification key. With `checkCatalogEntryTrustManifest()`, the caller selects and applies the signer profile and authenticates and authorizes the supplied key. Neither establishes claim accuracy, publisher reputation, attestation validity, or artifact safety. These operations do not authenticate the surrounding catalog or validate the artifact’s format-specific schema.
 
+## Check signatures with a supplied key
+
+`checkCatalogSignature()` and `checkTrustManifestSignature()` verify a detached compact JWS with one caller-selected public key and expected algorithm:
+
+```ts
+import {
+  checkCatalogSignature,
+  checkTrustManifestSignature,
+} from 'ai-catalog-sdk/verification';
+
+const catalogResult = await checkCatalogSignature(catalog, {
+  publicKey,
+  expectedAlgorithm: 'ES256',
+});
+
+const manifestResult = await checkTrustManifestSignature(manifest, {
+  publicKey,
+  expectedAlgorithm: 'ES256',
+});
+```
+
+They share `SignatureCheckOptions` and `SignatureCheckResult`. The SDK implements the exact algorithm token `ES256`; supply a native public P-256 `KeyObject` or a P-256 `CryptoKey` usable for verification.
+
+A `valid` result establishes only that the supplied key verifies the captured payload. It does not authenticate the claimed contributor or catalog operator, enforce issuance or expiration, check artifact binding, or establish trust. Header fields do not select a key or trigger network requests.
+
+The JWS must use canonical, unpadded base64url segments and a valid UTF-8 protected header. The required `typ` is exactly `ai-catalog+jws` for catalogs or `ai-catalog-trust-manifest+jws` for manifests. Any protected `b64` is forbidden. The expected algorithm is trusted caller input; the unverified `alg` is compared against it and never selects an algorithm.
+
+| Signature status | Meaning |
+| --- | --- |
+| `valid` | The supplied key verifies the signature over the captured payload. |
+| `unsigned` | The containing catalog or manifest has no `signature` of its own to verify. |
+| `invalid_jws` | The JWS is malformed or violates its required representation or headers. |
+| `algorithm_mismatch` | The protected `alg` differs from the caller's expectation. Includes the claimed algorithm for diagnostics. |
+| `jws_feature_not_implemented` | A well-formed critical extension is unsupported. |
+| `invalid_signature` | The signature representation or cryptographic check failed. |
+
+These functions validate the materialized JSON value without performing catalog or manifest schema validation. Wrong runtime argument types, incompatible keys, and malformed programmatic inputs reject with `TypeError`; resource limits reject with `RangeError`. Unexpected backend failures reject rather than becoming verification results.
+
 ## Check a digest
 
 `checkDigest(value, expectedDigest)` compares exact bytes or a JCS-canonicalized JSON value with an AI Catalog digest:
@@ -359,3 +283,97 @@ const sha384Digest = createDigest(artifactBytes, 'sha384');
 ```
 
 A `Uint8Array` or `Buffer` is hashed as its exact byte range. Other logical JSON values are JCS-canonicalized before hashing. Strings are JSON string values, including their JSON quotes and escapes; ordinary arrays are JSON arrays. To hash text as raw bytes, encode it with `TextEncoder` first.
+
+## Sign a Trust Manifest
+
+`signTrustManifest()` prepares the payload, calls your signer, and returns a completed `SignedTrustManifest`:
+
+```ts
+import { CompactSign } from 'jose';
+import { signTrustManifest } from 'ai-catalog-sdk/verification';
+
+const manifest = await signTrustManifest(
+  entry,
+  { contributor: 'did:web:example.com' },
+  ({ payload, typ }) => new CompactSign(payload)
+    .setProtectedHeader({ alg: 'ES256', typ, kid: 'did:web:example.com#release-key' })
+    .sign(privateKey),
+);
+```
+
+The callback receives `{ payload, typ }`, where `payload` contains the exact canonical UTF-8 bytes and `typ` is `ai-catalog-trust-manifest+jws`.
+
+The entry-based overload copies only `identifier`, `type`, `digest`, and a present `version` into the subject. The entry must already declare a digest; the helper does not retrieve or hash the artifact or attach the result to the entry. The contributor can be an assessor or any other signer, independent of the entry's publisher.
+
+For a separately distributed manifest or a subject containing additional fields, supply the subject explicitly:
+
+```ts
+const manifest = await signTrustManifest(
+  { contributor, subject, attestations },
+  createJws,
+  { profile, issuedAt, expiresAt },
+);
+```
+
+Both overloads accept an optional trailing `signatureMetadata` argument supplying `profile`, `issuedAt`, and `expiresAt`. An omitted `profile` defaults to `did-web-v1`; an omitted `issuedAt` uses the current time, captured before the callback. `expiresAt` is absent unless supplied. The helper sets `signer` to `contributor`.
+
+The callback may return any of these JWS representations, synchronously or through a promise:
+
+| Callback result | Handling |
+| --- | --- |
+| Ordinary compact JWS string (`protected.payload.signature`) | Checks that the embedded payload matches and removes it. |
+| Detached compact JWS string (`protected..signature`) | Retains the detached form. The callback is responsible for signing the supplied payload. |
+| Flattened JWS object (`{ protected, payload, signature }`) | Checks the embedded payload and constructs detached compact JWS. |
+
+These are standard JWS representations. The helper rejects unprotected headers, checks the required protected `typ` and `alg`, forbids `alg: 'none'` and any `b64`, and preserves the captured manifest contents. It does not verify the callback's cryptographic signature or authenticate the chosen key. The callback is responsible for selecting the correct algorithm, headers, and signing key for the requested profile.
+
+## Create signature payloads
+
+`createCatalogSignaturePayload(catalog)` and `createTrustManifestSignaturePayload(manifest)` return the exact RFC 8785 JCS UTF-8 payload bytes for their containing object:
+
+```ts
+import {
+  createCatalogSignaturePayload,
+  createTrustManifestSignaturePayload,
+} from 'ai-catalog-sdk/verification';
+
+const catalogPayload = createCatalogSignaturePayload(catalog);
+const manifestPayload = createTrustManifestSignaturePayload(manifest);
+```
+
+Each helper omits only the immediate `signature.jws` and immediate `additionalSignatures`. Signature metadata, unknown fields, extensions, and nested members with those names remain covered. A catalog payload includes complete nested manifest signatures. Inputs can contain a complete signature or pre-signing metadata without `jws`; the helpers do not mutate them.
+
+The helpers accept plain JSON objects and do not perform schema validation. Their output is the JWS payload, not a complete signing input or base64url-encoded text. They do not select keys or algorithms, fetch content, enforce time windows, or establish trust.
+
+## Canonicalize a logical JSON value
+
+`canonicalizeJsonValueToBytes(value)` produces fresh RFC 8785 JCS UTF-8 bytes from a materialized JSON value:
+
+```ts
+import { canonicalizeJsonValueToBytes } from 'ai-catalog-sdk/verification';
+
+const bytes = canonicalizeJsonValueToBytes({ b: 2, a: 1 });
+// UTF-8 bytes for {"a":1,"b":2}
+```
+
+Property names are sorted by UTF-16 code units, array order and Unicode normalization are preserved, and numbers use JCS's ECMAScript representation. Strings are canonicalized as JSON string values; parse JSON source text before passing it.
+
+Inputs must contain plain JSON objects, arrays, and primitives. Non-finite numbers, lone Unicode surrogates, noncharacters, cycles, sparse or decorated arrays, accessors, proxies, exotic objects, and other non-JSON values throw `TypeError`. Fixed node or nesting-depth limits produce `RangeError`. Canonicalization uses accepted own data properties without invoking inherited `toJSON` hooks or overridden array methods.
+
+## Validation diagnostics
+
+`CatalogParseError` and `CatalogValidationError` contain `CatalogIssue` objects in their `issues` arrays. The table below describes the values of `error.issues[i].code`, including for validation errors attached to verification results. These codes are distinct from verification result statuses.
+
+| Code | Meaning |
+| --- | --- |
+| `invalid_json` | Catalog text could not be decoded as JSON. |
+| `invalid_json_value` | A value violates the required JSON or I-JSON representation. |
+| `invalid_type` | A required value is missing or has the wrong JSON type. |
+| `invalid_value` | A value violates a format, range, or allowed representation. |
+| `unsupported_spec_version` | A well-formed catalog version declares an unsupported major. |
+| `duplicate_entry` | Catalog entries violate identifier/version uniqueness. |
+| `inconsistent_value` | Related declarations disagree, such as a Trust Manifest subject and its containing entry. |
+| `resource_limit` | Input exceeds an SDK node or nesting limit. |
+| `diagnostics_truncated` | Additional validation issues were omitted after the reporting limit was reached. |
+
+Codes may be added in future releases. Keep a fallback for unknown codes, and do not depend on issue order or a lower-level `cause` for classification.
