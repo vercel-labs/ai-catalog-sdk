@@ -271,37 +271,37 @@ The table below describes each status and shows where it appears in the `checkCa
 
 ## Check a digest
 
-`checkDigest(bytes, expectedDigest)` compares the exact byte range supplied by the caller with an AI Catalog digest:
+`checkDigest(value, expectedDigest)` compares exact bytes or a JCS-canonicalized JSON value with an AI Catalog digest:
 
 ```ts
 import { checkDigest } from 'ai-catalog-sdk/verification';
 
 const result = checkDigest(
-  artifactBytes,
+  artifactBytes, // or entry.data for an inline artifact
   'sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
 );
 
 if (result.status !== 'match') {
-  // Do not use the bytes as the declared artifact.
+  // Do not use this content as the declared artifact.
 }
 ```
 
-The function hashes bytes verbatim. It does not fetch content, decode a representation, serialize JSON, or apply JCS canonicalization. In particular, callers must not pass an ordinary JSON serialization for an entry with `data`, whose inline artifact digest is defined over JCS-canonicalized `data`.
+Pass retrieved bytes for a URL artifact and `entry.data` for an inline artifact. `Uint8Array` and `Buffer` inputs are hashed as their exact byte range. Other JSON values are JCS-canonicalized before hashing. Strings are JSON string values, including their JSON quotes and escapes; to check raw text bytes, encode them with `TextEncoder` first.
 
 The result statuses have deliberately narrow meanings:
 
 | Status | Meaning |
 | --- | --- |
-| `match` | The supplied bytes match the declared digest. |
-| `mismatch` | The digest is implemented and well-formed, but the bytes do not match. |
+| `match` | The supplied bytes or JCS-canonicalized JSON value match the declared digest. |
+| `mismatch` | The digest is implemented and well-formed, but the supplied bytes or JCS-canonicalized JSON value do not match. |
 | `invalid_digest` | The declaration is malformed, or a known algorithm has an invalid output length. |
 | `algorithm_not_implemented` | The declaration is syntactically valid, but the SDK does not implement its exact algorithm token. |
 
 The SDK currently implements the exact, case-sensitive `sha256`, `sha384`, and `sha512` tokens with 64, 96, and 128 lowercase hexadecimal characters, respectively. This is an SDK capability boundary, not a claim that other algorithms are forbidden or insecure. If the runtime cannot execute a registered implementation, the function throws `DigestAlgorithmUnavailableError` and preserves the underlying error as `cause`.
 
-`Buffer` values and `Uint8Array` subviews are accepted. Shared or detached backing buffers are rejected because they cannot provide a stable byte view for the check. Wrong JavaScript argument types and shared or detached byte views throw `TypeError`.
+`Buffer` values and `Uint8Array` subviews are accepted. Shared or detached backing buffers are rejected because they cannot provide a stable byte view for the check. Wrong JavaScript argument types, shared or detached byte views, and JSON values that cannot satisfy JCS throw `TypeError`. JSON values beyond the SDK's node or nesting-depth limits throw `RangeError`.
 
-A `match` result establishes only equality between caller-supplied bytes and a declared digest. It does not establish who made the declaration, whether the digest is authoritative, or whether the content is trustworthy.
+A `match` result establishes only that the supplied bytes or JCS-canonicalized JSON value match a declared digest. It does not establish who made the declaration, whether the digest is authoritative, or whether the content is trustworthy.
 
 ## Create a digest
 

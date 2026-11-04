@@ -493,7 +493,7 @@ function inspectDetachedJws(
   return { protectedHeader, protectedSegment, signatureSegment };
 }
 
-/** The outcome of comparing bytes with a declared AI Catalog digest. */
+/** The outcome of comparing exact bytes or canonical JSON with a declared AI Catalog digest. */
 export type DigestCheckResult =
   | { status: 'match' }
   | { status: 'mismatch' }
@@ -1433,27 +1433,32 @@ export function createDigest(
 }
 
 /**
- * Compares caller-supplied bytes with an AI Catalog digest.
+ * Compares exact bytes or a logical JSON value with an AI Catalog digest.
  *
- * The exact byte range represented by `bytes` is hashed without fetching,
- * decoding, serialization, or JCS canonicalization. A matching digest proves
- * only that those bytes match the declaration; it does not establish that the
- * declaration is authentic or that the content is trustworthy.
+ * Uint8Array and Buffer inputs are hashed as their exact byte range. Logical
+ * JSON values are JCS-canonicalized before hashing. Strings are JSON string
+ * values, not JSON source text or raw text; ordinary arrays are JSON arrays.
+ * A matching digest does not establish that the declaration is authentic or
+ * that the content is trustworthy.
  *
  * This SDK currently implements the exact, case-sensitive `sha256`, `sha384`,
  * and `sha512` algorithm tokens. Other syntactically valid tokens produce an
  * `algorithm_not_implemented` result rather than a judgment about whether the
  * AI Catalog specification permits them.
  *
- * @throws {TypeError} If an argument has the wrong runtime type or `bytes` is
- * backed by a shared or detached buffer.
+ * @throws {TypeError} If an argument has the wrong runtime type, byte storage
+ * is shared or detached, or the value cannot be canonicalized as plain I-JSON.
+ * @throws {RangeError} If a JSON value exceeds canonicalization limits.
  * @throws {DigestAlgorithmUnavailableError} If the runtime cannot execute a
  * digest algorithm implemented by this SDK.
  */
 export function checkDigest(
-  bytes: Uint8Array,
+  value: Uint8Array | JsonValue,
   expectedDigest: string,
 ): DigestCheckResult {
+  const bytes = utilTypes.isUint8Array(value)
+    ? value
+    : canonicalizeJsonValueToBytes(value);
   assertStableBytes(bytes);
   if (typeof expectedDigest !== 'string') {
     throw new TypeError('expectedDigest must be a string.');

@@ -151,11 +151,19 @@ const canonicalDigest = 'sha256:43258cff783fe7036d8a43033f830adfc60ec03738247354
 assert.equal(createDigest({ b: 2, a: 1 }), canonicalDigest);
 assert.equal(createDigest({ a: 1, b: 2 }), canonicalDigest);
 assert.equal(checkDigest(new TextEncoder().encode('{"a":1,"b":2}'), canonicalDigest).status, 'match');
+assert.equal(checkDigest({ b: 2, a: 1 }, canonicalDigest).status, 'match');
+assert.equal(checkDigest({ a: 1, b: 2 }, canonicalDigest).status, 'match');
+assert.equal(checkDigest({ a: 1, b: 3 }, canonicalDigest).status, 'mismatch');
 const stringDigest = 'sha256:' + createHash('sha256').update('"abc"').digest('hex');
 assert.equal(createDigest('abc'), stringDigest);
 assert.notEqual(stringDigest, createDigest(new TextEncoder().encode('abc')));
 assert.equal(checkDigest(new TextEncoder().encode('"abc"'), stringDigest).status, 'match');
+assert.equal(checkDigest('abc', stringDigest).status, 'match');
 assert.equal(checkDigest(new TextEncoder().encode('abc'), stringDigest).status, 'mismatch');
+for (const [jsonValue, canonicalText] of [[[97, 98, 99], '[97,98,99]'], [null, 'null']]) {
+  const expectedDigest = 'sha256:' + createHash('sha256').update(canonicalText).digest('hex');
+  assert.equal(checkDigest(jsonValue, expectedDigest).status, 'match');
+}
 const sha384Digest = createDigest(Buffer.from('abc'), 'sha384');
 assert.ok(sha384Digest.startsWith('sha384:'));
 assert.equal(checkDigest(Buffer.from('abc'), sha384Digest).status, 'match');
@@ -376,6 +384,14 @@ const digestAlgorithm: DigestAlgorithm = 'sha384';
 const generatedDigest: string = createDigest(new Uint8Array(), digestAlgorithm);
 const jsonDigest: string = createDigest({ b: 2, a: 1 });
 const unionDigest: string = createDigest({} as Uint8Array | JsonValue);
+const jsonDigestResult: DigestCheckResult = checkDigest({} as JsonValue, jsonDigest);
+const stringDigestResult: DigestCheckResult = checkDigest('abc', jsonDigest);
+const nullDigestResult: DigestCheckResult = checkDigest(null, jsonDigest);
+const unionDigestResult: DigestCheckResult = checkDigest({} as Uint8Array | JsonValue, jsonDigest);
+// @ts-expect-error Only Uint8Array byte views and JSON values are accepted.
+checkDigest(new Uint16Array(), jsonDigest);
+// @ts-expect-error The expected digest must be a string.
+checkDigest(null, 123);
 // @ts-expect-error Digest creation supports the SDK's implemented algorithms.
 createDigest(new Uint8Array(), 'md5');
 const signature: Signature = { ...metadata, signer: 'did:example:alice', jws: 'protected..signature' };
@@ -468,6 +484,7 @@ void catalogSignaturePayload; void signaturePayload; void presigningPayload; voi
 void dataBindingCheck; void urlBindingCheck; void unionBindingCheck; void dataCheck; void configuredDataCheck;
 void urlCheck; void configuredUrlCheck; void rawSchema;
 void generatedDigest; void jsonDigest; void unionDigest;
+void jsonDigestResult; void stringDigestResult; void nullDigestResult; void unionDigestResult;
 `,
   );
   await writeFile(

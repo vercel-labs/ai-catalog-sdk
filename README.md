@@ -107,7 +107,7 @@ Use the individual utilities when the composed catalog-entry check does not fit 
 | `createCatalogSignaturePayload()` | Creating the canonical detached-JWS payload for an AI Catalog | Does not validate the catalog, construct or verify a JWS, fetch URL artifacts, or establish trust |
 | `createTrustManifestSignaturePayload()` | Creating the canonical detached-JWS payload for a Trust Manifest | Does not validate the manifest, construct or verify a JWS, or establish trust |
 | `checkTrustManifestSignature()` | Checking a manifest snapshot with one caller-selected public key and expected algorithm | Currently supports ES256; does not check the subject digest, identity, freshness, or trust |
-| `checkDigest()` | Comparing exact caller-supplied bytes with a declared digest | Currently supports `sha256`, `sha384`, and `sha512` |
+| `checkDigest()` | Comparing exact bytes or JCS-canonicalized JSON with a declared digest | Currently supports `sha256`, `sha384`, and `sha512` |
 
 These utilities do not fetch content or resolve keys. See [Verification utilities](./docs/verification.md) for their inputs, results, errors, security boundaries, and examples.
 
