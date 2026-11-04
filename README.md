@@ -80,14 +80,14 @@ For an entry with `url`, supply the artifact bytes obtained by your application.
 
 `checked` means the requested checks completed. Each attached manifest has its own result in the original array order; manifests excluded by the contributor options receive `not_checked`. The report may contain no manifests or no passing endorsements. A `passed` manifest result authenticates its contributor, binds its claims to the entry and artifact, and checks its time window. `isPublisherEndorsement: true` additionally establishes the `did:web` Publisher Profile's exact relationship to the entry's `urn:air` namespace. Applications choose which contributors and endorsements they require. See [Verification utilities](./docs/verification.md#check-a-catalog-entry) for filtering, results, and network controls.
 
-## Check artifact binding with a supplied key
+## Check a Trust Manifest with a supplied key
 
-`checkCatalogEntryArtifactBinding()` checks one explicit signed manifest against an entry and its artifact representation using a key selected by your application:
+Use `checkCatalogEntryTrustManifest()` when your application supplies the verification key, such as when implementing a different signer profile:
 
 ```ts
-import { checkCatalogEntryArtifactBinding } from 'ai-catalog-sdk/verification';
+import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/verification';
 
-const result = await checkCatalogEntryArtifactBinding(
+const result = await checkCatalogEntryTrustManifest(
   entryWithUrl,
   artifactBytes,
   manifest,
@@ -95,7 +95,7 @@ const result = await checkCatalogEntryArtifactBinding(
 );
 ```
 
-For an entry with `data`, omit `artifactBytes`. A `valid` result means the supplied key verifies the signature, the manifest’s subject matches the entry, and the artifact matches its declared digest. The function performs no contributor authentication, time-window checks, or network requests. See [Verification utilities](./docs/verification.md#check-artifact-binding-with-a-supplied-key) for the complete boundary and results.
+For an entry with `data`, omit `artifactBytes`. The function validates the entry's fields and the explicit manifest, ignoring the entry's attached `trustManifests`. A `passed` result means the manifest’s declarations and signature pass the supplied-key checks, its subject matches the entry and artifact, and its time window passes. The caller is responsible for selecting and applying the signer profile and authenticating and authorizing the key; the function performs no network requests. See [Verification utilities](./docs/verification.md#check-a-trust-manifest-with-a-supplied-key) for details.
 
 ## Use lower-level verification utilities
 
@@ -120,7 +120,7 @@ These utilities do not fetch content or resolve keys. See [Verification utilitie
 | An already-parsed JSON value representing one catalog entry | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
 | A catalog, caller-selected public key, and expected algorithm | `checkCatalogSignature()` | `ai-catalog-sdk/verification` |
 | Check an entry and its selected endorsements | `checkCatalogEntry()` | `ai-catalog-sdk/verification` |
-| Check one manifest’s signature and artifact binding with a supplied public key | `checkCatalogEntryArtifactBinding()` | `ai-catalog-sdk/verification` |
+| Check one explicit Trust Manifest against an entry with a supplied public key | `checkCatalogEntryTrustManifest()` | `ai-catalog-sdk/verification` |
 | Structural validation composed with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
 | JSON Schema as a TypeScript or JavaScript value | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
 | Raw JSON Schema for another validator or tool | `ai-catalog.schema.json` | `ai-catalog-sdk/schema/ai-catalog.schema.json` |

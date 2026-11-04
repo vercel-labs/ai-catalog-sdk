@@ -14,6 +14,6 @@ For forward compatibility, an unrecognized Trust Manifest field satisfies the SD
 
 ## Verification
 
-The default 60-second clock tolerance for `checkCatalogEntry()` is an SDK choice permitted by the snapshot; callers can override it, including with zero.
+The default 60-second clock tolerance for `checkCatalogEntry()` and `checkCatalogEntryTrustManifest()` is an SDK choice permitted by the snapshot; callers can override it, including with zero.
 
 Automatic catalog-signer authentication is not implemented. The supplied-key catalog checker establishes snapshot integrity under the caller's selected key, without assigning catalog-operator authority.

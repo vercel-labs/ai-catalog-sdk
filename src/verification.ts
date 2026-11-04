@@ -75,18 +75,6 @@ interface SignatureCheckSnapshot extends SignaturePayloadSnapshot {
   publicKey: webcrypto.CryptoKey | KeyObject;
 }
 
-type TrustSubjectSnapshot =
-  | { kind: 'missing' }
-  | { kind: 'invalid' }
-  | {
-      kind: 'present';
-      identifier: unknown;
-      hasVersion: boolean;
-      version: unknown;
-      type: unknown;
-      digest: unknown;
-    };
-
 function isImplementedDigestAlgorithm(
   algorithm: string,
 ): algorithm is DigestAlgorithm {
@@ -245,30 +233,6 @@ function readOwnDataProperty(value: object, name: string): unknown {
   return descriptor.value;
 }
 
-function readRequiredEntryProperty(entry: object, name: string): unknown {
-  const descriptor = Object.getOwnPropertyDescriptor(entry, name);
-  if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
-    throw new TypeError(
-      `entry.${name} must be an enumerable own data property.`,
-    );
-  }
-  return descriptor.value;
-}
-
-function readOptionalEntryProperty(
-  entry: object,
-  name: string,
-): { present: boolean; value: unknown } {
-  const descriptor = Object.getOwnPropertyDescriptor(entry, name);
-  if (!descriptor) return { present: false, value: undefined };
-  if (!descriptor.enumerable || !('value' in descriptor)) {
-    throw new TypeError(
-      `entry.${name} must be an enumerable own data property when present.`,
-    );
-  }
-  return { present: true, value: descriptor.value };
-}
-
 function assertCatalogEntryObject(
   entry: unknown,
 ): asserts entry is CatalogEntry {
@@ -282,35 +246,6 @@ function assertCatalogEntryObject(
   ) {
     throw new TypeError('entry must be a plain object.');
   }
-}
-
-function snapshotTrustSubject(manifest: TrustManifest): TrustSubjectSnapshot {
-  const descriptor = Object.getOwnPropertyDescriptor(manifest, 'subject');
-  if (!descriptor) return { kind: 'missing' };
-
-  // The signature payload preflight has already rejected accessors, proxies,
-  // and non-JSON members throughout the manifest.
-  const subject = 'value' in descriptor ? descriptor.value : undefined;
-  if (
-    subject === null ||
-    typeof subject !== 'object' ||
-    Array.isArray(subject)
-  ) {
-    return { kind: 'invalid' };
-  }
-
-  const versionDescriptor = Object.getOwnPropertyDescriptor(subject, 'version');
-  return {
-    kind: 'present',
-    identifier: readOwnDataProperty(subject, 'identifier'),
-    hasVersion: versionDescriptor !== undefined,
-    version:
-      versionDescriptor && 'value' in versionDescriptor
-        ? versionDescriptor.value
-        : undefined,
-    type: readOwnDataProperty(subject, 'type'),
-    digest: readOwnDataProperty(subject, 'digest'),
-  };
 }
 
 function assertEs256PublicKey(
@@ -536,20 +471,23 @@ type EntryStructureFailure = {
 
 type EntryCheckFailure = EntryStructureFailure | ArtifactCheckFailure;
 
-/** A failed comparison between a signed subject and its entry/artifact. */
-export type SubjectCheckFailure =
-  | { status: 'missing_subject' }
-  | { status: 'identifier_mismatch' }
-  | { status: 'version_mismatch' }
-  | { status: 'type_mismatch' }
-  | { status: 'digest_mismatch' }
-  | Exclude<DigestCheckResult, { status: 'match' }>;
-
 /** The outcome of checking one explicit manifest using a caller-selected key. */
-export type CatalogEntryArtifactBindingCheckResult =
-  | { status: 'valid' }
-  | { status: 'signature_check_failed'; signatureResult: SignatureCheckFailure }
-  | { status: 'subject_check_failed'; subjectResult: SubjectCheckFailure };
+export type CatalogEntryTrustManifestCheckResult =
+  | { status: 'passed' }
+  | EntryCheckFailure
+  | { status: 'invalid_manifest'; error: CatalogValidationError }
+  | SignatureCheckFailure
+  | { status: 'not_yet_valid' }
+  | { status: 'expired' };
+
+/** Caller-selected key and time controls for one explicit manifest. */
+export interface CatalogEntryTrustManifestCheckOptions
+  extends SignatureCheckOptions {
+  /** Nonnegative safe integer milliseconds of clock skew. Defaults to 60,000. */
+  clockToleranceMs?: number;
+  /** Evaluation instant as safe integer UTC epoch milliseconds; defaults to the clock near completion. */
+  nowMs?: number;
+}
 
 /** Selection, time, and DID-resolution controls for an entry check. */
 export interface CatalogEntryCheckOptions {
@@ -866,122 +804,69 @@ export async function checkTrustManifestSignature(
 }
 
 /**
- * Checks one explicit manifest's signature and artifact binding with the
- * caller-selected key. It does not resolve identity or enforce currentness.
+ * Checks entry/artifact preconditions, then reports manifest declaration,
+ * supplied-key signature, and time-window failures in that order.
+ * An `expired` or `not_yet_valid` result means the preceding checks passed.
+ * The caller selects and applies the signer profile and authenticates/authorizes the key;
+ * this operation performs no network requests and ignores attached manifests.
  * URL entries take their supplied artifact bytes adjacent to the entry.
  */
-export function checkCatalogEntryArtifactBinding(
+export function checkCatalogEntryTrustManifest(
   entry: CatalogEntryWithData,
   manifest: TrustManifest,
-  options: SignatureCheckOptions,
-): Promise<CatalogEntryArtifactBindingCheckResult>;
-export function checkCatalogEntryArtifactBinding(
+  options: CatalogEntryTrustManifestCheckOptions,
+): Promise<CatalogEntryTrustManifestCheckResult>;
+export function checkCatalogEntryTrustManifest(
   entry: CatalogEntryWithUrl,
   artifactBytes: Uint8Array,
   manifest: TrustManifest,
-  options: SignatureCheckOptions,
-): Promise<CatalogEntryArtifactBindingCheckResult>;
-export async function checkCatalogEntryArtifactBinding(
+  options: CatalogEntryTrustManifestCheckOptions,
+): Promise<CatalogEntryTrustManifestCheckResult>;
+export async function checkCatalogEntryTrustManifest(
   entry: CatalogEntry,
   bytesOrManifest: Uint8Array | TrustManifest,
-  manifestOrOptions: TrustManifest | SignatureCheckOptions,
-  maybeOptions?: SignatureCheckOptions,
-): Promise<CatalogEntryArtifactBindingCheckResult> {
+  manifestOrOptions: TrustManifest | CatalogEntryTrustManifestCheckOptions,
+  maybeOptions?: CatalogEntryTrustManifestCheckOptions,
+): Promise<CatalogEntryTrustManifestCheckResult> {
   const isDataCall = maybeOptions === undefined;
-  const options = snapshotSignatureCheckOptions(
-    isDataCall ? manifestOrOptions : maybeOptions,
-  );
-  const artifact = captureArtifactContext(entry, bytesOrManifest, isDataCall);
-  const manifest = (
-    isDataCall ? bytesOrManifest : manifestOrOptions
-  ) as TrustManifest;
+  const rawOptions = isDataCall ? manifestOrOptions : maybeOptions;
+  const options = snapshotSignatureCheckOptions(rawOptions);
+  const timeOptions = snapshotTimeCheckOptions(rawOptions as object);
+  const captured = captureEntryFields(entry, bytesOrManifest, isDataCall);
+  if ('status' in captured) return captured;
+  const artifact = precheckArtifact(captured.entry, bytesOrManifest);
+  if (artifact !== undefined) return artifact;
+  const input = isDataCall ? bytesOrManifest : manifestOrOptions;
+  assertJsonInput(input);
+  const parsed = safeParseTrustManifest(input);
+  if (!parsed.success)
+    return {
+      status: 'invalid_manifest',
+      error: new CatalogValidationError(
+        parsed.error.issues,
+        parsed.error.cause,
+      ),
+    };
+  const manifest = parsed.data;
+  const error = validateTrustManifest(manifest, captured.entry);
+  if (error !== undefined) return { status: 'invalid_manifest', error };
+  if (manifest.signature === undefined) return { status: 'unsigned' };
   const signature = snapshotSignaturePayload(manifest, 'manifest');
-  const subjectResult = checkSubject(artifact.entry, manifest, artifact.bytes);
   const signatureResult = await executeSignatureCheck(
     'status' in signature
       ? signature
       : { ...signature, publicKey: options.publicKey },
   );
-  if (signatureResult.status !== 'valid')
-    return { status: 'signature_check_failed', signatureResult };
-  if (subjectResult.status !== 'match')
-    return { status: 'subject_check_failed', subjectResult };
-  return { status: 'valid' };
-}
-
-function captureArtifactContext(
-  entry: CatalogEntry,
-  bytes: unknown,
-  isDataCall: boolean,
-): { entry: CatalogEntry; bytes: Uint8Array } {
-  assertCatalogEntryObject(entry);
-  const identifier = readRequiredEntryProperty(entry, 'identifier');
-  const type = readRequiredEntryProperty(entry, 'type');
-  const version = readOptionalEntryProperty(entry, 'version');
-  const digest = readOptionalEntryProperty(entry, 'digest');
-  if (
-    typeof identifier !== 'string' ||
-    typeof type !== 'string' ||
-    (version.present && typeof version.value !== 'string') ||
-    (digest.present && typeof digest.value !== 'string')
-  )
-    throw new TypeError(
-      'Entry coordinates and digest must be strings when present.',
+  if (signatureResult.status !== 'valid') return signatureResult;
+  if (manifest.signature !== undefined) {
+    const time = checkManifestTime(
+      manifest.signature,
+      timeOptions.nowMs ?? Date.now(),
+      timeOptions.clockToleranceMs,
     );
-  const data = readOptionalEntryProperty(entry, 'data');
-  const url = readOptionalEntryProperty(entry, 'url');
-  if (data.present === url.present)
-    throw new TypeError('entry must contain exactly one of data or url.');
-  if (isDataCall !== data.present)
-    throw new TypeError(
-      'URL entries require artifact bytes; inline entries do not accept artifact bytes.',
-    );
-  if (url.present && typeof url.value !== 'string')
-    throw new TypeError('entry.url must be a string.');
-  let artifactBytes: Uint8Array;
-  if (data.present)
-    artifactBytes = canonicalizeJsonValueToBytes(data.value as JsonValue);
-  else {
-    assertStableBytes(bytes);
-    artifactBytes = bytes;
+    if (time !== undefined) return { status: time };
   }
-  const captured = {
-    identifier,
-    type,
-    ...(version.present ? { version: version.value as string } : {}),
-    ...(digest.present ? { digest: digest.value as string } : {}),
-    ...(data.present ? { data: null } : { url: url.value as string }),
-  } as CatalogEntry;
-  return { entry: captured, bytes: artifactBytes };
-}
-
-function checkSubject(
-  entry: CatalogEntry,
-  manifest: TrustManifest,
-  bytes: Uint8Array,
-  digestResult?: DigestCheckResult,
-): { status: 'match' } | SubjectCheckFailure {
-  const subject = snapshotTrustSubject(manifest);
-  if (subject.kind === 'missing') return { status: 'missing_subject' };
-  if (subject.kind === 'invalid')
-    throw new TypeError('manifest.subject must be an object.');
-  if (
-    typeof subject.identifier !== 'string' ||
-    typeof subject.type !== 'string' ||
-    typeof subject.digest !== 'string' ||
-    (subject.hasVersion && typeof subject.version !== 'string')
-  )
-    throw new TypeError('Subject coordinates and digest must be strings.');
-  if (subject.identifier !== entry.identifier)
-    return { status: 'identifier_mismatch' };
-  if (
-    subject.hasVersion !== Object.hasOwn(entry, 'version') ||
-    subject.version !== entry.version
-  )
-    return { status: 'version_mismatch' };
-  if (subject.type !== entry.type) return { status: 'type_mismatch' };
-  if (subject.digest !== entry.digest) return { status: 'digest_mismatch' };
-  return digestResult ?? checkDigest(bytes, subject.digest);
+  return { status: 'passed' };
 }
 
 function assertJsonInput(value: unknown): void {
