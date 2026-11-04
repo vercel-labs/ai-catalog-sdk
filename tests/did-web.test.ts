@@ -47,6 +47,7 @@ vi.mock('node:https', async (importOriginal) => {
 });
 
 import { resolveDidWeb } from '../src/internal/did-web.js';
+import { fetchHttpsResource, HttpFetchError } from '../src/internal/http-fetch.js';
 import { IssuerCheckError } from '../src/internal/publisher-profile.js';
 import {
   canonicalizeJsonValueToBytes,
@@ -199,6 +200,13 @@ describe('native did:web transport', () => {
     expect(network.options).toHaveLength(1);
   });
 
+  it('retains the DID-specific failure for a redirect without Location', async () => {
+    respond = (_request, response) => response.writeHead(302).end();
+    await expect(resolveDidWeb('did:web:publisher.example', options)).rejects.toMatchObject({
+      name: 'IssuerCheckError', message: 'The publisher DID redirect has no Location header.',
+    });
+  });
+
   it.each(['gzip', 'deflate', 'br'] as const)('reads %s and applies the ceiling to decoded bytes', async (encoding) => {
     const body = Buffer.from(JSON.stringify({ ...document, padding: 'x'.repeat(4000) }));
     const compressed = { gzip: gzipSync, deflate: deflateSync, br: brotliCompressSync }[encoding](body);
@@ -308,5 +316,89 @@ describe('native did:web transport', () => {
       Object.defineProperty(controller.signal, property, { get() { throw new Error('Caller override invoked'); } });
     }
     await expect(resolveDidWeb('did:web:publisher.example', { ...options, signal: controller.signal })).resolves.toEqual(document);
+  });
+});
+
+describe('shared HTTPS transport', () => {
+  const fetchOptions = { timeoutMs: 2_000, maxResponseBytes: 3, accept: 'application/example' };
+
+  it('exposes the final URL and non-success headers without reading the unused body', async () => {
+    let closed: () => void = () => {};
+    const bodyClosed = new Promise<void>((resolve) => { closed = resolve; });
+    respond = (request, response) => {
+      expect(request.headers.accept).toBe('application/example');
+      if (request.url === '/start') {
+        response.writeHead(302, { location: '/selected' }).end();
+      } else {
+        response.once('close', closed);
+        response.writeHead(418, { link: '</catalog>; rel="ai-catalog"', 'content-encoding': 'unknown' });
+        response.flushHeaders();
+      }
+    };
+    await expect(fetchHttpsResource(new URL('https://publisher.example/start'), fetchOptions, (response) => ({
+      url: response.url.href,
+      statusCode: response.statusCode,
+      link: response.headers.link,
+    }))).resolves.toEqual({
+      url: 'https://publisher.example/selected',
+      statusCode: 418,
+      link: '</catalog>; rel="ai-catalog"',
+    });
+    await bodyClosed;
+  });
+
+  it('returns exact body bytes and reuses the same body read', async () => {
+    respond = (_request, response) => response.end('raw');
+    const body = await fetchHttpsResource(new URL('https://publisher.example/'), fetchOptions, (response) => {
+      const firstRead = response.readBody();
+      expect(response.readBody()).toBe(firstRead);
+      return firstRead;
+    });
+    expect(body).toEqual(Buffer.from('raw'));
+  });
+
+  it('keeps callback work inside the deadline even when it does not read the body', async () => {
+    respond = (_request, response) => {
+      response.writeHead(200);
+      response.flushHeaders();
+    };
+    await expect(fetchHttpsResource(
+      new URL('https://publisher.example/'),
+      { ...fetchOptions, timeoutMs: 50 },
+      () => new Promise<never>(() => {}),
+    )).rejects.toThrow('timeoutMs');
+  });
+
+  it('checks elapsed time after synchronous consumption', async () => {
+    respond = (_request, response) => response.end();
+    await expect(fetchHttpsResource(
+      new URL('https://publisher.example/'),
+      { ...fetchOptions, timeoutMs: 50 },
+      () => {
+        const start = performance.now();
+        while (performance.now() - start < 60) { /* Simulate synchronous parsing. */ }
+      },
+    )).rejects.toThrow('timeoutMs');
+  });
+
+  it('handles cancellation during synchronous consumption without leaving a rejected promise unhandled', async () => {
+    const controller = new AbortController();
+    const reason = new Error('Cancelled during callback');
+    respond = (_request, response) => response.end();
+    await expect(fetchHttpsResource(
+      new URL('https://publisher.example/'),
+      { ...fetchOptions, signal: controller.signal },
+      () => {
+        controller.abort(reason);
+        return Promise.reject(reason);
+      },
+    )).rejects.toBe(reason);
+  });
+
+  it('preserves a caller cancellation reason that is itself a transport error', async () => {
+    const controller = new AbortController();
+    const reason = new HttpFetchError('Caller cancellation');
+    controller.abort(reason);
+    await expect(resolveDidWeb('did:web:publisher.example', { ...options, signal: controller.signal })).rejects.toBe(reason);
   });
 });
