@@ -302,3 +302,17 @@ The SDK currently implements the exact, case-sensitive `sha256`, `sha384`, and `
 `Buffer` values and `Uint8Array` subviews are accepted. Shared or detached backing buffers are rejected because they cannot provide a stable byte view for the check. Wrong JavaScript argument types and shared or detached byte views throw `TypeError`.
 
 A `match` result establishes only equality between caller-supplied bytes and a declared digest. It does not establish who made the declaration, whether the digest is authoritative, or whether the content is trustworthy.
+
+## Create a digest
+
+`createDigest(value, algorithm?)` returns an artifact digest in `algorithm:lowercase-hex` form. The algorithm defaults to `sha256`; `sha384` and `sha512` are also supported:
+
+```ts
+import { createDigest } from 'ai-catalog-sdk/verification';
+
+const artifactDigest = createDigest(artifactBytes);
+const inlineDigest = createDigest(entry.data);
+const sha384Digest = createDigest(artifactBytes, 'sha384');
+```
+
+A `Uint8Array` or `Buffer` is hashed as its exact byte range. Other logical JSON values are JCS-canonicalized before hashing. Strings are JSON string values, including their JSON quotes and escapes; ordinary arrays are JSON arrays. To hash text as raw bytes, encode it with `TextEncoder` first.

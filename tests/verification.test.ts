@@ -3,6 +3,7 @@ import { createHash as createNodeHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { JsonValue } from '../src/index.js';
 
 const backend = vi.hoisted(() => ({ failure: undefined as unknown }));
 
@@ -19,7 +20,9 @@ vi.mock('node:crypto', async (importOriginal) => {
 
 import {
   checkDigest,
+  createDigest,
   DigestAlgorithmUnavailableError,
+  type DigestAlgorithm,
 } from '../src/verification.js';
 
 const emptySha256 =
@@ -33,6 +36,68 @@ const abcSha512 =
 
 afterEach(() => {
   backend.failure = undefined;
+});
+
+describe('createDigest', () => {
+  it('defaults to SHA-256 and formats a fixed byte vector', () => {
+    expect(createDigest(new TextEncoder().encode('abc'))).toBe(abcSha256);
+  });
+
+  it.each([
+    ['sha256', abcSha256],
+    ['sha384', abcSha384],
+    ['sha512', abcSha512],
+  ] as const)('creates a fixed %s digest', (algorithm, expected) => {
+    expect(createDigest(Buffer.from('abc'), algorithm)).toBe(expected);
+  });
+
+  it('hashes byte subviews and cross-realm byte arrays without JSON encoding', () => {
+    const backing = new Uint8Array([255, 97, 98, 99, 0]);
+    expect(createDigest(backing.subarray(1, 4))).toBe(abcSha256);
+    expect(createDigest(runInNewContext('new Uint8Array([97, 98, 99])')))
+      .toBe(abcSha256);
+  });
+
+  it('canonicalizes object keys, strings, and ordinary arrays as JSON values', () => {
+    const cases: [JsonValue, string][] = [
+      [{ b: 2, a: 1 }, '{"a":1,"b":2}'],
+      ['abc', '"abc"'],
+      ['{"a":1}', '"{\\"a\\":1}"'],
+      [[97, 98, 99], '[97,98,99]'],
+    ];
+    for (const [value, canonicalJson] of cases) {
+      const expected = `sha256:${createNodeHash('sha256')
+        .update(canonicalJson)
+        .digest('hex')}`;
+      expect(createDigest(value)).toBe(expected);
+    }
+  });
+
+  it('rejects invalid JSON values and unstable byte storage', () => {
+    expect(() => createDigest(Number.NaN)).toThrow(TypeError);
+    const detached = new Uint8Array([1]);
+    structuredClone(detached.buffer, { transfer: [detached.buffer] });
+    expect(() => createDigest(detached)).toThrow(TypeError);
+    expect(() => createDigest(new Uint8Array(new SharedArrayBuffer(1))))
+      .toThrow(TypeError);
+  });
+
+  it('rejects unsupported algorithm arguments', () => {
+    expect(() => createDigest(null, 'md5' as DigestAlgorithm)).toThrow(TypeError);
+  });
+
+  it('preserves the algorithm and cause when hashing is unavailable', () => {
+    const cause = new Error('backend failure');
+    backend.failure = cause;
+    let thrown: unknown;
+    try {
+      createDigest(Buffer.from('abc'), 'sha384');
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(DigestAlgorithmUnavailableError);
+    expect(thrown).toMatchObject({ algorithm: 'sha384', cause });
+  });
 });
 
 describe('checkDigest', () => {

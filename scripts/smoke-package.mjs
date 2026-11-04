@@ -90,7 +90,7 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { CatalogParseError, CatalogValidationError, implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
-import { canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryArtifactBinding, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createCatalogSignaturePayload, createTrustManifestSignaturePayload } from ${JSON.stringify(`${pkg.name}/verification`)};
+import { canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryArtifactBinding, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload } from ${JSON.stringify(`${pkg.name}/verification`)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
 const value = { specVersion: '1.0', entries: [] };
@@ -146,6 +146,20 @@ assert.deepEqual(catalogPayload.extension, payloadCatalog.extension);
 const manifestPayload = JSON.parse(decode(createTrustManifestSignaturePayload({ contributor: 'did:example:alice', signature: { ...signatureMetadata, jws: 'excluded' }, additionalSignatures: null })));
 assert.deepEqual(manifestPayload, { contributor: 'did:example:alice', signature: signatureMetadata });
 assert.equal(checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855').status, 'match');
+assert.equal(createDigest(new Uint8Array()), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+const canonicalDigest = 'sha256:43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777';
+assert.equal(createDigest({ b: 2, a: 1 }), canonicalDigest);
+assert.equal(createDigest({ a: 1, b: 2 }), canonicalDigest);
+assert.equal(checkDigest(new TextEncoder().encode('{"a":1,"b":2}'), canonicalDigest).status, 'match');
+const stringDigest = 'sha256:' + createHash('sha256').update('"abc"').digest('hex');
+assert.equal(createDigest('abc'), stringDigest);
+assert.notEqual(stringDigest, createDigest(new TextEncoder().encode('abc')));
+assert.equal(checkDigest(new TextEncoder().encode('"abc"'), stringDigest).status, 'match');
+assert.equal(checkDigest(new TextEncoder().encode('abc'), stringDigest).status, 'mismatch');
+const sha384Digest = createDigest(Buffer.from('abc'), 'sha384');
+assert.ok(sha384Digest.startsWith('sha384:'));
+assert.equal(checkDigest(Buffer.from('abc'), sha384Digest).status, 'match');
+
 const keys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 function createJws({ payload, typ }, representation = 'compact', headerFields = {}) {
   const protectedSegment = Buffer.from(JSON.stringify({ alg: 'ES256', typ, ...headerFields })).toString('base64url');
@@ -312,9 +326,11 @@ import {
   checkCatalogSignature,
   checkDigest,
   checkTrustManifestSignature,
+  createDigest,
   createCatalogSignaturePayload,
   createTrustManifestSignaturePayload,
   DigestAlgorithmUnavailableError,
+  type DigestAlgorithm,
   type DigestCheckResult,
     type CatalogEntryArtifactBindingCheckResult,
   type CatalogEntryCheckOptions,
@@ -356,6 +372,12 @@ const schema: JsonSchema = aiCatalogJsonSchema;
 const digestResult: DigestCheckResult = checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
 const canonicalBytes: Uint8Array = canonicalizeJsonValueToBytes({ b: 2, a: 1 });
 const metadata = { profile: 'custom-v1', issuedAt: '2026-08-31T00:00:00Z' };
+const digestAlgorithm: DigestAlgorithm = 'sha384';
+const generatedDigest: string = createDigest(new Uint8Array(), digestAlgorithm);
+const jsonDigest: string = createDigest({ b: 2, a: 1 });
+const unionDigest: string = createDigest({} as Uint8Array | JsonValue);
+// @ts-expect-error Digest creation supports the SDK's implemented algorithms.
+createDigest(new Uint8Array(), 'md5');
 const signature: Signature = { ...metadata, signer: 'did:example:alice', jws: 'protected..signature' };
 // @ts-expect-error A completed Signature requires jws.
 const incompleteSignature: Signature = { ...metadata, signer: 'did:example:alice' };
@@ -445,6 +467,7 @@ void pluginType; void entriesWithData; void entriesWithUrl; void schema; void un
 void catalogSignaturePayload; void signaturePayload; void presigningPayload; void signatureCheck; void catalogSignatureCheck;
 void dataBindingCheck; void urlBindingCheck; void unionBindingCheck; void dataCheck; void configuredDataCheck;
 void urlCheck; void configuredUrlCheck; void rawSchema;
+void generatedDigest; void jsonDigest; void unionDigest;
 `,
   );
   await writeFile(
