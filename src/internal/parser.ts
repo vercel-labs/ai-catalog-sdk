@@ -6,7 +6,6 @@ import {
   type AICatalog,
   type Attestation,
   type CatalogEntry,
-  type CatalogIssue,
   type HostInfo,
   type ParseResult,
   type ProvenanceLink,
@@ -14,111 +13,20 @@ import {
   type TrustSchema,
 } from '../types.js';
 import { preflightJsonValue } from './json-value.js';
+import { IssueCollector, issue, type Path } from './issues.js';
 import {
   aiCatalogEnvelopeSchema,
   catalogEntryEnvelopeSchema,
-  concreteAttestationSchema,
-  concreteProvenanceLinkSchema,
+  parsedAttestationSchema,
+  parsedProvenanceLinkSchema,
   hostInfoEnvelopeSchema,
   stringItemSchema,
   trustManifestEnvelopeSchema,
   trustSchemaEnvelopeSchema,
 } from './schemas.js';
 
-const MAX_ISSUES = 100;
-
-type Path = readonly (string | number)[];
-
 const hasOwn = (value: object, key: PropertyKey): boolean =>
   Object.hasOwn(value, key);
-
-function issue(code: string, path: Path, message: string): CatalogIssue {
-  return { code, path, message };
-}
-
-function stableZodIssue(raw: z.core.$ZodIssue, prefix: Path): CatalogIssue {
-  const rawPath = raw.path.filter(
-    (part): part is string | number =>
-      typeof part === 'string' || typeof part === 'number',
-  );
-  const path = [...prefix, ...rawPath];
-
-  switch (raw.code) {
-    case 'invalid_type':
-      return issue(
-        'invalid_type',
-        path,
-        'The value is not the required JSON type.',
-      );
-    case 'invalid_format':
-      return issue(
-        'invalid_value',
-        path,
-        'The string does not use the required format.',
-      );
-    case 'invalid_union':
-      return issue(
-        'invalid_value',
-        path,
-        'The value does not match any allowed structure.',
-      );
-    case 'too_big':
-    case 'too_small':
-      return issue(
-        'invalid_value',
-        path,
-        'The value is outside the allowed range.',
-      );
-    default:
-      return issue(
-        'invalid_value',
-        path,
-        'The value violates an AI Catalog structural rule.',
-      );
-  }
-}
-
-class IssueCollector {
-  readonly issues: CatalogIssue[] = [];
-  cause: unknown;
-  truncated = false;
-
-  get stopped(): boolean {
-    return this.truncated;
-  }
-
-  add(catalogIssue: CatalogIssue, cause?: unknown): void {
-    if (this.truncated) return;
-    if (this.cause === undefined && cause !== undefined) this.cause = cause;
-    if (this.issues.length < MAX_ISSUES) {
-      this.issues.push(catalogIssue);
-      return;
-    }
-    this.truncated = true;
-  }
-
-  addZod(error: z.ZodError, prefix: Path): void {
-    if (this.cause === undefined) this.cause = error;
-    for (const rawIssue of error.issues) {
-      this.add(stableZodIssue(rawIssue, prefix));
-      if (this.stopped) break;
-    }
-  }
-
-  finish(): CatalogParseError | undefined {
-    if (this.truncated) {
-      this.issues.push(
-        issue(
-          'diagnostics_truncated',
-          [],
-          'Additional validation issues were omitted.',
-        ),
-      );
-    }
-    if (this.issues.length === 0) return undefined;
-    return new CatalogParseError(this.issues, this.cause);
-  }
-}
 
 function parseStringArray(
   values: readonly unknown[],
@@ -206,7 +114,7 @@ function parseTrustManifest(
   if (hasOwn(result.data, 'attestations')) {
     const parsed = parseItemArray<Attestation>(
       result.data.attestations as unknown[],
-      concreteAttestationSchema as z.ZodType<Attestation>,
+      parsedAttestationSchema as z.ZodType<Attestation>,
       [...path, 'attestations'],
       collector,
     );
@@ -217,7 +125,7 @@ function parseTrustManifest(
   if (hasOwn(result.data, 'provenance')) {
     const parsed = parseItemArray<ProvenanceLink>(
       result.data.provenance as unknown[],
-      concreteProvenanceLinkSchema as z.ZodType<ProvenanceLink>,
+      parsedProvenanceLinkSchema as z.ZodType<ProvenanceLink>,
       [...path, 'provenance'],
       collector,
     );
@@ -263,113 +171,33 @@ function parseCatalogEntryValue(
     else valid = false;
   }
   if (collector.stopped) return undefined;
-  if (hasOwn(result.data, 'trustManifest')) {
-    const manifest = parseTrustManifest(
-      result.data.trustManifest,
-      [...path, 'trustManifest'],
-      collector,
-    );
-    if (manifest) {
-      output.trustManifest = manifest;
-      const { subject } = manifest;
-      if (subject && subject.identifier !== output.identifier) {
+  if (hasOwn(result.data, 'trustManifests')) {
+    const manifests: TrustManifest[] = [];
+    const values = result.data.trustManifests as unknown[];
+    for (
+      let index = 0;
+      index < values.length && !collector.stopped;
+      index += 1
+    ) {
+      const manifestPath = [...path, 'trustManifests', index];
+      const manifest = parseTrustManifest(
+        values[index],
+        manifestPath,
+        collector,
+      );
+      if (!manifest) {
         valid = false;
-        collector.add(
-          issue(
-            'inconsistent_value',
-            [...path, 'trustManifest', 'subject', 'identifier'],
-            'Trust Manifest subject.identifier must match the catalog entry identifier.',
-          ),
-        );
+        continue;
       }
-      if (
-        subject &&
-        hasOwn(manifest, 'signature') &&
-        (hasOwn(subject, 'version') !== hasOwn(output, 'version') ||
-          subject.version !== output.version)
-      ) {
-        valid = false;
-        collector.add(
-          issue(
-            'inconsistent_value',
-            [...path, 'trustManifest', 'subject', 'version'],
-            'Signed Trust Manifest subject.version and entry version must both be absent or both be present and exactly equal.',
-          ),
-        );
-      }
-      if (subject && subject.type !== output.type) {
-        valid = false;
-        collector.add(
-          issue(
-            'inconsistent_value',
-            [...path, 'trustManifest', 'subject', 'type'],
-            'Trust Manifest subject.type must match the catalog entry type.',
-          ),
-        );
-      }
-      if (subject?.url !== undefined) {
-        if (!('url' in output) || subject.url !== output.url) {
-          valid = false;
-          collector.add(
-            issue(
-              'inconsistent_value',
-              [...path, 'trustManifest', 'subject', 'url'],
-              "Trust Manifest subject.url must match the containing entry's url.",
-            ),
-          );
-        }
-      }
-    } else valid = false;
+      manifests.push(manifest);
+    }
+    output.trustManifests = manifests;
   }
   return valid ? output : undefined;
 }
 
 function normalizedDecimal(value: string): string {
   return value.replace(/^0+(?=[0-9])/, '');
-}
-
-function validateEntryUniqueness(
-  indexedEntries: readonly { entry: CatalogEntry; index: number }[],
-  collector: IssueCollector,
-): void {
-  const seen = new Map<
-    string,
-    { unversioned: boolean; versions: Set<string> }
-  >();
-  for (
-    let index = 0;
-    index < indexedEntries.length && !collector.stopped;
-    index += 1
-  ) {
-    const indexedEntry = indexedEntries[index];
-    if (!indexedEntry) continue;
-    const { entry, index: inputIndex } = indexedEntry;
-    const state = seen.get(entry.identifier) ?? {
-      unversioned: false,
-      versions: new Set<string>(),
-    };
-    const version = entry.version;
-    const duplicate =
-      version === undefined
-        ? state.unversioned || state.versions.size > 0
-        : state.unversioned || state.versions.has(version);
-    if (duplicate) {
-      collector.add(
-        issue(
-          'duplicate_entry',
-          [
-            'entries',
-            inputIndex,
-            version === undefined ? 'identifier' : 'version',
-          ],
-          'Catalog entry identifiers and versions must be unique.',
-        ),
-      );
-    }
-    if (version === undefined) state.unversioned = true;
-    else state.versions.add(version);
-    seen.set(entry.identifier, state);
-  }
 }
 
 function parseCatalogValue(
@@ -409,7 +237,6 @@ function parseCatalogValue(
   if (collector.stopped) return undefined;
 
   const entries: CatalogEntry[] = [];
-  const indexedEntries: { entry: CatalogEntry; index: number }[] = [];
   for (
     let index = 0;
     index < result.data.entries.length && !collector.stopped;
@@ -422,11 +249,9 @@ function parseCatalogValue(
     );
     if (entry) {
       entries.push(entry);
-      indexedEntries.push({ entry, index });
     } else valid = false;
   }
   output.entries = entries;
-  validateEntryUniqueness(indexedEntries, collector);
   return valid ? output : undefined;
 }
 
@@ -447,7 +272,7 @@ function safeParseWith<T>(
   }
   const collector = new IssueCollector();
   const data = parser(input, collector);
-  const error = collector.finish();
+  const error = collector.finish(CatalogParseError);
   if (error || data === undefined) {
     return {
       success: false,
@@ -464,7 +289,7 @@ function safeParseWith<T>(
 /**
  * Validates an already-parsed JSON value as an AI Catalog.
  *
- * Applies the SDK's defensive input checks and catalog-wide validation.
+ * Applies the SDK's defensive input checks and supported-version handling.
  *
  * @param input - The already-parsed JSON value to validate.
  * @returns A {@link ParseResult} containing the validated catalog or validation
@@ -502,6 +327,15 @@ export function safeParseCatalogEntry(
 ): ParseResult<CatalogEntry> {
   return safeParseWith(input, (entryInput, collector) =>
     parseCatalogEntryValue(entryInput, [], collector),
+  );
+}
+
+/** Internal manifest validation with the root parsers' bounded diagnostics. */
+export function safeParseTrustManifest(
+  input: unknown,
+): ParseResult<TrustManifest> {
+  return safeParseWith(input, (manifestInput, collector) =>
+    parseTrustManifest(manifestInput, [], collector),
   );
 }
 

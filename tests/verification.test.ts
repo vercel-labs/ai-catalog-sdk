@@ -3,6 +3,7 @@ import { createHash as createNodeHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { JsonValue } from '../src/index.js';
 
 const backend = vi.hoisted(() => ({ failure: undefined as unknown }));
 
@@ -19,7 +20,9 @@ vi.mock('node:crypto', async (importOriginal) => {
 
 import {
   checkDigest,
+  createDigest,
   DigestAlgorithmUnavailableError,
+  type DigestAlgorithm,
 } from '../src/verification.js';
 
 const emptySha256 =
@@ -33,6 +36,68 @@ const abcSha512 =
 
 afterEach(() => {
   backend.failure = undefined;
+});
+
+describe('createDigest', () => {
+  it('defaults to SHA-256 and formats a fixed byte vector', () => {
+    expect(createDigest(new TextEncoder().encode('abc'))).toBe(abcSha256);
+  });
+
+  it.each([
+    ['sha256', abcSha256],
+    ['sha384', abcSha384],
+    ['sha512', abcSha512],
+  ] as const)('creates a fixed %s digest', (algorithm, expected) => {
+    expect(createDigest(Buffer.from('abc'), algorithm)).toBe(expected);
+  });
+
+  it('hashes byte subviews and cross-realm byte arrays without JSON encoding', () => {
+    const backing = new Uint8Array([255, 97, 98, 99, 0]);
+    expect(createDigest(backing.subarray(1, 4))).toBe(abcSha256);
+    expect(createDigest(runInNewContext('new Uint8Array([97, 98, 99])')))
+      .toBe(abcSha256);
+  });
+
+  it('canonicalizes object keys, strings, and ordinary arrays as JSON values', () => {
+    const cases: [JsonValue, string][] = [
+      [{ b: 2, a: 1 }, '{"a":1,"b":2}'],
+      ['abc', '"abc"'],
+      ['{"a":1}', '"{\\"a\\":1}"'],
+      [[97, 98, 99], '[97,98,99]'],
+    ];
+    for (const [value, canonicalJson] of cases) {
+      const expected = `sha256:${createNodeHash('sha256')
+        .update(canonicalJson)
+        .digest('hex')}`;
+      expect(createDigest(value)).toBe(expected);
+    }
+  });
+
+  it('rejects invalid JSON values and unstable byte storage', () => {
+    expect(() => createDigest(Number.NaN)).toThrow(TypeError);
+    const detached = new Uint8Array([1]);
+    structuredClone(detached.buffer, { transfer: [detached.buffer] });
+    expect(() => createDigest(detached)).toThrow(TypeError);
+    expect(() => createDigest(new Uint8Array(new SharedArrayBuffer(1))))
+      .toThrow(TypeError);
+  });
+
+  it('rejects unsupported algorithm arguments', () => {
+    expect(() => createDigest(null, 'md5' as DigestAlgorithm)).toThrow(TypeError);
+  });
+
+  it('preserves the algorithm and cause when hashing is unavailable', () => {
+    const cause = new Error('backend failure');
+    backend.failure = cause;
+    let thrown: unknown;
+    try {
+      createDigest(Buffer.from('abc'), 'sha384');
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(DigestAlgorithmUnavailableError);
+    expect(thrown).toMatchObject({ algorithm: 'sha384', cause });
+  });
 });
 
 describe('checkDigest', () => {
@@ -58,6 +123,96 @@ describe('checkDigest', () => {
     expect(checkDigest(new TextEncoder().encode('abd'), digest)).toEqual({
       status: 'mismatch',
     });
+  });
+
+  it.each(['sha256', 'sha384', 'sha512'] as const)(
+    'checks canonical JSON with %s and detects a different value',
+    (algorithm) => {
+      const expected = `${algorithm}:${createNodeHash(algorithm)
+        .update('{"a":1,"b":2}')
+        .digest('hex')}`;
+      const value = Object.freeze({ b: 2, a: 1 });
+      expect(checkDigest(value, expected)).toEqual({ status: 'match' });
+      expect(checkDigest({ a: 1, b: 3 }, expected)).toEqual({
+        status: 'mismatch',
+      });
+    },
+  );
+
+  it('checks strings, ordinary arrays, and primitives as JSON values', () => {
+    const cases: [JsonValue, string][] = [
+      ['abc', '"abc"'],
+      ['{"a":1}', '"{\\"a\\":1}"'],
+      [[97, 98, 99], '[97,98,99]'],
+      [null, 'null'],
+      [true, 'true'],
+      [false, 'false'],
+      [-0, '0'],
+      [1.5, '1.5'],
+    ];
+    for (const [value, canonicalJson] of cases) {
+      const expected = `sha256:${createNodeHash('sha256')
+        .update(canonicalJson)
+        .digest('hex')}`;
+      expect(checkDigest(value, expected)).toEqual({ status: 'match' });
+    }
+    expect(checkDigest('abc', abcSha256)).toEqual({ status: 'mismatch' });
+    expect(checkDigest([97, 98, 99], abcSha256)).toEqual({
+      status: 'mismatch',
+    });
+  });
+
+  it('rejects invalid JSON without executing accessors or proxy traps', () => {
+    const forbidden = vi.fn(() => {
+      throw new Error('must not execute');
+    });
+    const accessor = Object.defineProperty({}, 'value', {
+      enumerable: true,
+      get: forbidden,
+    });
+    const proxy = new Proxy(
+      {},
+      {
+        get: forbidden,
+        getPrototypeOf: forbidden,
+        getOwnPropertyDescriptor: forbidden,
+        ownKeys: forbidden,
+      },
+    );
+    const cyclic: JsonValue[] = [];
+    cyclic.push(cyclic);
+    for (const value of [
+      undefined,
+      Number.NaN,
+      '\ud800',
+      new Date(),
+      Array(1),
+      cyclic,
+      accessor,
+      proxy,
+    ]) {
+      expect(() => checkDigest(value as JsonValue, emptySha256)).toThrow(
+        TypeError,
+      );
+    }
+    expect(forbidden).not.toHaveBeenCalled();
+  });
+
+  it('validates the value before classifying malformed or unsupported digests', () => {
+    let tooDeep: JsonValue = null;
+    for (let index = 0; index < 129; index += 1) tooDeep = [tooDeep];
+    const detached = new Uint8Array([1]);
+    structuredClone(detached.buffer, { transfer: [detached.buffer] });
+    const shared = new Uint8Array(new SharedArrayBuffer(1));
+    for (const digest of ['sha256:abc', 'future:a']) {
+      for (const value of [Number.NaN, detached, shared]) {
+        expect(() => checkDigest(value, digest)).toThrow(TypeError);
+      }
+      expect(() => checkDigest(tooDeep, digest)).toThrow(RangeError);
+    }
+    expect(() => checkDigest(Array(100_000).fill(null), emptySha256)).toThrow(
+      RangeError,
+    );
   });
 
   it('accepts Buffer, cross-realm arrays, and the exact range of subviews', () => {
@@ -176,5 +331,25 @@ describe('checkDigest', () => {
       status: 'algorithm_not_implemented',
       algorithm: 'sha3-256',
     });
+  });
+
+  it('preserves JSON digest backend failures and skips hashing invalid declarations', () => {
+    const cause = new Error('backend failure');
+    backend.failure = cause;
+    expect(checkDigest({ a: 1 }, 'sha256:abc')).toEqual({
+      status: 'invalid_digest',
+    });
+    expect(checkDigest({ a: 1 }, 'future:a')).toEqual({
+      status: 'algorithm_not_implemented',
+      algorithm: 'future',
+    });
+    let thrown: unknown;
+    try {
+      checkDigest({ a: 1 }, abcSha384);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(DigestAlgorithmUnavailableError);
+    expect(thrown).toMatchObject({ algorithm: 'sha384', cause });
   });
 });

@@ -44,9 +44,9 @@ const moduleSource = `import type { JsonSchema } from '../json-schema-types.js';
  * \`ai-catalog-sdk/schema/ai-catalog.schema.json\` package export.
  * Format validation depends on the validator and its configuration.
  *
- * Unlike \`parseCatalog()\`, it does not require a supported specification major,
- * enforce entry uniqueness, compare a Trust Manifest subject with its
- * containing entry, or apply defensive input checks and resource limits.
+ * It does not enforce catalog entry uniqueness, subject/entry correspondence,
+ * signer/contributor equality, or signature timestamp ordering. It also does
+ * not apply the SDK parsers’ supported-major check or defensive input limits.
  */
 export const aiCatalogJsonSchema: JsonSchema = ${JSON.stringify(schema, null, 2)};
 `;

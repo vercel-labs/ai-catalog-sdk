@@ -1,115 +1,108 @@
 import { describe, expect, it } from 'vitest';
 
-import type { JsonValue, TrustManifest } from '../src/index.js';
+import type { TrustManifest, JsonValue } from '../src/index.js';
 import { createTrustManifestSignaturePayload } from '../src/verification.js';
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
-
+const metadata = {
+  signer: 'did:example:alice',
+  profile: 'custom-profile',
+  issuedAt: '2026-08-31T00:00:00Z',
+};
 const manifestWithFutureDepth = (depth: number): TrustManifest => {
   let future: JsonValue = null;
-  for (let index = 0; index < depth; index += 1) {
-    future = { next: future };
-  }
-  return { identity: 'did:example:alice', future } as TrustManifest;
+  for (let index = 0; index < depth; index += 1) future = { next: future };
+  return { contributor: 'did:example:alice', future } as TrustManifest;
 };
 
 describe('createTrustManifestSignaturePayload', () => {
-  it('omits only the own top-level case-sensitive signature member', () => {
+  it('omits only immediate signature.jws and additionalSignatures while retaining metadata', () => {
     const manifest = {
-      identity: 'did:example:alice',
-      signature: 'detached-jws',
+      ...{ contributor: 'did:example:alice' },
+      signature: { ...metadata, jws: 'detached-jws', future: true },
+      additionalSignatures: [{ anything: true }],
       Signature: 'case-sensitive',
-      extensions: {
-        'example.com/trust': { signature: 'nested-extension', z: 1 },
+      future: {
+        signature: { jws: 'nested' },
+        additionalSignatures: ['nested'],
       },
-      future: { signature: 'nested-future' },
     } as TrustManifest & Record<string, JsonValue>;
-
-    expect(decode(createTrustManifestSignaturePayload(manifest))).toBe(
-      '{"Signature":"case-sensitive","extensions":{"example.com/trust":' +
-        '{"signature":"nested-extension","z":1}},"future":' +
-        '{"signature":"nested-future"},"identity":"did:example:alice"}',
+    const payload = JSON.parse(
+      decode(createTrustManifestSignaturePayload(manifest)),
     );
+    expect(payload).toEqual({
+      ...{ contributor: 'did:example:alice' },
+      signature: { ...metadata, future: true },
+      Signature: 'case-sensitive',
+      future: {
+        signature: { jws: 'nested' },
+        additionalSignatures: ['nested'],
+      },
+    });
+    expect(decode(createTrustManifestSignaturePayload(manifest))).toMatch(
+      /"issuedAt":"2026-08-31T00:00:00Z","profile":"custom-profile","signer":"did:example:alice"/,
+    );
+  });
+
+  it('accepts pre-sign metadata and produces the same payload after adding jws', () => {
+    const preSign = {
+      ...{ contributor: 'did:example:alice' },
+      signature: metadata,
+    };
+    const signed = {
+      ...preSign,
+      signature: { ...metadata, jws: 'detached-jws' },
+    };
+    expect(createTrustManifestSignaturePayload(signed)).toEqual(
+      createTrustManifestSignaturePayload(preSign),
+    );
+    const changed = {
+      ...signed,
+      signature: { ...signed.signature, profile: 'another-profile' },
+    };
+    expect(createTrustManifestSignaturePayload(changed)).not.toEqual(
+      createTrustManifestSignaturePayload(signed),
+    );
+  });
+
+  it('does not require a schema-valid document to create a payload', () => {
+    const manifest = { contributor: 'did:example:alice' };
+    expect(
+      JSON.parse(decode(createTrustManifestSignaturePayload(manifest))),
+    ).toEqual(manifest);
+  });
+
+  it('returns fresh bytes and preserves frozen null-prototype inputs', () => {
+    const manifest = Object.assign(Object.create(null), {
+      ...{ contributor: 'did:example:alice' },
+      signature: Object.freeze({ ...metadata, jws: 'detached-jws' }),
+    }) as TrustManifest;
+    Object.freeze(manifest);
+    const before = Object.getOwnPropertyDescriptors(manifest);
+    const first = createTrustManifestSignaturePayload(manifest);
+    const second = createTrustManifestSignaturePayload(manifest);
+    expect(first).not.toBe(second);
+    first[0] = 0;
+    expect(second[0]).toBe(123);
+    expect(Object.getOwnPropertyDescriptors(manifest)).toEqual(before);
   });
 
   it('preserves an own __proto__ member safely', () => {
     const manifest = JSON.parse(
-      '{"identity":"did:example:alice","signature":"detached-jws",' +
-        '"__proto__":{"signature":"nested"}}',
+      '{"contributor":"did:example:alice","signature":{"jws":"omitted"},"__proto__":{"signature":"nested"}}',
     ) as TrustManifest;
-
-    expect(decode(createTrustManifestSignaturePayload(manifest))).toBe(
-      '{"__proto__":{"signature":"nested"},"identity":"did:example:alice"}',
+    const payload = JSON.parse(
+      decode(createTrustManifestSignaturePayload(manifest)),
     );
-  });
-
-  it('produces identical payloads for signed and unsigned forms', () => {
-    const unsigned: TrustManifest = {
-      identity: 'did:example:alice',
-      issuedAt: '2026-08-31T00:00:00Z',
-      subject: {
-        identifier: 'example-artifact',
-        type: 'application/example',
-        digest: `sha256:${'a'.repeat(64)}`,
-      },
-    };
-    const signed: TrustManifest = {
-      ...unsigned,
-      signature: 'detached-jws',
-    };
-
-    expect(createTrustManifestSignaturePayload(signed)).toEqual(
-      createTrustManifestSignaturePayload(unsigned),
-    );
-  });
-
-  it('does not require schema-valid evidence to create a payload', () => {
-    const manifest: TrustManifest = { identity: 'did:example:alice' };
-    expect(decode(createTrustManifestSignaturePayload(manifest))).toBe(
-      '{"identity":"did:example:alice"}',
-    );
-  });
-
-  it('returns fresh bytes without mutating the manifest', () => {
-    const manifest: TrustManifest = {
-      identity: 'did:example:alice',
-      signature: 'detached-jws',
-      trustSchema: { identifier: 'example', version: '1' },
-    };
-    const before = structuredClone(manifest);
-
-    const first = createTrustManifestSignaturePayload(manifest);
-    const second = createTrustManifestSignaturePayload(manifest);
-
-    expect(first).not.toBe(second);
-    first[0] = 0;
-    expect(decode(second)).toBe(
-      '{"identity":"did:example:alice","trustSchema":' +
-        '{"identifier":"example","version":"1"}}',
-    );
-    expect(manifest).toEqual(before);
-  });
-
-  it('preserves frozen null-prototype inputs and their descriptors', () => {
-    const manifest = Object.assign(Object.create(null), {
-      identity: 'did:example:alice',
-      signature: 'detached-jws',
-      trustSchema: Object.freeze({ identifier: 'example', version: '1' }),
-    }) as TrustManifest;
-    Object.freeze(manifest);
-    const before = Object.getOwnPropertyDescriptors(manifest);
-
-    expect(decode(createTrustManifestSignaturePayload(manifest))).toBe(
-      '{"identity":"did:example:alice","trustSchema":' +
-        '{"identifier":"example","version":"1"}}',
-    );
-    expect(Object.getOwnPropertyDescriptors(manifest)).toEqual(before);
+    expect(Object.hasOwn(payload, '__proto__')).toBe(true);
+    expect(payload.__proto__).toEqual({ signature: 'nested' });
+    expect(payload.signature).toEqual({});
   });
 
   it('rejects top-level, nested, and signature accessors without reading them', () => {
     let reads = 0;
     const accessor = (key: string): TrustManifest => {
-      const manifest = { identity: 'did:example:alice' };
+      const manifest = { contributor: 'did:example:alice' };
       Object.defineProperty(manifest, key, {
         enumerable: true,
         get() {
@@ -119,7 +112,7 @@ describe('createTrustManifestSignaturePayload', () => {
       });
       return manifest;
     };
-    const nested = { identity: 'did:example:alice', future: {} };
+    const nested = { contributor: 'did:example:alice', future: {} };
     Object.defineProperty(nested.future, 'value', {
       enumerable: true,
       get() {
@@ -128,9 +121,9 @@ describe('createTrustManifestSignaturePayload', () => {
       },
     });
 
-    expect(() => createTrustManifestSignaturePayload(accessor('future'))).toThrow(
-      TypeError,
-    );
+    expect(() =>
+      createTrustManifestSignaturePayload(accessor('future')),
+    ).toThrow(TypeError);
     expect(() =>
       createTrustManifestSignaturePayload(nested as TrustManifest),
     ).toThrow(TypeError);
@@ -166,17 +159,19 @@ describe('createTrustManifestSignaturePayload', () => {
       );
 
     expect(() =>
-      createTrustManifestSignaturePayload(proxied() as unknown as TrustManifest),
+      createTrustManifestSignaturePayload(
+        proxied() as unknown as TrustManifest,
+      ),
     ).toThrow(TypeError);
     expect(() =>
       createTrustManifestSignaturePayload({
-        identity: 'did:example:alice',
+        contributor: 'did:example:alice',
         future: proxied(),
       } as unknown as TrustManifest),
     ).toThrow(TypeError);
     expect(() =>
       createTrustManifestSignaturePayload({
-        identity: 'did:example:alice',
+        contributor: 'did:example:alice',
         signature: proxied(),
       } as unknown as TrustManifest),
     ).toThrow(TypeError);
@@ -184,33 +179,38 @@ describe('createTrustManifestSignaturePayload', () => {
   });
 
   it('rejects non-enumerable and non-JSON signature members', () => {
-    const hidden = { identity: 'did:example:alice' };
+    const hidden = { contributor: 'did:example:alice' };
     Object.defineProperty(hidden, 'signature', {
       value: 'detached-jws',
     });
-    expect(() => createTrustManifestSignaturePayload(hidden)).toThrow(TypeError);
+    expect(() => createTrustManifestSignaturePayload(hidden)).toThrow(
+      TypeError,
+    );
 
     expect(() =>
       createTrustManifestSignaturePayload({
-        identity: 'did:example:alice',
+        contributor: 'did:example:alice',
         signature: () => 'detached-jws',
       } as unknown as TrustManifest),
     ).toThrow(TypeError);
   });
 
-  it.each([null, 'manifest', 1, true, []])(
-    'rejects a non-object manifest root: %#',
-    (value) => {
-      expect(() =>
-        createTrustManifestSignaturePayload(value as unknown as TrustManifest),
-      ).toThrow(TypeError);
-    },
-  );
+  it.each([
+    null,
+    'manifest',
+    1,
+    true,
+    [],
+  ])('rejects a non-object manifest root: %#', (value) => {
+    expect(() =>
+      createTrustManifestSignaturePayload(value as unknown as TrustManifest),
+    ).toThrow(TypeError);
+  });
 
   it('rejects a representative retained non-JSON member', () => {
     expect(() =>
       createTrustManifestSignaturePayload({
-        identity: 'did:example:alice',
+        contributor: 'did:example:alice',
         future: Number.NaN,
       } as unknown as TrustManifest),
     ).toThrow(TypeError);

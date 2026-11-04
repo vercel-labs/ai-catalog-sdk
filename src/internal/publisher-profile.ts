@@ -3,8 +3,8 @@ import { createPublicKey, type KeyObject } from 'node:crypto';
 import { isIP } from 'node:net';
 import { domainToASCII } from 'node:url';
 
-import type { TrustManifest } from '../types.js';
-import { isRfc3339DateTime, RFC3339_PATTERN_SOURCE } from './rfc3339.js';
+import type { Signature, TrustManifest } from '../types.js';
+import { compareRfc3339DateTimes, isRfc3339DateTime } from './rfc3339.js';
 
 export class IssuerCheckError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -17,9 +17,11 @@ const uriCharacter = "(?:[A-Za-z0-9._~!$&'()*+,;=:@/-]|%[0-9A-Fa-f]{2})";
 const airTail = new RegExp(`^${uriCharacter}+$`);
 const fragmentPattern = /^(?:[A-Za-z0-9._~!$&'()*+,;=:@/?-]|%[0-9A-Fa-f]{2})+$/;
 const didCharacter = '(?:[A-Za-z0-9._-]|%[0-9A-Fa-f]{2})';
-const didPattern = new RegExp(`^did:[a-z0-9]+:(?:${didCharacter}|:)*${didCharacter}$`);
-const uriReferencePattern = /^(?:[A-Za-z0-9._~!$&'()*+,;=:@/?#-]|%[0-9A-Fa-f]{2})*$/;
-const rfc3339Pattern = new RegExp(RFC3339_PATTERN_SOURCE);
+const didPattern = new RegExp(
+  `^did:[a-z0-9]+:(?:${didCharacter}|:)*${didCharacter}$`,
+);
+const uriReferencePattern =
+  /^(?:[A-Za-z0-9._~!$&'()*+,;=:@/?#-]|%[0-9A-Fa-f]{2})*$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -35,11 +37,18 @@ function validPublisherDomain(domain: string): boolean {
     !/^[a-z0-9.-]+$/.test(domain) ||
     domainToASCII(domain) !== domain ||
     isIP(domain) !== 0
-  ) return false;
+  )
+    return false;
 
-  if (!domain.split('.').every((label) =>
-    label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label),
-  )) return false;
+  if (
+    !domain
+      .split('.')
+      .every(
+        (label) =>
+          label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label),
+      )
+  )
+    return false;
 
   // WHATWG also recognizes shortened, hexadecimal, and integer IPv4 forms.
   try {
@@ -49,17 +58,8 @@ function validPublisherDomain(domain: string): boolean {
   }
 }
 
-/** Receives the invocation's already-captured, plain JSON manifest and header. */
-export function inspectPublisherProfile(
-  identifier: string,
-  manifest: TrustManifest,
-  header: Record<string, unknown>,
-): { identity: string; kid: string } | Error {
-  if (typeof identifier !== 'string' || !isRecord(manifest) || !isRecord(header)) {
-    throw new TypeError('Publisher Profile inputs must contain an identifier and JSON objects.');
-  }
-  const identity = own(manifest, 'identity');
-  if (typeof identity !== 'string') throw new TypeError('Trust Manifest identity must be a string.');
+/** Derives the publisher selected by the standard urn:air Publisher Profile. */
+export function publisherIdentityFor(identifier: string): string | undefined {
   const components = identifier.split(':');
   const publisher = components[2];
   if (
@@ -68,31 +68,43 @@ export function inspectPublisherProfile(
     publisher === undefined ||
     !validPublisherDomain(publisher) ||
     !components.slice(3).every((component) => airTail.test(component))
-  ) return new Error('Publisher verification requires a standard urn:air identifier and a lowercase domain publisher.');
-  if (identity !== `did:web:${publisher}`) {
-    return new Error('Trust Manifest identity must exactly equal the root did:web publisher identity.');
-  }
-  if (Object.hasOwn(manifest, 'identityType')) {
-    const identityType = own(manifest, 'identityType');
-    if (typeof identityType !== 'string') throw new TypeError('Trust Manifest identityType must be a string.');
-    if (identityType !== 'did') return new Error('Publisher Profile identityType must be did.');
-  }
-  const issuedAt = own(manifest, 'issuedAt');
-  if (!Object.hasOwn(manifest, 'issuedAt')) return new Error('A signed Trust Manifest requires issuedAt.');
-  if (typeof issuedAt !== 'string') throw new TypeError('Trust Manifest issuedAt must be a string.');
-  if (!isRfc3339DateTime(issuedAt)) return new Error('Trust Manifest issuedAt must be a valid RFC 3339 timestamp.');
-  if (Object.hasOwn(manifest, 'expiresAt')) {
-    const expiresAt = own(manifest, 'expiresAt');
-    if (typeof expiresAt !== 'string') throw new TypeError('Trust Manifest expiresAt must be a string.');
-    if (!isRfc3339DateTime(expiresAt)) return new Error('Trust Manifest expiresAt must be a valid RFC 3339 timestamp.');
-  }
+  )
+    return undefined;
+  return `did:web:${publisher}`;
+}
+
+/** Receives captured, structurally validated JSON manifest/header values. */
+export function inspectSignerProfile(
+  manifest: TrustManifest,
+  header: Record<string, unknown>,
+): { identity: string; kid: string } | Error {
+  const identity = manifest.contributor;
+  if (typeof identity !== 'string')
+    throw new TypeError('Trust Manifest contributor must be a string.');
+  if (
+    !identity.startsWith('did:web:') ||
+    !validPublisherDomain(identity.slice('did:web:'.length))
+  )
+    return new Error(
+      'The did:web Signer Profile requires a root DID with a supported lowercase domain.',
+    );
+  if (manifest.signature?.signer !== identity)
+    return new Error(
+      'The signature signer must exactly equal the contributor.',
+    );
   for (const parameter of ['b64', 'jku', 'jwk', 'x5u', 'x5c']) {
-    if (Object.hasOwn(header, parameter)) return new Error(`The Publisher Profile forbids protected ${parameter}.`);
+    if (Object.hasOwn(header, parameter))
+      return new Error(`The Signer Profile forbids protected ${parameter}.`);
   }
   const kid = own(header, 'kid');
-  if (typeof kid !== 'string' || !kid.startsWith(`${identity}#`) || !fragmentPattern.test(kid.slice(identity.length + 1))) {
-    return new Error('The protected kid must be the exact issuer DID followed by a non-empty URI fragment.');
-  }
+  if (
+    typeof kid !== 'string' ||
+    !kid.startsWith(`${identity}#`) ||
+    !fragmentPattern.test(kid.slice(identity.length + 1))
+  )
+    return new Error(
+      'The protected kid must be the exact signer DID followed by a non-empty URI fragment.',
+    );
   return { identity, kid };
 }
 
@@ -209,25 +221,53 @@ export function authorizePublisherKey(document: unknown, identity: string, kid: 
   return importPublisherKey(method, identity);
 }
 
-/** Compare accepted RFC 3339 instants without discarding sub-millisecond digits. */
-export function isManifestExpired(expiresAt: string, now: number): boolean {
-  if (typeof expiresAt !== 'string' || !isRfc3339DateTime(expiresAt)) throw new TypeError('expiresAt must be a valid RFC 3339 timestamp.');
-  if (!Number.isFinite(now) || !Number.isInteger(now) || Number.isNaN(new Date(now).getTime())) throw new TypeError('The current time must be a valid integer millisecond timestamp.');
-  const match = rfc3339Pattern.exec(expiresAt);
-  if (match === null) throw new TypeError('expiresAt must be a valid RFC 3339 timestamp.');
-  const offset = (match[8] === '-' ? -1 : 1) * (Number(match[9] ?? 0) * 60 + Number(match[10] ?? 0));
-  const second = Number(match[6]);
-  const instant = new Date(0);
-  instant.setUTCFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  instant.setUTCHours(Number(match[4]), Number(match[5]) - offset, Math.min(second, 59), 0);
-  const seconds = instant.getTime() / 1000;
-  const nowSeconds = Math.floor(now / 1000);
-  // UTC's leap second lies after :59 and before the following :00. JavaScript's
-  // wall clock cannot express that second, but it can order the adjacent times.
-  if (second === 60) return nowSeconds > seconds;
-  if (seconds !== nowSeconds) return seconds < nowSeconds;
-  const fraction = match[7] ?? '';
-  const nowFraction = String(now - nowSeconds * 1000).padStart(3, '0');
-  const width = Math.max(3, fraction.length);
-  return fraction.padEnd(width, '0') < nowFraction.padEnd(width, '0');
+/** Apply currentness only after authentication, sharing the invocation clock. */
+export function checkManifestTime(
+  signature: Signature,
+  now: number,
+  toleranceMs: number,
+): 'not_yet_valid' | 'expired' | undefined {
+  if (
+    !isRfc3339DateTime(signature.issuedAt) ||
+    (signature.expiresAt !== undefined &&
+      !isRfc3339DateTime(signature.expiresAt))
+  )
+    throw new TypeError(
+      'Signature timestamps must be valid RFC 3339 instants.',
+    );
+  if (
+    signature.expiresAt !== undefined &&
+    compareRfc3339DateTimes(signature.expiresAt, signature.issuedAt) <= 0
+  )
+    throw new TypeError('Signature expiration must follow issuance.');
+  if (
+    !Number.isSafeInteger(now) ||
+    !Number.isSafeInteger(toleranceMs) ||
+    toleranceMs < 0
+  )
+    throw new TypeError('Clock and tolerance must be integer milliseconds.');
+  // Safe-integer tolerances can exceed the Date range. Saturation outside the
+  // parser's four-digit year range preserves comparisons without rounding.
+  const earliest = Date.parse('0000-01-01T00:00:00Z');
+  const latest = Date.parse('9999-12-31T23:59:59.999Z');
+  if (
+    now + toleranceMs < earliest ||
+    (now + toleranceMs <= latest &&
+      compareRfc3339DateTimes(
+        signature.issuedAt,
+        new Date(now + toleranceMs).toISOString(),
+      ) > 0)
+  )
+    return 'not_yet_valid';
+  if (
+    signature.expiresAt !== undefined &&
+    (now - toleranceMs > latest ||
+      (now - toleranceMs >= earliest &&
+        compareRfc3339DateTimes(
+          signature.expiresAt,
+          new Date(now - toleranceMs).toISOString(),
+        ) <= 0))
+  )
+    return 'expired';
+  return undefined;
 }

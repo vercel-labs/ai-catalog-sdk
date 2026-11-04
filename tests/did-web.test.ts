@@ -50,12 +50,12 @@ import { resolveDidWeb } from '../src/internal/did-web.js';
 import { IssuerCheckError } from '../src/internal/publisher-profile.js';
 import {
   canonicalizeJsonValueToBytes,
-  checkCatalogEntryTrustManifest,
+  checkCatalogEntry,
   createTrustManifestSignaturePayload,
 } from '../src/verification.js';
 import type { CatalogEntryWithData } from '../src/types.js';
 
-const options = { timeoutMs: 2_000, maxResponseBytes: 1024 * 1024 };
+const options = { resolutionTimeoutMs: 2_000, maxResponseBytes: 1024 * 1024 };
 const document = { id: 'did:web:publisher.example', assertionMethod: [] };
 let server: Server;
 let respond: (request: IncomingMessage, response: ServerResponse) => void;
@@ -96,22 +96,23 @@ describe('native did:web transport', () => {
     const identifier = 'urn:air:publisher.example:finance:agent:billing';
     const type = 'application/json';
     const manifest = {
-      identity,
-      issuedAt: '2026-01-01T00:00:00Z',
+      contributor: identity,
+      signature: { signer: identity, profile: 'did-web-v1', issuedAt: '2026-01-01T00:00:00Z' },
       subject: {
         identifier,
         type,
         digest: `sha256:${createHash('sha256').update(canonicalizeJsonValueToBytes(data)).digest('hex')}`,
       },
     };
-    const protectedSegment = Buffer.from(JSON.stringify({ alg: 'ES256', kid })).toString('base64url');
+    const protectedSegment = Buffer.from(JSON.stringify({ alg: 'ES256', typ: 'ai-catalog-trust-manifest+jws', kid })).toString('base64url');
     const payloadSegment = Buffer.from(createTrustManifestSignaturePayload(manifest)).toString('base64url');
     const signature = sign('sha256', Buffer.from(`${protectedSegment}.${payloadSegment}`), {
       key: keys.privateKey, dsaEncoding: 'ieee-p1363',
     }).toString('base64url');
     const entry: CatalogEntryWithData = {
       identifier, type, data,
-      trustManifest: { ...manifest, signature: `${protectedSegment}..${signature}` },
+      digest: manifest.subject.digest,
+      trustManifests: [{ ...manifest, signature: { ...manifest.signature, jws: `${protectedSegment}..${signature}` } }],
     };
     const did = {
       '@context': 'https://www.w3.org/ns/did/v1',
@@ -122,9 +123,15 @@ describe('native did:web transport', () => {
       }],
     };
     respond = (_request, response) => response.end(JSON.stringify(did));
-    await expect(checkCatalogEntryTrustManifest(entry)).resolves.toEqual({ status: 'valid' });
+    await expect(checkCatalogEntry(entry)).resolves.toMatchObject({
+      status: 'checked',
+      manifests: [{ status: 'passed', isPublisherEndorsement: true }],
+    });
     did.assertionMethod = [];
-    await expect(checkCatalogEntryTrustManifest(entry)).resolves.toMatchObject({ status: 'issuer_check_failed' });
+    await expect(checkCatalogEntry(entry)).resolves.toMatchObject({
+      status: 'checked',
+      manifests: [{ status: 'issuer_check_failed' }],
+    });
     expect(network.options).toHaveLength(2);
   });
 
@@ -252,7 +259,7 @@ describe('native did:web transport', () => {
   it('enforces the deadline during DNS, and does not connect after a late answer', async () => {
     let finish: (addresses: unknown) => void = () => {};
     network.resolve.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
-    await expect(resolveDidWeb('did:web:publisher.example', { ...options, timeoutMs: 20 })).rejects.toThrow('timeoutMs');
+    await expect(resolveDidWeb('did:web:publisher.example', { ...options, resolutionTimeoutMs: 20 })).rejects.toThrow('resolutionTimeoutMs');
     finish([{ address: '8.8.8.8', family: 4 }]);
     await Promise.resolve();
     expect(network.options).toHaveLength(0);
@@ -263,7 +270,7 @@ describe('native did:web transport', () => {
       response.writeHead(200);
       response.write('{');
     };
-    await expect(resolveDidWeb('did:web:publisher.example', { ...options, timeoutMs: 80 })).rejects.toThrow('timeoutMs');
+    await expect(resolveDidWeb('did:web:publisher.example', { ...options, resolutionTimeoutMs: 80 })).rejects.toThrow('resolutionTimeoutMs');
   });
 
   it.each([undefined, 'gzip'])('handles an interrupted response with content encoding %s', async (encoding) => {

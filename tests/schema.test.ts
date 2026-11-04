@@ -10,7 +10,7 @@ import {
 import { isRfc3339DateTime } from '../src/internal/rfc3339.js';
 import { implementedSpecRevision, safeParseCatalog } from '../src/index.js';
 import rawSchema from '../schema/ai-catalog.schema.json';
-import { structurallyInvalidFixtures, validFixtures } from './fixtures.js';
+import { invalidDeclarationFixtures, validFixtures } from './fixtures.js';
 
 function createValidator(validateFormats: boolean) {
   const ajv = new Ajv2020({ strict: false, validateFormats });
@@ -20,7 +20,7 @@ function createValidator(validateFormats: boolean) {
   return ajv.compile(rawSchema);
 }
 
-describe('shared structural fixtures', () => {
+describe('schema declaration fixtures', () => {
   const withFormats = createValidator(true);
   const withoutFormats = createValidator(false);
 
@@ -34,9 +34,8 @@ describe('shared structural fixtures', () => {
   });
 
   it.each(
-    structurallyInvalidFixtures.map((value, index) => [index, value] as const),
-  )('rejects invalid fixture %s across root, Zod, and JSON Schema', (_index, value) => {
-    expect(safeParseCatalog(value).success).toBe(false);
+    invalidDeclarationFixtures.map((value, index) => [index, value] as const),
+  )('rejects invalid declaration fixture %s in Zod and JSON Schema', (_index, value) => {
     expect(aiCatalogSchema.safeParse(value).success).toBe(false);
     expect(withFormats(value)).toBe(false);
     expect(withoutFormats(value)).toBe(false);
@@ -54,7 +53,7 @@ describe('shared structural fixtures', () => {
         },
       ],
     };
-    expect(safeParseCatalog(invalidCalendar).success).toBe(false);
+    expect(safeParseCatalog(invalidCalendar).success).toBe(true);
     expect(aiCatalogSchema.safeParse(invalidCalendar).success).toBe(false);
     expect(withFormats(invalidCalendar)).toBe(false);
     expect(withoutFormats(invalidCalendar)).toBe(true);
@@ -64,18 +63,23 @@ describe('shared structural fixtures', () => {
     ['identifier mismatch', 'other', '1.0.0'],
     ['version mismatch', 'x', '2.0.0'],
     ['version absent', 'x', undefined],
-  ] as const)(
-    'leaves contextual %s checks to root parsers',
-    (_name, identifier, version) => {
-      const entry = {
-        identifier: 'x',
-        version: '1.0.0',
-        type: 'custom',
-        data: null,
-        trustManifest: {
-          identity: 'did:web:example.com',
-          issuedAt: '2026-08-20T00:00:00Z',
-          signature: 'signed',
+  ] as const)('does not apply contextual %s checks during ingestion or schema validation', (_name, identifier, version) => {
+    const entry = {
+      identifier: 'x',
+      version: '1.0.0',
+      type: 'custom',
+      data: null,
+      digest: `sha256:${'a'.repeat(64)}`,
+      trustManifests: [
+        {
+          contributor: 'did:web:example.com',
+
+          signature: {
+            signer: 'did:web:example.com',
+            profile: 'did-web-v1',
+            issuedAt: '2026-08-20T00:00:00Z',
+            jws: 'signed',
+          },
           subject: {
             identifier,
             ...(version === undefined ? {} : { version }),
@@ -83,35 +87,33 @@ describe('shared structural fixtures', () => {
             digest: `sha256:${'a'.repeat(64)}`,
           },
         },
-      };
-      const value = { specVersion: '1.0', entries: [entry] };
-      expect(safeParseCatalog(value).success).toBe(false);
-      expect(aiCatalogSchema.safeParse(value).success).toBe(true);
-      expect(catalogEntrySchema.safeParse(entry).success).toBe(true);
-      expect(trustManifestSchema.safeParse(entry.trustManifest).success)
-        .toBe(true);
-      expect(withFormats(value)).toBe(true);
-      expect(withoutFormats(value)).toBe(true);
-    },
-  );
+      ],
+    };
+    const value = { specVersion: '1.0', entries: [entry] };
+    expect(safeParseCatalog(value).success).toBe(true);
+    expect(aiCatalogSchema.safeParse(value).success).toBe(true);
+    expect(catalogEntrySchema.safeParse(entry).success).toBe(true);
+    expect(trustManifestSchema.safeParse(entry.trustManifests[0]).success).toBe(
+      true,
+    );
+    expect(withFormats(value)).toBe(true);
+    expect(withoutFormats(value)).toBe(true);
+  });
 
   it.each(
     [null, false, 42, 'opaque', [], { subject: 'uninterpreted' }].map(
       (value) => [value] as const,
     ),
-  )(
-    'treats host.trustManifest as generic JSON across schemas: %j',
-    (trustManifest) => {
-      const value = {
-        specVersion: '1.0',
-        entries: [],
-        host: { displayName: 'Host', trustManifest },
-      };
-      expect(aiCatalogSchema.parse(value)).toEqual(value);
-      expect(withFormats(value)).toBe(true);
-      expect(withoutFormats(value)).toBe(true);
-    },
-  );
+  )('treats host.trustManifest as generic JSON across schemas: %j', (trustManifest) => {
+    const value = {
+      specVersion: '1.0',
+      entries: [],
+      host: { displayName: 'Host', trustManifest },
+    };
+    expect(aiCatalogSchema.parse(value)).toEqual(value);
+    expect(withFormats(value)).toBe(true);
+    expect(withoutFormats(value)).toBe(true);
+  });
 });
 
 describe('public schemas and generated artifact', () => {
@@ -125,7 +127,7 @@ describe('public schemas and generated artifact', () => {
     ).toBe(true);
     expect(
       trustManifestSchema.safeParse({
-        identity: 'x',
+        contributor: 'urn:x',
         trustSchema: { identifier: 'x', version: '1' },
       }).success,
     ).toBe(true);
@@ -209,5 +211,135 @@ describe('RFC 3339 profile', () => {
         updatedAt,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('signature structure and schema coverage', () => {
+  const validate = createValidator(true);
+  const signature = {
+    signer: 'did:web:example.com',
+    profile: 'did-web-v1',
+    issuedAt: '2026-01-01T00:00:00Z',
+    jws: '',
+  };
+  const digest = `sha256:${'a'.repeat(64)}`;
+  const subject = { identifier: 'x', type: 'custom', digest };
+
+  it('does not count known metadata or empty evidence as substantive', () => {
+    for (const [content, accepted] of [
+      [{}, false],
+      [{ subject }, false],
+      [{ subject: { ...subject, futureClaim: true } }, false],
+      [{ attestations: [] }, false],
+      [{ provenance: [] }, false],
+      [{ additionalSignatures: { futureClaim: true } }, false],
+      [{ extensions: {} }, false],
+      [{ extensions: { 'example.audit': null } }, true],
+    ] as const) {
+      const manifest = { contributor: 'urn:auditor:one', ...content };
+      const value = {
+        specVersion: '1.0',
+        entries: [
+          {
+            identifier: 'x',
+            type: 'custom',
+            data: null,
+            digest,
+            trustManifests: [manifest],
+          },
+        ],
+      };
+      expect(safeParseCatalog(value).success).toBe(true);
+      expect(aiCatalogSchema.safeParse(value).success).toBe(accepted);
+      expect(trustManifestSchema.safeParse(manifest).success).toBe(accepted);
+      expect(validate(value)).toBe(accepted);
+    }
+  });
+
+  it.each([
+    [{ contributor: 'relative' }, true],
+    [{ trustSchema: { identifier: 'x' } }, false],
+    [{ attestations: [{ type: 'evidence', uri: 42 }] }, false],
+    [{ provenance: [{ relation: 'source', sourceId: 42 }] }, false],
+    [{ extensions: [] }, false],
+    [{ subject: { ...subject, digest: false } }, false],
+    [{ subject, signature: { ...signature, profile: '' } }, true],
+  ] as const)('unknown content does not change interpretation of known fields: %j', (malformed, parseable) => {
+    for (const unknownContent of [{}, { futureEvidence: null }]) {
+      const manifest = {
+        contributor: 'did:web:example.com',
+        ...malformed,
+        ...unknownContent,
+      };
+      const entry = {
+        identifier: 'x',
+        type: 'custom',
+        data: null,
+        digest,
+        trustManifests: [manifest],
+      };
+      const value = { specVersion: '1.0', entries: [entry] };
+      expect(safeParseCatalog(value).success).toBe(parseable);
+      expect(aiCatalogSchema.safeParse(value).success).toBe(false);
+      expect(catalogEntrySchema.safeParse(entry).success).toBe(false);
+      expect(trustManifestSchema.safeParse(manifest).success).toBe(false);
+      expect(validate(value)).toBe(false);
+    }
+  });
+
+  it('preserves unknown-content subject disagreements during ingestion', () => {
+    const entry = {
+      identifier: 'x',
+      type: 'custom',
+      data: null,
+      digest,
+      trustManifests: [
+        {
+          contributor: 'urn:auditor:one',
+          subject: { ...subject, identifier: 'different' },
+          futureEvidence: false,
+        },
+      ],
+    };
+    const value = { specVersion: '1.0', entries: [entry] };
+    expect(safeParseCatalog(value).success).toBe(true);
+    expect(aiCatalogSchema.safeParse(value).success).toBe(true);
+    expect(validate(value)).toBe(true);
+  });
+
+  it('enforces timestamp ordering in Zod, beyond ingestion and JSON Schema coverage', () => {
+    const value = {
+      specVersion: '1.0',
+      entries: [],
+      signature: { ...signature, expiresAt: signature.issuedAt },
+    };
+    expect(safeParseCatalog(value).success).toBe(true);
+    expect(aiCatalogSchema.safeParse(value).success).toBe(false);
+    expect(validate(value)).toBe(true);
+  });
+
+  it('enforces contributor attribution in Zod, beyond ingestion and JSON Schema coverage', () => {
+    const digest = `sha256:${'a'.repeat(64)}`;
+    const value = {
+      specVersion: '1.0',
+      entries: [
+        {
+          identifier: 'x',
+          type: 'custom',
+          data: null,
+          digest,
+          trustManifests: [
+            {
+              contributor: 'did:web:assessor.example',
+              signature,
+              subject: { identifier: 'x', type: 'custom', digest },
+            },
+          ],
+        },
+      ],
+    };
+    expect(safeParseCatalog(value).success).toBe(true);
+    expect(aiCatalogSchema.safeParse(value).success).toBe(false);
+    expect(validate(value)).toBe(true);
   });
 });

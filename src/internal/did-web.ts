@@ -10,7 +10,7 @@ import { IssuerCheckError } from './publisher-profile.js';
 
 interface ResolutionOptions {
   signal?: AbortSignal;
-  timeoutMs: number;
+  resolutionTimeoutMs: number;
   maxResponseBytes: number;
 }
 
@@ -234,7 +234,7 @@ async function readDocument(
 /** Resolves a validated root did:web issuer through a bounded native HTTPS request. */
 export async function resolveDidWeb(identity: string, options: ResolutionOptions): Promise<unknown> {
   const controller = new AbortController();
-  const deadline = performance.now() + options.timeoutMs;
+  const deadline = performance.now() + options.resolutionTimeoutMs;
   let timer: ReturnType<typeof setTimeout> | undefined;
   // Use the native signal operations rather than caller-overridden accessors
   // or methods. The public boundary has already checked the native brand.
@@ -246,7 +246,7 @@ export async function resolveDidWeb(identity: string, options: ResolutionOptions
   const scheduleDeadline = () => {
     const remaining = deadline - performance.now();
     if (remaining <= 0) {
-      controller.abort(new IssuerCheckError('Publisher DID resolution exceeded timeoutMs.'));
+      controller.abort(new IssuerCheckError('Publisher DID resolution exceeded resolutionTimeoutMs.'));
     } else timer = setTimeout(scheduleDeadline, Math.min(remaining, 2 ** 31 - 1));
   };
   scheduleDeadline();
@@ -282,7 +282,7 @@ export async function resolveDidWeb(identity: string, options: ResolutionOptions
       // Parsing is synchronous, so explicitly sample the monotonic deadline
       // rather than relying on a timer callback being able to run during it.
       if (performance.now() >= deadline) {
-        throw new IssuerCheckError('Publisher DID resolution exceeded timeoutMs.');
+        throw new IssuerCheckError('Publisher DID resolution exceeded resolutionTimeoutMs.');
       }
       controller.signal.throwIfAborted();
       return document;
