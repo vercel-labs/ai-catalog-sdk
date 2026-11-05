@@ -1,6 +1,6 @@
 # ai-catalog-sdk
 
-Parse, validate, and author JSON-native AI Catalog documents in TypeScript.
+Discover, parse, validate, and author JSON-native AI Catalog documents in TypeScript.
 
 ## Parse a catalog
 
@@ -38,6 +38,30 @@ The parsed result is an ordinary mutable, JSON-shaped object. Parsing checks fie
 ## Parsing does not verify trust
 
 Parsing provides structurally usable data, including declarations that may fail authoring validation or verification. Use [authoring validation](#author-a-catalog) to check an assembled document’s declarations and consistency, and verification to evaluate its artifacts and endorsements.
+
+## Discover a website's catalog
+
+Pass an absolute HTTPS website URL to `discoverCatalog()`:
+
+```ts
+import { discoverCatalog } from 'ai-catalog-sdk/discovery';
+
+const result = await discoverCatalog('https://example.com/tools');
+
+if (result.status === 'found') {
+  console.log(result.url, result.catalog.entries);
+}
+```
+
+| Status | Meaning |
+| --- | --- |
+| `not_found` | No catalog was found at the checked well-known locations. |
+| `invalid_catalog` | The retrieved content could not be parsed as a catalog. `url` identifies the catalog response; `error` is a `CatalogParseError` with path-specific `issues`. |
+| `fetch_failed` | The website or catalog request failed. Includes `url` and an `error` explaining the failure. |
+
+Discovery follows website redirects, then checks the final response for an HTTP `Link` with `rel="ai-catalog"`. If no catalog link is advertised, it tries `/.well-known/ai-catalog.json` at the website's origin. When the website redirects to a different origin, it tries the destination origin first, then the original origin if needed. A selected HTTP link takes precedence: if its catalog cannot be fetched or parsed, discovery returns that failure without trying the well-known locations. HTML `<link>` elements are not inspected, so catalogs advertised only in HTML will not be discovered.
+
+A `found` result contains the parsed catalog and the URL it was retrieved from after any redirects. The catalog remains unverified; apply the [verification utilities](./docs/verification.md) when your application needs artifact or endorsement checks. Discovery does not traverse nested catalogs or fetch referenced artifacts.
 
 ## Check a catalog signature
 
@@ -162,17 +186,18 @@ const jsonWithEndorsement = JSON.stringify(catalogWithEndorsement, null, 2);
 
 The digest must describe the exact bytes published at `entry.url`. For an inline entry, use `createDigest(entry.data)` to hash its JCS-canonicalized JSON value. The signed Trust Manifest endorses the entry's artifact; the containing catalog remains unsigned. See [Signing](./docs/verification.md#sign-a-trust-manifest) for signing with an explicit subject and supported callback formats.
 
-## Choose a validation API
+## Choose an API
 
 | Task | API | Import path |
 | --- | --- | --- |
 | Parse catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `ai-catalog-sdk` |
 | Parse a catalog from an existing JSON value | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
 | Parse one catalog entry from an existing JSON value | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
-| Validate an assembled catalog before serialization | `assertValidCatalog()` | `ai-catalog-sdk` |
+| Discover a catalog from a website URL | `discoverCatalog()` | `ai-catalog-sdk/discovery` |
 | Check a catalog signature with a supplied public key | `checkCatalogSignature()` | `ai-catalog-sdk/verification` |
 | Check an entry and its selected endorsements | `checkCatalogEntry()` | `ai-catalog-sdk/verification` |
 | Check one explicit Trust Manifest against an entry with a supplied public key | `checkCatalogEntryTrustManifest()` | `ai-catalog-sdk/verification` |
+| Validate an assembled catalog before serialization | `assertValidCatalog()` | `ai-catalog-sdk` |
 | Compose structural validation with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
 | Use JSON Schema in TypeScript or JavaScript | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
 | Use raw JSON Schema with another validator or tool | `ai-catalog.schema.json` | `ai-catalog-sdk/schema/ai-catalog.schema.json` |

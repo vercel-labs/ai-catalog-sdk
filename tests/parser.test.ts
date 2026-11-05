@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 
 import {
@@ -29,6 +29,17 @@ function countNestedIssues(value: unknown): number {
 }
 
 describe('root parsing', () => {
+  it('propagates unexpected JSON backend failures through both text parsers', () => {
+    const cause = new RangeError('JSON backend unavailable');
+    const parse = vi.spyOn(JSON, 'parse').mockImplementation(() => { throw cause; });
+    try {
+      expect(() => safeParseCatalogJson('{"specVersion":"1.0","entries":[]}')).toThrow(cause);
+      expect(() => parseCatalogJson('{"specVersion":"1.0","entries":[]}')).toThrow(cause);
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
   it.each(
     validFixtures.map((value, index) => [index, value] as const),
   )('accepts valid fixture %s', (_index, value) => {
