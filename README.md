@@ -63,6 +63,43 @@ Discovery follows website redirects, then checks the final response for an HTTP 
 
 A `found` result contains the parsed catalog and the URL it was retrieved from after any redirects. The catalog remains unverified; apply the [verification utilities](./docs/verification.md) when your application needs artifact or endorsement checks. Discovery does not traverse nested catalogs or fetch referenced artifacts.
 
+## Load a catalog from an entry
+
+Use `loadCatalogFromEntry()` to load one entry with type `application/ai-catalog+json`. For example, select a nested catalog from a discovered catalog:
+
+```ts
+import {
+  discoverCatalog,
+  entryTypes,
+  isEntryType,
+  loadCatalogFromEntry,
+} from 'ai-catalog-sdk/node';
+
+const discovered = await discoverCatalog('https://example.com/tools');
+
+if (discovered.status === 'found') {
+  const entry = discovered.catalog.entries.find(isEntryType(entryTypes.aiCatalog));
+
+  if (entry) {
+    const loaded = await loadCatalogFromEntry(entry, { baseUrl: discovered.url });
+
+    if (loaded.status === 'found') {
+      console.log(loaded.catalog.entries);
+    }
+  }
+}
+```
+
+For a URL entry, the loader retrieves and parses the referenced catalog over public HTTPS. A `found` result includes `catalog`, the final response `url`, and the decoded response `bytes`.
+
+For an inline entry, the loader parses `entry.data` as the complete catalog. A `found` result includes `catalog` and, when `baseUrl` was supplied, the same value as `url`. It has no response bytes.
+
+To support relative URLs, pass the containing catalog's final response URL as `baseUrl`, as above. Use a successful load's returned `url` as the base for loading its entries. An inline catalog's `url` carries inherited resolution context; it does not identify a separately retrieved catalog. Without a base URL, a relative reference returns `fetch_failed`.
+
+If catalog parsing fails, the result has status `invalid_catalog` and a `CatalogParseError` in `error`. For a URL entry, the result also includes `url`. URL resolution or retrieval failures return `fetch_failed` with `url` and `error`. Malformed entry arguments, entries of another type, and invalid options reject with `TypeError`.
+
+Loading performs ordinary structural parsing, without authoring validation, verification, or automatic traversal. For a URL entry, pass the returned bytes to `checkCatalogEntry(entry, loaded.bytes)` when your application needs artifact and endorsement checks. For an inline entry, use `checkCatalogEntry(entry)` instead. Interpret those reports as described in [Check a catalog entry](#check-a-catalog-entry).
+
 ## Check a catalog signature
 
 `checkCatalogSignature()` checks one catalog snapshot with a public key and expected algorithm selected by the caller:
@@ -193,7 +230,7 @@ The digest must describe the exact bytes published at `entry.url`. For an inline
 
 ## Choose an API
 
-The `ai-catalog-sdk` entry point provides parsing and authoring without importing Node.js built-in modules in its runtime or type declarations. For Node.js applications, `ai-catalog-sdk/node` exports every root API and adds discovery, verification, and signing.
+The `ai-catalog-sdk` entry point provides parsing and authoring without importing Node.js built-in modules in its runtime or type declarations. For Node.js applications, `ai-catalog-sdk/node` exports every root API and adds discovery, entry loading, verification, and signing.
 
 | Task | API | Import path |
 | --- | --- | --- |
@@ -201,6 +238,7 @@ The `ai-catalog-sdk` entry point provides parsing and authoring without importin
 | Parse a catalog from an existing JSON value | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
 | Parse one catalog entry from an existing JSON value | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
 | Discover a catalog from a website URL | `discoverCatalog()` | `ai-catalog-sdk/node` |
+| Load the catalog represented by an entry | `loadCatalogFromEntry()` | `ai-catalog-sdk/node` |
 | Check a catalog signature with a supplied public key | `checkCatalogSignature()` | `ai-catalog-sdk/node` |
 | Check an entry and its selected endorsements | `checkCatalogEntry()` | `ai-catalog-sdk/node` |
 | Check one explicit Trust Manifest against an entry with a supplied public key | `checkCatalogEntryTrustManifest()` | `ai-catalog-sdk/node` |

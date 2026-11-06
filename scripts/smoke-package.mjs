@@ -1,8 +1,8 @@
+import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
@@ -92,12 +92,12 @@ import * as nodeApi from ${JSON.stringify(`${pkg.name}/node`)};
 import { assertValidCatalog, CatalogParseError, CatalogValidationError, implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
-import { discoverCatalog, canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryTrustManifest, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(`${pkg.name}/node`)};
+import { discoverCatalog, loadCatalogFromEntry, canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryTrustManifest, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(`${pkg.name}/node`)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
 const value = { specVersion: '1.0', entries: [] };
 for (const [name, value] of Object.entries(core)) assert.equal(nodeApi[name], value);
-for (const name of ['discoverCatalog', 'checkCatalogEntry', 'createDigest', 'signTrustManifest']) {
+for (const name of ['discoverCatalog', 'loadCatalogFromEntry', 'checkCatalogEntry', 'createDigest', 'signTrustManifest']) {
   assert.equal(Object.hasOwn(core, name), false);
 }
 for (const path of ['discovery', 'verification']) {
@@ -123,6 +123,31 @@ const discoveryCancellation = new AbortController();
 const discoveryCancellationReason = { message: 'Packed discovery cancellation' };
 discoveryCancellation.abort(discoveryCancellationReason);
 await assert.rejects(discoverCatalog('https://example.com/', {
+  signal: discoveryCancellation.signal,
+}), error => error === discoveryCancellationReason);
+const catalogLoadEntry = { identifier: 'catalog', type: 'application/ai-catalog+json', data: value };
+assert.deepEqual(await loadCatalogFromEntry(catalogLoadEntry), { status: 'found', catalog: value });
+const catalogLoadBase = 'https://EXAMPLE.com:443/releases/../root.json#existing';
+assert.deepEqual(await loadCatalogFromEntry(catalogLoadEntry, { baseUrl: catalogLoadBase }), {
+  status: 'found', catalog: value, url: catalogLoadBase,
+});
+const invalidCatalogLoad = await loadCatalogFromEntry({ ...catalogLoadEntry, data: null });
+assert.equal(invalidCatalogLoad.status, 'invalid_catalog');
+assert.ok(invalidCatalogLoad.error instanceof CatalogParseError);
+assert.equal(Object.hasOwn(invalidCatalogLoad, 'url'), false);
+assert.equal(Object.hasOwn(invalidCatalogLoad, 'bytes'), false);
+const blockedCatalogLoad = await loadCatalogFromEntry({
+  identifier: 'catalog', type: 'application/ai-catalog+json', url: blockedDiscoveryUrl,
+});
+assert.equal(blockedCatalogLoad.status, 'fetch_failed');
+assert.equal(blockedCatalogLoad.url, blockedDiscoveryUrl);
+const relativeCatalogLoad = await loadCatalogFromEntry({
+  identifier: 'catalog', type: 'application/ai-catalog+json', url: './child.json',
+});
+assert.equal(relativeCatalogLoad.status, 'fetch_failed');
+assert.equal(relativeCatalogLoad.url, './child.json');
+await assert.rejects(loadCatalogFromEntry({ ...catalogLoadEntry, type: 'application/json' }), TypeError);
+await assert.rejects(loadCatalogFromEntry(catalogLoadEntry, {
   signal: discoveryCancellation.signal,
 }), error => error === discoveryCancellationReason);
 assert.deepEqual(parseCatalog(value).entries, []);
@@ -451,6 +476,9 @@ try {
   assert.equal(core.safeParseCatalogJson(JSON.stringify(catalog)).success, true);
   assert.equal(catalog.entries.filter(core.isCatalogEntryWithData).length, 1);
   assert.equal(catalog.entries.filter(core.isEntryType('application/json')).length, 1);
+  assert.equal(core.isEntryType(catalog.entries[0], 'application/json'), true);
+  assert.equal(core.isNotEntryType(catalog.entries[0], core.entryTypes.aiCatalog), true);
+  assert.equal(catalog.entries.filter(core.isNotEntryType(core.entryTypes.aiCatalog)).length, 1);
 } finally {
   hooks.deregister();
 }
@@ -472,6 +500,7 @@ try {
   isCatalogEntryWithData,
   isCatalogEntryWithUrl,
   isEntryType,
+  isNotEntryType,
   mediaTypes,
   parseCatalog,
   safeParseCatalogJson,
@@ -486,6 +515,16 @@ const dataEntries: CatalogEntryWithData[] = parsed.entries.filter(isCatalogEntry
 const urlEntries: CatalogEntryWithUrl[] = parsed.entries.filter(isCatalogEntryWithUrl);
 const selected = parsed.entries.filter(isEntryType(mediaTypes.a2aAgentCard));
 parsed.entries.filter(isEntryType(entryTypes.agentPlugin));
+const nonCatalogEntries = parsed.entries.filter(isNotEntryType(entryTypes.aiCatalog));
+for (const entry of parsed.entries) {
+  const notCatalog: boolean = isNotEntryType(entry, entryTypes.aiCatalog);
+  if (isEntryType(entry, mediaTypes.a2aAgentCard)) {
+    const exactType: typeof mediaTypes.a2aAgentCard = entry.type;
+    void exactType;
+  }
+  void notCatalog;
+}
+void nonCatalogEntries;
 const result = safeParseCatalogJson(JSON.stringify(authored));
 if (!result.success) {
   const diagnostic: CatalogParseError = result.error;
@@ -546,6 +585,7 @@ import {
   isCatalogEntryWithData,
   isCatalogEntryWithUrl,
   isEntryType,
+  isNotEntryType,
   mediaTypes,
   safeParseCatalog,
   assertValidCatalog,
@@ -599,6 +639,45 @@ const coreCatalog: import('${pkg.name}').AICatalog = nodeCatalog;
 void nodeCore; void coreCatalog;
 
 const authored: AICatalog = { specVersion: '1.0', entries: [] };
+const loaderOptions: import('${pkg.name}/node').LoadCatalogFromEntryOptions = {
+  baseUrl: 'https://example.com/root.json', signal: new AbortController().signal,
+  resourceTimeoutMs: 120_000, maxResponseBytes: 64 * 1024 * 1024,
+};
+async function checkUrlCatalog(entry: CatalogEntryWithUrl) {
+  const loaded: import('${pkg.name}/node').UrlCatalogLoadResult =
+    await nodeApi.loadCatalogFromEntry(entry, loaderOptions);
+  if (loaded.status === 'found') {
+    const bytes: Uint8Array = loaded.bytes;
+    const url: string = loaded.url;
+    const catalog: AICatalog = loaded.catalog;
+    await checkCatalogEntry(entry, bytes);
+    void url; void catalog;
+  }
+}
+async function checkInlineCatalog(entry: CatalogEntryWithData) {
+  const loaded: import('${pkg.name}/node').InlineCatalogLoadResult =
+    await nodeApi.loadCatalogFromEntry(entry);
+  if (loaded.status === 'found') {
+    const catalog: AICatalog = loaded.catalog;
+    const url: string | undefined = loaded.url;
+    // @ts-expect-error Inline catalogs have no fetched body bytes.
+    loaded.bytes;
+    await checkCatalogEntry(entry);
+    void catalog; void url;
+  }
+}
+async function loadEitherCatalog(entry: import('${pkg.name}').CatalogEntry) {
+  const loaded: import('${pkg.name}/node').CatalogLoadResult =
+    await nodeApi.loadCatalogFromEntry(entry, loaderOptions);
+  if (loaded.status === 'found') {
+    const url: string | undefined = loaded.url;
+    void url;
+  }
+  return loaded;
+}
+// @ts-expect-error Entry loading is only available through the Node entry point.
+import { loadCatalogFromEntry as coreLoader } from '${pkg.name}';
+void checkUrlCatalog; void checkInlineCatalog; void loadEitherCatalog;
 const discoveryOptions: DiscoverCatalogOptions = {
   signal: new AbortController().signal,
   resourceTimeoutMs: 120_000,

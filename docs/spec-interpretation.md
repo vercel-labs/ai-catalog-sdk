@@ -23,3 +23,7 @@ Automatic catalog-signer authentication is not implemented. The supplied-key cat
 The pinned snapshot's recommended agent-driven discovery procedure includes inspecting HTML `<link>` elements when no HTTP `Link` header is present. `discoverCatalog()` intentionally inspects HTTP headers and well-known locations only; catalogs advertised solely through HTML are not discovered. The procedure is a `SHOULD` recommendation, not a requirement for every catalog consumer.
 
 The recommended discovery procedure expects a JSON media type for the catalog response. The SDK instead parses catalog responses as JSON regardless of their `Content-Type`, accepting catalogs from hosts that serve them without a JSON media type.
+
+## Catalog entry loading
+
+The pinned snapshot's accepted [ADR-0007](https://github.com/Agent-Card/ai-catalog/blob/9aac2c1bfa622356e45a31f3dc1d342bdb329e00/adr/0007-url-field-name.md) permits relative URI references in `url` fields while recommending absolute URLs. `loadCatalogFromEntry()` resolves relative references against the optional absolute `baseUrl`; a relative reference without a base returns `fetch_failed`. Use the containing catalog's final retrieval URL as its base, following [RFC 3986 section 5.1](https://www.rfc-editor.org/rfc/rfc3986#section-5.1). Successful inline loads return the supplied base unchanged as `url` to preserve that resolution context; the SDK does not assign inline catalogs a separate retrieval location.
