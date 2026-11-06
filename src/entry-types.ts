@@ -35,40 +35,88 @@ export const entryTypes = {
   agentPlugin: [mediaTypes.agentPluginZip, mediaTypes.agentPluginGzip],
 } as const satisfies Record<string, readonly string[]>;
 
+type MatchedEntryType<Type extends string | readonly string[]> =
+  Type extends readonly string[] ? Type[number] : Type;
+
 /**
- * Creates a predicate that matches entries with one exact `type` value.
+ * Creates a predicate that matches entries with any supplied exact `type` value.
  *
  * Matching is case-sensitive and does not parse or normalize the type value.
  * This helper filters entries; it does not validate catalog input.
  *
- * @param type - The type value to match.
+ * @param type - One type value or a group of type values to match.
  * @returns A predicate that preserves the entry shape and narrows its `type` to
- * the supplied value.
+ * the supplied values' union.
  */
-export function isEntryType<const Type extends string>(
+export function isEntryType<const Type extends string | readonly string[]>(
   type: Type,
 ): <Entry extends CatalogEntry>(
   entry: Entry,
-) => entry is Entry & { type: Type };
+) => entry is Entry & { type: MatchedEntryType<Type> };
 /**
- * Creates a predicate that matches entries with any exact `type` value in a
- * group.
+ * Checks whether an entry matches any supplied exact `type` value.
  *
  * Matching is case-sensitive and does not parse or normalize the type values.
  * This helper filters entries; it does not validate catalog input.
  *
- * @param types - The type values to match.
- * @returns A predicate that preserves the entry shape and narrows its `type` to
+ * @param entry - The entry to check.
+ * @param type - One type value or a group of type values to match.
+ * @returns Whether the entry matches, preserving its shape and narrowing `type` to
  * the supplied values' union.
  */
-export function isEntryType<const Types extends readonly string[]>(
-  types: Types,
-): <Entry extends CatalogEntry>(
+export function isEntryType<
+  Entry extends CatalogEntry,
+  const Type extends string | readonly string[],
+>(
   entry: Entry,
-) => entry is Entry & { type: Types[number] };
-export function isEntryType(type: string | readonly string[]) {
-  return <Entry extends CatalogEntry>(entry: Entry) =>
-    typeof type === 'string' ? entry.type === type : type.includes(entry.type);
+  type: Type,
+): entry is Entry & { type: MatchedEntryType<Type> };
+export function isEntryType(
+  entryOrType: CatalogEntry | string | readonly string[],
+  type?: string | readonly string[],
+) {
+  if (type !== undefined) {
+    return matchesEntryType(entryOrType as CatalogEntry, type);
+  }
+  return (entry: CatalogEntry) =>
+    matchesEntryType(entry, entryOrType as string | readonly string[]);
+}
+
+/**
+ * Creates a predicate that matches entries with none of the supplied exact
+ * `type` values.
+ *
+ * Matching is case-sensitive and does not parse or normalize the type values.
+ * This helper filters entries; it does not validate catalog input.
+ */
+export function isNotEntryType(
+  type: string | readonly string[],
+): (entry: CatalogEntry) => boolean;
+/**
+ * Checks whether an entry matches none of the supplied exact `type` values.
+ *
+ * Matching is case-sensitive and does not parse or normalize the type values.
+ * This helper filters entries; it does not validate catalog input.
+ */
+export function isNotEntryType(
+  entry: CatalogEntry,
+  type: string | readonly string[],
+): boolean;
+export function isNotEntryType(
+  entryOrType: CatalogEntry | string | readonly string[],
+  type?: string | readonly string[],
+) {
+  if (type !== undefined) {
+    return !matchesEntryType(entryOrType as CatalogEntry, type);
+  }
+  return (entry: CatalogEntry) =>
+    !matchesEntryType(entry, entryOrType as string | readonly string[]);
+}
+
+function matchesEntryType(entry: CatalogEntry, type: string | readonly string[]) {
+  return typeof type === 'string'
+    ? entry.type === type
+    : type.includes(entry.type);
 }
 
 /**

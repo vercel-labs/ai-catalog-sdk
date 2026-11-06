@@ -3,6 +3,7 @@ export {
   isCatalogEntryWithData,
   isCatalogEntryWithUrl,
   isEntryType,
+  isNotEntryType,
   mediaTypes,
 } from './entry-types.js';
 export {
