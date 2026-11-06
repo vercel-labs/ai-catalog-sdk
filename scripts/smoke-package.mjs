@@ -1,8 +1,8 @@
+import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
@@ -87,15 +87,24 @@ try {
     join(consumerDirectory, 'smoke.mjs'),
     `import { strict as assert } from 'node:assert';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import * as core from ${JSON.stringify(pkg.name)};
+import * as nodeApi from ${JSON.stringify(`${pkg.name}/node`)};
 import { assertValidCatalog, CatalogParseError, CatalogValidationError, implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
-import { discoverCatalog } from ${JSON.stringify(`${pkg.name}/discovery`)};
-import { canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryTrustManifest, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(`${pkg.name}/verification`)};
+import { discoverCatalog, loadCatalogFromEntry, canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryTrustManifest, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(`${pkg.name}/node`)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
 const value = { specVersion: '1.0', entries: [] };
-assert.equal(Object.hasOwn(await import(${JSON.stringify(pkg.name)}), 'discoverCatalog'), false);
+for (const [name, value] of Object.entries(core)) assert.equal(nodeApi[name], value);
+for (const name of ['discoverCatalog', 'loadCatalogFromEntry', 'checkCatalogEntry', 'createDigest', 'signTrustManifest']) {
+  assert.equal(Object.hasOwn(core, name), false);
+}
+for (const path of ['discovery', 'verification']) {
+  await assert.rejects(import(${JSON.stringify(pkg.name)} + '/' + path), {
+    code: 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+  });
+}
 const blockedDiscoveryUrl = 'https://127.0.0.1/catalog.json';
 const blockedDiscovery = await discoverCatalog(blockedDiscoveryUrl);
 assert.equal(blockedDiscovery.status, 'fetch_failed');
@@ -114,6 +123,31 @@ const discoveryCancellation = new AbortController();
 const discoveryCancellationReason = { message: 'Packed discovery cancellation' };
 discoveryCancellation.abort(discoveryCancellationReason);
 await assert.rejects(discoverCatalog('https://example.com/', {
+  signal: discoveryCancellation.signal,
+}), error => error === discoveryCancellationReason);
+const catalogLoadEntry = { identifier: 'catalog', type: 'application/ai-catalog+json', data: value };
+assert.deepEqual(await loadCatalogFromEntry(catalogLoadEntry), { status: 'found', catalog: value });
+const catalogLoadBase = 'https://EXAMPLE.com:443/releases/../root.json#existing';
+assert.deepEqual(await loadCatalogFromEntry(catalogLoadEntry, { baseUrl: catalogLoadBase }), {
+  status: 'found', catalog: value, url: catalogLoadBase,
+});
+const invalidCatalogLoad = await loadCatalogFromEntry({ ...catalogLoadEntry, data: null });
+assert.equal(invalidCatalogLoad.status, 'invalid_catalog');
+assert.ok(invalidCatalogLoad.error instanceof CatalogParseError);
+assert.equal(Object.hasOwn(invalidCatalogLoad, 'url'), false);
+assert.equal(Object.hasOwn(invalidCatalogLoad, 'bytes'), false);
+const blockedCatalogLoad = await loadCatalogFromEntry({
+  identifier: 'catalog', type: 'application/ai-catalog+json', url: blockedDiscoveryUrl,
+});
+assert.equal(blockedCatalogLoad.status, 'fetch_failed');
+assert.equal(blockedCatalogLoad.url, blockedDiscoveryUrl);
+const relativeCatalogLoad = await loadCatalogFromEntry({
+  identifier: 'catalog', type: 'application/ai-catalog+json', url: './child.json',
+});
+assert.equal(relativeCatalogLoad.status, 'fetch_failed');
+assert.equal(relativeCatalogLoad.url, './child.json');
+await assert.rejects(loadCatalogFromEntry({ ...catalogLoadEntry, type: 'application/json' }), TypeError);
+await assert.rejects(loadCatalogFromEntry(catalogLoadEntry, {
   signal: discoveryCancellation.signal,
 }), error => error === discoveryCancellationReason);
 assert.deepEqual(parseCatalog(value).entries, []);
@@ -420,6 +454,119 @@ await assert.rejects(checkCatalogEntry(signedEntry, artifactBytes, { signal: abo
   );
   run(node, ['smoke.mjs'], { cwd: consumerDirectory });
 
+  // Keep the import hook in its own process so it only constrains the core graph.
+  await writeFile(
+    join(consumerDirectory, 'core-smoke.mjs'),
+    `import { strict as assert } from 'node:assert';
+import { isBuiltin, registerHooks } from 'node:module';
+
+const hooks = registerHooks({
+  resolve(specifier, context, nextResolve) {
+    assert.equal(isBuiltin(specifier), false, 'The core import graph must not depend on ' + specifier);
+    return nextResolve(specifier, context);
+  },
+});
+try {
+  const core = await import(${JSON.stringify(pkg.name)});
+  const catalog = core.parseCatalog({
+    specVersion: '1.0',
+    entries: [{ identifier: 'inline', type: 'application/json', data: null }],
+  });
+  core.assertValidCatalog(catalog);
+  assert.equal(core.safeParseCatalogJson(JSON.stringify(catalog)).success, true);
+  assert.equal(catalog.entries.filter(core.isCatalogEntryWithData).length, 1);
+  assert.equal(catalog.entries.filter(core.isEntryType('application/json')).length, 1);
+  assert.equal(core.isEntryType(catalog.entries[0], 'application/json'), true);
+  assert.equal(core.isNotEntryType(catalog.entries[0], core.entryTypes.aiCatalog), true);
+  assert.equal(catalog.entries.filter(core.isNotEntryType(core.entryTypes.aiCatalog)).length, 1);
+} finally {
+  hooks.deregister();
+}
+`,
+  );
+  run(node, ['core-smoke.mjs'], { cwd: consumerDirectory });
+
+  await writeFile(
+    join(consumerDirectory, 'core-consumer.ts'),
+    `import {
+  type AICatalog,
+  type CatalogEntryWithData,
+  type CatalogEntryWithUrl,
+  type CatalogIssue,
+  CatalogParseError,
+  CatalogValidationError,
+  assertValidCatalog,
+  entryTypes,
+  isCatalogEntryWithData,
+  isCatalogEntryWithUrl,
+  isEntryType,
+  isNotEntryType,
+  mediaTypes,
+  parseCatalog,
+  safeParseCatalogJson,
+} from '${pkg.name}';
+
+const authored: AICatalog = { specVersion: '1.0', entries: [] };
+const parsed: AICatalog = parseCatalog(authored);
+const candidate: unknown = parsed;
+assertValidCatalog(candidate);
+const asserted: AICatalog = candidate;
+const dataEntries: CatalogEntryWithData[] = parsed.entries.filter(isCatalogEntryWithData);
+const urlEntries: CatalogEntryWithUrl[] = parsed.entries.filter(isCatalogEntryWithUrl);
+const selected = parsed.entries.filter(isEntryType(mediaTypes.a2aAgentCard));
+parsed.entries.filter(isEntryType(entryTypes.agentPlugin));
+const nonCatalogEntries = parsed.entries.filter(isNotEntryType(entryTypes.aiCatalog));
+for (const entry of parsed.entries) {
+  const notCatalog: boolean = isNotEntryType(entry, entryTypes.aiCatalog);
+  if (isEntryType(entry, mediaTypes.a2aAgentCard)) {
+    const exactType: typeof mediaTypes.a2aAgentCard = entry.type;
+    void exactType;
+  }
+  void notCatalog;
+}
+void nonCatalogEntries;
+const result = safeParseCatalogJson(JSON.stringify(authored));
+if (!result.success) {
+  const diagnostic: CatalogParseError = result.error;
+  const issues: readonly CatalogIssue[] = diagnostic.issues;
+  void issues;
+}
+const validationDiagnostic = {} as CatalogValidationError;
+const validationIssues: readonly CatalogIssue[] = validationDiagnostic.issues;
+// @ts-expect-error Core declarations must not introduce Node.js ambient types.
+type NodeBuffer = Buffer;
+// @ts-expect-error Core declarations must not introduce the Node.js namespace.
+type NodeEnvironment = NodeJS.ProcessEnv;
+void asserted; void dataEntries; void urlEntries; void selected; void validationIssues;
+`,
+  );
+  await writeFile(
+    join(consumerDirectory, 'tsconfig.core.json'),
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'NodeNext',
+          moduleResolution: 'NodeNext',
+          lib: ['ES2022', 'DOM'],
+          types: [],
+          strict: true,
+          exactOptionalPropertyTypes: true,
+          skipLibCheck: false,
+          noEmit: true,
+        },
+        include: ['core-consumer.ts'],
+      },
+      null,
+      2,
+    ),
+  );
+  for (const compiler of ['typescript', 'typescript-5-5']) {
+    run(node, [join(root, 'node_modules', compiler, 'bin', 'tsc'), '-p', 'tsconfig.core.json'], {
+      cwd: consumerDirectory,
+    });
+  }
+
   await writeFile(
     join(consumerDirectory, 'consumer.ts'),
     `import { createPublicKey } from 'node:crypto';
@@ -438,22 +585,27 @@ import {
   isCatalogEntryWithData,
   isCatalogEntryWithUrl,
   isEntryType,
+  isNotEntryType,
   mediaTypes,
   safeParseCatalog,
   assertValidCatalog,
   CatalogValidationError,
   CatalogParseError,
   type CatalogIssue,
-} from '${pkg.name}';
+} from '${pkg.name}/node';
 import { aiCatalogSchema } from '${pkg.name}/zod';
 import { aiCatalogJsonSchema, type JsonSchema } from '${pkg.name}/json-schema';
 import {
   discoverCatalog,
   type DiscoverCatalogOptions,
   type CatalogDiscoveryResult,
-} from '${pkg.name}/discovery';
-// @ts-expect-error Discovery is available through its dedicated Node.js subpath.
+} from '${pkg.name}/node';
+// @ts-expect-error Discovery is available through the Node.js subpath.
 import { discoverCatalog as rootDiscovery } from '${pkg.name}';
+// @ts-expect-error Operational subpaths were consolidated into the Node.js subpath.
+import {} from '${pkg.name}/discovery';
+// @ts-expect-error Operational subpaths were consolidated into the Node.js subpath.
+import {} from '${pkg.name}/verification';
 import {
   canonicalizeJsonValueToBytes,
   checkCatalogEntry,
@@ -477,10 +629,55 @@ import {
   type TrustManifestSignatureMetadata,
   type TrustManifestSigner,
   type JwsSigningResult,
-} from '${pkg.name}/verification';
+} from '${pkg.name}/node';
 import rawSchema from '${pkg.name}/schema/ai-catalog.schema.json' with { type: 'json' };
+import * as nodeApi from '${pkg.name}/node';
+
+const nodeCore: typeof import('${pkg.name}') = nodeApi;
+const nodeCatalog: import('${pkg.name}/node').AICatalog = { specVersion: '1.0', entries: [] };
+const coreCatalog: import('${pkg.name}').AICatalog = nodeCatalog;
+void nodeCore; void coreCatalog;
 
 const authored: AICatalog = { specVersion: '1.0', entries: [] };
+const loaderOptions: import('${pkg.name}/node').LoadCatalogFromEntryOptions = {
+  baseUrl: 'https://example.com/root.json', signal: new AbortController().signal,
+  resourceTimeoutMs: 120_000, maxResponseBytes: 64 * 1024 * 1024,
+};
+async function checkUrlCatalog(entry: CatalogEntryWithUrl) {
+  const loaded: import('${pkg.name}/node').UrlCatalogLoadResult =
+    await nodeApi.loadCatalogFromEntry(entry, loaderOptions);
+  if (loaded.status === 'found') {
+    const bytes: Uint8Array = loaded.bytes;
+    const url: string = loaded.url;
+    const catalog: AICatalog = loaded.catalog;
+    await checkCatalogEntry(entry, bytes);
+    void url; void catalog;
+  }
+}
+async function checkInlineCatalog(entry: CatalogEntryWithData) {
+  const loaded: import('${pkg.name}/node').InlineCatalogLoadResult =
+    await nodeApi.loadCatalogFromEntry(entry);
+  if (loaded.status === 'found') {
+    const catalog: AICatalog = loaded.catalog;
+    const url: string | undefined = loaded.url;
+    // @ts-expect-error Inline catalogs have no fetched body bytes.
+    loaded.bytes;
+    await checkCatalogEntry(entry);
+    void catalog; void url;
+  }
+}
+async function loadEitherCatalog(entry: import('${pkg.name}').CatalogEntry) {
+  const loaded: import('${pkg.name}/node').CatalogLoadResult =
+    await nodeApi.loadCatalogFromEntry(entry, loaderOptions);
+  if (loaded.status === 'found') {
+    const url: string | undefined = loaded.url;
+    void url;
+  }
+  return loaded;
+}
+// @ts-expect-error Entry loading is only available through the Node entry point.
+import { loadCatalogFromEntry as coreLoader } from '${pkg.name}';
+void checkUrlCatalog; void checkInlineCatalog; void loadEitherCatalog;
 const discoveryOptions: DiscoverCatalogOptions = {
   signal: new AbortController().signal,
   resourceTimeoutMs: 120_000,
