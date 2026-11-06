@@ -44,7 +44,7 @@ Parsing provides structurally usable data, including declarations that may fail 
 Pass an absolute HTTPS website URL to `discoverCatalog()`:
 
 ```ts
-import { discoverCatalog } from 'ai-catalog-sdk/discovery';
+import { discoverCatalog } from 'ai-catalog-sdk/node';
 
 const result = await discoverCatalog('https://example.com/tools');
 
@@ -68,7 +68,7 @@ A `found` result contains the parsed catalog and the URL it was retrieved from a
 `checkCatalogSignature()` checks one catalog snapshot with a public key and expected algorithm selected by the caller:
 
 ```ts
-import { checkCatalogSignature } from 'ai-catalog-sdk/verification';
+import { checkCatalogSignature } from 'ai-catalog-sdk/node';
 
 const result = await checkCatalogSignature(catalog, {
   publicKey,
@@ -87,7 +87,7 @@ A `valid` result means the exact caller-selected key verified the signature over
 `checkCatalogEntry()` checks an entry's fields and declared artifact digest, then evaluates each selected Trust Manifest independently. A malformed selected manifest receives `invalid_manifest` without preventing the other manifests from being checked. For the `did-web-v1` profile, it resolves the contributor's current DID document and selects an authorized assertion key:
 
 ```ts
-import { checkCatalogEntry } from 'ai-catalog-sdk/verification';
+import { checkCatalogEntry } from 'ai-catalog-sdk/node';
 
 const report = await checkCatalogEntry(entryWithUrl, artifactBytes);
 
@@ -109,7 +109,7 @@ For an entry with `url`, supply the artifact bytes obtained by your application.
 Use `checkCatalogEntryTrustManifest()` when your application supplies the verification key, such as when implementing a different signer profile:
 
 ```ts
-import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/verification';
+import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/node';
 
 const result = await checkCatalogEntryTrustManifest(
   entryWithUrl,
@@ -156,8 +156,13 @@ To add a signed endorsement, declare the entry's artifact digest, sign a Trust M
 ```ts
 import { readFile } from 'node:fs/promises';
 import { CompactSign } from 'jose';
-import { assertValidCatalog, mediaTypes, type AICatalog } from 'ai-catalog-sdk';
-import { createDigest, signTrustManifest } from 'ai-catalog-sdk/verification';
+import {
+  assertValidCatalog,
+  createDigest,
+  mediaTypes,
+  signTrustManifest,
+  type AICatalog,
+} from 'ai-catalog-sdk/node';
 
 const artifactBytes = await readFile('example-agent-plugin.zip');
 const entry = {
@@ -188,15 +193,17 @@ The digest must describe the exact bytes published at `entry.url`. For an inline
 
 ## Choose an API
 
+The `ai-catalog-sdk` entry point provides parsing and authoring without importing Node.js built-in modules in its runtime or type declarations. For Node.js applications, `ai-catalog-sdk/node` exports every root API and adds discovery, verification, and signing.
+
 | Task | API | Import path |
 | --- | --- | --- |
 | Parse catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `ai-catalog-sdk` |
 | Parse a catalog from an existing JSON value | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
 | Parse one catalog entry from an existing JSON value | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
-| Discover a catalog from a website URL | `discoverCatalog()` | `ai-catalog-sdk/discovery` |
-| Check a catalog signature with a supplied public key | `checkCatalogSignature()` | `ai-catalog-sdk/verification` |
-| Check an entry and its selected endorsements | `checkCatalogEntry()` | `ai-catalog-sdk/verification` |
-| Check one explicit Trust Manifest against an entry with a supplied public key | `checkCatalogEntryTrustManifest()` | `ai-catalog-sdk/verification` |
+| Discover a catalog from a website URL | `discoverCatalog()` | `ai-catalog-sdk/node` |
+| Check a catalog signature with a supplied public key | `checkCatalogSignature()` | `ai-catalog-sdk/node` |
+| Check an entry and its selected endorsements | `checkCatalogEntry()` | `ai-catalog-sdk/node` |
+| Check one explicit Trust Manifest against an entry with a supplied public key | `checkCatalogEntryTrustManifest()` | `ai-catalog-sdk/node` |
 | Validate an assembled catalog before serialization | `assertValidCatalog()` | `ai-catalog-sdk` |
 | Compose structural validation with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
 | Use JSON Schema in TypeScript or JavaScript | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
