@@ -21,5 +21,5 @@ export const implementedSpecRevision = {
   source: 'specification/ai-catalog.md',
 
   /** Full Git commit identifying the exact upstream source revision. */
-  commit: '9aac2c1bfa622356e45a31f3dc1d342bdb329e00',
+  commit: '66def4ad23fe11bb7a5cc21d169b8fe7fce78636',
 } as const;

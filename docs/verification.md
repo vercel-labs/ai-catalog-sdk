@@ -70,7 +70,7 @@ When the entry declares a digest, the SDK checks it against the supplied artifac
 
 ### Interpret manifest results
 
-In a `checkCatalogEntry()` report, `passed` means the selected signer profile authenticated the contributor, the signed subject matches the entry and artifact, and the endorsement satisfies its time window with the configured tolerance. The result's `isPublisherEndorsement` is true only when that contribution also satisfies the `did:web` Publisher Profile. For example, the publisher for `urn:air:example.com:agent:billing` is exactly `did:web:example.com`. The SDK does not infer this relationship from an artifact URL or informational publisher metadata.
+In a `checkCatalogEntry()` report, `passed` means the selected signer profile authenticated the contributor, the signed subject matches the entry and artifact, and the endorsement satisfies its time window with the configured tolerance. The result's `isPublisherEndorsement` is true only when that contribution also satisfies the `did:web` Publisher Profile, which recognizes `urn:air:{publisher}:{name}[:{kind}]` identifiers. For example, the publisher for `urn:air:example.com:agent:billing` is exactly `did:web:example.com`. The SDK does not infer this relationship from an artifact URL or informational publisher metadata.
 
 A passing assessor contribution, or a passing contribution for an entry outside the Publisher Profile's identifier syntax, has `isPublisherEndorsement: false`. That value means the SDK did not establish the profile-defined publisher relationship. Applications can require a passing publisher result, particular assessors, or their own combination of evidence by inspecting the report.
 
@@ -121,7 +121,7 @@ Publisher-only selection does not require such a manifest to exist: when none ma
 
 ### Network and time controls
 
-The SDK supports the [`did-web-v1` Signer Profile](https://github.com/Agent-Card/ai-catalog/blob/9aac2c1bfa622356e45a31f3dc1d342bdb329e00/specification/ai-catalog.md#the-did-web-signer-profile) for root `did:web` contributors using ES256. It resolves the contributor's current DID document and checks that the signing key is authorized for assertions.
+The SDK supports the [`did-web-v1` Signer Profile](https://github.com/Agent-Card/ai-catalog/blob/66def4ad23fe11bb7a5cc21d169b8fe7fce78636/specification/ai-catalog.md#the-did-web-signer-profile) for root `did:web` contributors using ES256. It resolves the contributor's current DID document and checks that the signing key is authorized for assertions.
 
 ```ts
 const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {

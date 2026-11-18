@@ -490,6 +490,32 @@ describe('checkCatalogEntry', () => {
     }
   });
 
+  it.each([
+    ['urn:air:example.com:billing', true],
+    ['urn:air:example.com:finance/billing:custom-kind', true],
+    ['urn:air:example.com:finance:agent:billing', false],
+    ['urn:air:example.com:billing::future', false],
+  ] as const)('classifies and selects publisher endorsements for %s', async (entryIdentifier, isPublisherEndorsement) => {
+    const manifest = signManifest({
+      contributor: publisher,
+      subject: { identifier: entryIdentifier, type, digest: digestOf(artifact) },
+    });
+    const entry = { ...entryFor([manifest]), identifier: entryIdentifier };
+    expect(await statuses(entry)).toMatchObject([
+      { status: 'passed', isPublisherEndorsement },
+    ]);
+
+    resolver.mockClear();
+    const selected = await statuses(entry, {
+      contributors: [],
+      alwaysCheckPublisherManifests: true,
+    });
+    expect(selected.map(({ status }) => status)).toEqual([
+      isPublisherEndorsement ? 'passed' : 'not_checked',
+    ]);
+    expect(resolver).toHaveBeenCalledTimes(isPublisherEndorsement ? 1 : 0);
+  });
+
   it('publisher-only selection does not require a publisher manifest to exist', async () => {
     const manifest = manifestFor(assessor);
     await expect(

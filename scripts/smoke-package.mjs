@@ -186,7 +186,7 @@ for (const futureFields of [{}, { futureEvidence: null }]) {
   assert.equal(aiCatalogSchema.safeParse(malformedCatalog).success, false);
 }
 assert.equal(aiCatalogJsonSchema.$id, rawSchema.$id);
-assert.equal(implementedSpecRevision.commit, '9aac2c1bfa622356e45a31f3dc1d342bdb329e00');
+assert.equal(implementedSpecRevision.commit, '66def4ad23fe11bb7a5cc21d169b8fe7fce78636');
 const decode = bytes => new TextDecoder().decode(bytes);
 assert.equal(decode(canonicalizeJsonValueToBytes({ b: 2, a: 1 })), '{"a":1,"b":2}');
 const signatureMetadata = { signer: 'did:example:alice', profile: 'https://example.com/profiles/custom-v1', issuedAt: '2026-08-31T00:00:00Z' };
