@@ -14,7 +14,7 @@ import type { TrustManifest } from '../src/types.js';
 
 const identity = 'did:web:example.com';
 const kid = `${identity}#release-key`;
-const identifier = 'urn:air:example.com:finance:agent:billing';
+const identifier = 'urn:air:example.com:finance/billing:agent';
 const publicKey = generateKeyPairSync('ec', {
   namedCurve: 'prime256v1',
 }).publicKey;
@@ -80,9 +80,21 @@ describe('Signer and Publisher Profile requirements', () => {
   });
 
   it.each([
+    'urn:air:example.com:billing',
+    'urn:air:example.com:finance.billing',
+    'urn:air:example.com:billing:custom-kind',
+    'urn:air:example.com:billing%3Avariant',
+  ])('derives the publisher from %s', (value) => {
+    expect(publisherIdentityFor(value)).toBe(identity);
+  });
+
+  it.each([
     'https://example.com/agent/billing',
     'URN:air:example.com:agent:billing',
-    'urn:air:example.com:billing',
+    'urn:air:example.com',
+    'urn:air:example.com:',
+    'urn:air:example.com:finance:agent:billing',
+    'urn:air:example.com:billing::future',
     'urn:air:example.com:agent:',
     'urn:air:example.com::billing',
     'urn:air:example.com:agent:bill ing',

@@ -94,7 +94,7 @@ describe('native did:web transport', () => {
     const identity = 'did:web:publisher.example';
     const kid = `${identity}#release-key`;
     const data = { amount: 123, currency: 'USD' };
-    const identifier = 'urn:air:publisher.example:finance:agent:billing';
+    const identifier = 'urn:air:publisher.example:finance/billing:agent';
     const type = 'application/json';
     const manifest = {
       contributor: identity,

@@ -2,4 +2,4 @@
 
 ## Unreleased
 
-- Initial private-incubation implementation for AI Catalog specification commit `9aac2c1bfa622356e45a31f3dc1d342bdb329e00`.
+- Initial private-incubation implementation for AI Catalog specification commit `66def4ad23fe11bb7a5cc21d169b8fe7fce78636`.

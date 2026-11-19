@@ -64,7 +64,8 @@ export function publisherIdentityFor(identifier: string): string | undefined {
   const publisher = components[2];
   if (
     !identifier.startsWith('urn:air:') ||
-    components.length < 5 ||
+    components.length < 4 ||
+    components.length > 5 ||
     publisher === undefined ||
     !validPublisherDomain(publisher) ||
     !components.slice(3).every((component) => airTail.test(component))
