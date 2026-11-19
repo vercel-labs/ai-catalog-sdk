@@ -12,13 +12,13 @@ const metadata = {
 const catalogWithFutureDepth = (depth: number): AICatalog => {
   let future: JsonValue = null;
   for (let index = 0; index < depth; index += 1) future = { next: future };
-  return { specVersion: '1.0', entries: [], future } as AICatalog;
+  return { specVersion: '0.9', entries: [], future } as AICatalog;
 };
 
 describe('createCatalogSignaturePayload', () => {
   it('omits only immediate signature.jws and additionalSignatures while retaining metadata', () => {
     const catalog = {
-      ...{ specVersion: '1.0', entries: [] },
+      ...{ specVersion: '0.9', entries: [] },
       signature: { ...metadata, jws: 'detached-jws', future: true },
       additionalSignatures: [{ anything: true }],
       Signature: 'case-sensitive',
@@ -29,7 +29,7 @@ describe('createCatalogSignaturePayload', () => {
     } as AICatalog & Record<string, JsonValue>;
     const payload = JSON.parse(decode(createCatalogSignaturePayload(catalog)));
     expect(payload).toEqual({
-      ...{ specVersion: '1.0', entries: [] },
+      ...{ specVersion: '0.9', entries: [] },
       signature: { ...metadata, future: true },
       Signature: 'case-sensitive',
       future: {
@@ -44,7 +44,7 @@ describe('createCatalogSignaturePayload', () => {
 
   it('accepts pre-sign metadata and produces the same payload after adding jws', () => {
     const preSign = {
-      ...{ specVersion: '1.0', entries: [] },
+      ...{ specVersion: '0.9', entries: [] },
       signature: metadata,
     };
     const signed = {
@@ -64,7 +64,7 @@ describe('createCatalogSignaturePayload', () => {
   });
 
   it('does not require a schema-valid document to create a payload', () => {
-    const catalog = { specVersion: '1.0', entries: [] };
+    const catalog = { specVersion: '0.9', entries: [] };
     expect(JSON.parse(decode(createCatalogSignaturePayload(catalog)))).toEqual(
       catalog,
     );
@@ -72,7 +72,7 @@ describe('createCatalogSignaturePayload', () => {
 
   it('returns fresh bytes and preserves frozen null-prototype inputs', () => {
     const catalog = Object.assign(Object.create(null), {
-      ...{ specVersion: '1.0', entries: [] },
+      ...{ specVersion: '0.9', entries: [] },
       signature: Object.freeze({ ...metadata, jws: 'detached-jws' }),
     }) as AICatalog;
     Object.freeze(catalog);
@@ -87,7 +87,7 @@ describe('createCatalogSignaturePayload', () => {
 
   it('preserves an own __proto__ member safely', () => {
     const catalog = JSON.parse(
-      '{"specVersion":"1.0","entries":[],"signature":{"jws":"omitted"},"__proto__":{"signature":"nested"}}',
+      '{"specVersion":"0.9","entries":[],"signature":{"jws":"omitted"},"__proto__":{"signature":"nested"}}',
     ) as AICatalog;
     const payload = JSON.parse(decode(createCatalogSignaturePayload(catalog)));
     expect(Object.hasOwn(payload, '__proto__')).toBe(true);
@@ -97,7 +97,7 @@ describe('createCatalogSignaturePayload', () => {
 
   it('rejects accessors without reading them, including the omitted member', () => {
     let reads = 0;
-    const catalog: AICatalog = { specVersion: '1.0', entries: [] };
+    const catalog: AICatalog = { specVersion: '0.9', entries: [] };
     Object.defineProperty(catalog, 'signature', {
       enumerable: true,
       get() {
@@ -140,7 +140,7 @@ describe('createCatalogSignaturePayload', () => {
     ).toThrow(TypeError);
     expect(() =>
       createCatalogSignaturePayload({
-        specVersion: '1.0',
+        specVersion: '0.9',
         entries: [],
         signature: proxied(),
       } as unknown as AICatalog),
@@ -149,7 +149,7 @@ describe('createCatalogSignaturePayload', () => {
   });
 
   it('rejects non-enumerable and non-JSON signature members', () => {
-    const hidden: AICatalog = { specVersion: '1.0', entries: [] };
+    const hidden: AICatalog = { specVersion: '0.9', entries: [] };
     Object.defineProperty(hidden, 'signature', {
       value: 'detached-jws',
     });
@@ -157,7 +157,7 @@ describe('createCatalogSignaturePayload', () => {
 
     expect(() =>
       createCatalogSignaturePayload({
-        specVersion: '1.0',
+        specVersion: '0.9',
         entries: [],
         signature: () => 'detached-jws',
       } as unknown as AICatalog),

@@ -1,9 +1,9 @@
 const sha256 = `sha256:${'a'.repeat(64)}`;
 
 export const validFixtures: readonly unknown[] = [
-  { specVersion: '1.0', entries: [] },
+  { specVersion: '0.9', entries: [] },
   {
-    specVersion: '1.99',
+    specVersion: '0.99',
     futureCatalogField: { preserved: true },
     host: {
       displayName: 'Example Host',
@@ -54,7 +54,7 @@ export const validFixtures: readonly unknown[] = [
     ],
   },
   {
-    specVersion: '1.0',
+    specVersion: '0.9',
     entries: [
       {
         identifier: 'urn:air:example.com:artifact:trust-schema',
@@ -77,7 +77,7 @@ export const validFixtures: readonly unknown[] = [
     ],
   },
   {
-    specVersion: '1.99',
+    specVersion: '0.99',
     entries: [
       {
         identifier: 'future-content',
@@ -97,17 +97,17 @@ export const validFixtures: readonly unknown[] = [
 export const invalidDeclarationFixtures: readonly unknown[] = [
   {},
   { specVersion: '1', entries: [] },
-  { specVersion: '1.0', entries: [{}] },
+  { specVersion: '0.9', entries: [{}] },
   {
-    specVersion: '1.0',
+    specVersion: '0.9',
     entries: [{ identifier: 'x', type: 'x', url: 'u', data: null }],
   },
   {
-    specVersion: '1.0',
+    specVersion: '0.9',
     entries: [{ identifier: 'x', type: 'x' }],
   },
   {
-    specVersion: '1.0',
+    specVersion: '0.9',
     entries: [
       {
         identifier: 'x',
@@ -119,7 +119,7 @@ export const invalidDeclarationFixtures: readonly unknown[] = [
     ],
   },
   {
-    specVersion: '1.0',
+    specVersion: '0.9',
     entries: [
       {
         identifier: 'x',
@@ -136,7 +136,7 @@ export const invalidDeclarationFixtures: readonly unknown[] = [
     ],
   },
   {
-    specVersion: '1.0',
+    specVersion: '0.9',
     entries: [
       {
         identifier: 'x',
@@ -147,7 +147,7 @@ export const invalidDeclarationFixtures: readonly unknown[] = [
     ],
   },
   {
-    specVersion: '1.0',
+    specVersion: '0.9',
     entries: [
       {
         identifier: 'x',
@@ -175,7 +175,7 @@ export const invalidDeclarationFixtures: readonly unknown[] = [
     { identifier: 'x', version: null, type: 'custom', digest: sha256 },
     { identifier: 'x', version: 42, type: 'custom', digest: sha256 },
   ].map((subject) => ({
-    specVersion: '1.0',
+    specVersion: '0.9',
     entries: [
       {
         identifier: 'x',

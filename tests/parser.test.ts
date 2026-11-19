@@ -33,8 +33,8 @@ describe('root parsing', () => {
     const cause = new RangeError('JSON backend unavailable');
     const parse = vi.spyOn(JSON, 'parse').mockImplementation(() => { throw cause; });
     try {
-      expect(() => safeParseCatalogJson('{"specVersion":"1.0","entries":[]}')).toThrow(cause);
-      expect(() => parseCatalogJson('{"specVersion":"1.0","entries":[]}')).toThrow(cause);
+      expect(() => safeParseCatalogJson('{"specVersion":"0.9","entries":[]}')).toThrow(cause);
+      expect(() => parseCatalogJson('{"specVersion":"0.9","entries":[]}')).toThrow(cause);
     } finally {
       parse.mockRestore();
     }
@@ -50,10 +50,10 @@ describe('root parsing', () => {
   it.each([
     {},
     { specVersion: '1', entries: [] },
-    { specVersion: '1.0', entries: [{}] },
-    { specVersion: '1.0', entries: [{ identifier: 'x', type: 'custom' }] },
+    { specVersion: '0.9', entries: [{}] },
+    { specVersion: '0.9', entries: [{ identifier: 'x', type: 'custom' }] },
     {
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [{ identifier: 'x', type: 'custom', url: 'u', data: null }],
     },
     ...[
@@ -75,7 +75,7 @@ describe('root parsing', () => {
       { contributor: 'urn:x', attestations: [{}] },
       null,
     ].map((manifest) => ({
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [
         {
           identifier: 'x',
@@ -116,9 +116,15 @@ describe('root parsing', () => {
     }
   });
 
+  it.each(['0.9', '0.10'])('accepts specification version %s through object and JSON parsers', (specVersion) => {
+    const catalog = { specVersion, entries: [] };
+    expect(parseCatalog(catalog)).toEqual(catalog);
+    expect(parseCatalogJson(JSON.stringify(catalog))).toEqual(catalog);
+  });
+
   it('dispatches supported majors without numeric precision loss', () => {
     expect(
-      safeParseCatalog({ specVersion: '01.999', entries: [] }).success,
+      safeParseCatalog({ specVersion: '00.999', entries: [] }).success,
     ).toBe(true);
     const result = safeParseCatalog({
       specVersion: '999999999999999999999.0',
@@ -130,9 +136,9 @@ describe('root parsing', () => {
     }
   });
 
-  it('preserves unknown-only manifest content in higher 1.x minors', () => {
+  it('preserves unknown-only manifest content in higher 0.x minors', () => {
     const value = {
-      specVersion: '1.99',
+      specVersion: '0.99',
       entries: [
         {
           identifier: 'x',
@@ -165,7 +171,7 @@ describe('root parsing', () => {
       ],
       [{ ...entry, version: '1' }, entry],
     ]) {
-      const catalog = { specVersion: '1.0', entries };
+      const catalog = { specVersion: '0.9', entries };
       expect(parseCatalog(catalog)).toEqual(catalog);
     }
   });
@@ -201,7 +207,7 @@ describe('root parsing', () => {
     };
     expect(parseCatalogEntry(entry)).toEqual(entry);
     expect(
-      parseCatalog({ specVersion: '1.0', entries: [entry] }).entries[0],
+      parseCatalog({ specVersion: '0.9', entries: [entry] }).entries[0],
     ).toEqual(entry);
   });
 
@@ -250,7 +256,7 @@ describe('root parsing', () => {
       };
       expect(parseCatalogEntry(entry)).toEqual(entry);
       expect(
-        parseCatalog({ specVersion: '1.0', entries: [entry] }).entries[0],
+        parseCatalog({ specVersion: '0.9', entries: [entry] }).entries[0],
       ).toEqual(entry);
     }
   });
@@ -285,7 +291,7 @@ describe('root parsing', () => {
     ),
   )('preserves host.trustManifest as any unknown JSON property: %j', (value) => {
     const parsed = parseCatalog({
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [],
       host: { displayName: 'Host', trustManifest: value, arbitrary: value },
     });
@@ -300,7 +306,7 @@ describe('root parsing', () => {
     for (const value of [undefined, () => null, new Date()]) {
       expect(
         safeParseCatalog({
-          specVersion: '1.0',
+          specVersion: '0.9',
           entries: [],
           host: { displayName: 'Host', trustManifest: value },
         }).success,
@@ -384,7 +390,7 @@ describe('JSON text parsing', () => {
     const value = {
       toString() {
         coercions += 1;
-        return '{"specVersion":"1.0","entries":[]}';
+        return '{"specVersion":"0.9","entries":[]}';
       },
     };
     const result = safeParseCatalogJson(value as unknown as string);
@@ -396,7 +402,7 @@ describe('JSON text parsing', () => {
 describe('bounded diagnostics', () => {
   it('does not label exactly the issue budget as truncated', () => {
     const result = safeParseCatalog({
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: Array.from({ length: 100 }, () => ({})),
     });
     expect(result.success).toBe(false);
@@ -415,7 +421,7 @@ describe('bounded diagnostics', () => {
 
   it('inspects one issue beyond the budget and appends truncation', () => {
     const result = safeParseCatalog({
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: Array.from({ length: 101 }, () => ({})),
     });
     expect(result.success).toBe(false);
@@ -487,7 +493,7 @@ describe('bounded diagnostics', () => {
       },
     ],
   ] as const)('bounds issues in %s', (_name, entry) => {
-    const result = safeParseCatalog({ specVersion: '1.0', entries: [entry] });
+    const result = safeParseCatalog({ specVersion: '0.9', entries: [entry] });
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues).toHaveLength(101);
@@ -587,7 +593,7 @@ describe('independent contributions', () => {
         },
       ],
     };
-    const catalog = { specVersion: '1.0', signature, entries: [entry] };
+    const catalog = { specVersion: '0.9', signature, entries: [entry] };
     expect(parseCatalog(catalog)).toEqual(catalog);
   });
 
@@ -628,7 +634,7 @@ describe('independent contributions', () => {
       }).success,
     ).toBe(true);
     expect(
-      safeParseCatalog({ specVersion: '1.0', entries: [], signature }).success,
+      safeParseCatalog({ specVersion: '0.9', entries: [], signature }).success,
     ).toBe(true);
   });
 });

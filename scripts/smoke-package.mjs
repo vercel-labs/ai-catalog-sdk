@@ -95,7 +95,7 @@ import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)}
 import { discoverCatalog, loadCatalogFromEntry, canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryTrustManifest, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(`${pkg.name}/node`)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
-const value = { specVersion: '1.0', entries: [] };
+const value = { specVersion: '0.9', entries: [] };
 for (const [name, value] of Object.entries(core)) assert.equal(nodeApi[name], value);
 for (const name of ['discoverCatalog', 'loadCatalogFromEntry', 'checkCatalogEntry', 'createDigest', 'signTrustManifest']) {
   assert.equal(Object.hasOwn(core, name), false);
@@ -151,6 +151,7 @@ await assert.rejects(loadCatalogFromEntry(catalogLoadEntry, {
   signal: discoveryCancellation.signal,
 }), error => error === discoveryCancellationReason);
 assert.deepEqual(parseCatalog(value).entries, []);
+assert.throws(() => parseCatalog({ ...value, specVersion: '1.0' }), CatalogParseError);
 assert.equal(assertValidCatalog(value), undefined);
 assert.throws(() => parseCatalog({ ...value, entries: [null] }), CatalogParseError);
 const opaqueHostManifest = { formerField: ['opaque', 1, null] };
@@ -186,7 +187,9 @@ for (const futureFields of [{}, { futureEvidence: null }]) {
   assert.equal(aiCatalogSchema.safeParse(malformedCatalog).success, false);
 }
 assert.equal(aiCatalogJsonSchema.$id, rawSchema.$id);
-assert.equal(implementedSpecRevision.commit, '66def4ad23fe11bb7a5cc21d169b8fe7fce78636');
+assert.equal(implementedSpecRevision.commit, '19208af2f8adbc0a6457e3ff36ce691a304fbd97');
+assert.equal(implementedSpecRevision.specVersion, '0.9');
+assert.equal(implementedSpecRevision.status, 'release-candidate');
 const decode = bytes => new TextDecoder().decode(bytes);
 assert.equal(decode(canonicalizeJsonValueToBytes({ b: 2, a: 1 })), '{"a":1,"b":2}');
 const signatureMetadata = { signer: 'did:example:alice', profile: 'https://example.com/profiles/custom-v1', issuedAt: '2026-08-31T00:00:00Z' };
@@ -469,7 +472,7 @@ const hooks = registerHooks({
 try {
   const core = await import(${JSON.stringify(pkg.name)});
   const catalog = core.parseCatalog({
-    specVersion: '1.0',
+    specVersion: '0.9',
     entries: [{ identifier: 'inline', type: 'application/json', data: null }],
   });
   core.assertValidCatalog(catalog);
@@ -506,7 +509,7 @@ try {
   safeParseCatalogJson,
 } from '${pkg.name}';
 
-const authored: AICatalog = { specVersion: '1.0', entries: [] };
+const authored: AICatalog = { specVersion: '0.9', entries: [] };
 const parsed: AICatalog = parseCatalog(authored);
 const candidate: unknown = parsed;
 assertValidCatalog(candidate);
@@ -634,11 +637,11 @@ import rawSchema from '${pkg.name}/schema/ai-catalog.schema.json' with { type: '
 import * as nodeApi from '${pkg.name}/node';
 
 const nodeCore: typeof import('${pkg.name}') = nodeApi;
-const nodeCatalog: import('${pkg.name}/node').AICatalog = { specVersion: '1.0', entries: [] };
+const nodeCatalog: import('${pkg.name}/node').AICatalog = { specVersion: '0.9', entries: [] };
 const coreCatalog: import('${pkg.name}').AICatalog = nodeCatalog;
 void nodeCore; void coreCatalog;
 
-const authored: AICatalog = { specVersion: '1.0', entries: [] };
+const authored: AICatalog = { specVersion: '0.9', entries: [] };
 const loaderOptions: import('${pkg.name}/node').LoadCatalogFromEntryOptions = {
   baseUrl: 'https://example.com/root.json', signal: new AbortController().signal,
   resourceTimeoutMs: 120_000, maxResponseBytes: 64 * 1024 * 1024,

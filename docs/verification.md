@@ -121,7 +121,7 @@ Publisher-only selection does not require such a manifest to exist: when none ma
 
 ### Network and time controls
 
-The SDK supports the [`did-web-v1` Signer Profile](https://github.com/Agent-Card/ai-catalog/blob/66def4ad23fe11bb7a5cc21d169b8fe7fce78636/specification/ai-catalog.md#the-did-web-signer-profile) for root `did:web` contributors using ES256. It resolves the contributor's current DID document and checks that the signing key is authorized for assertions.
+The SDK supports the [`did-web-v1` Signer Profile](https://github.com/Agent-Card/ai-catalog/blob/19208af2f8adbc0a6457e3ff36ce691a304fbd97/specification/ai-catalog.md#the-did-web-signer-profile) for root `did:web` contributors using ES256. It resolves the contributor's current DID document and checks that the signing key is authorized for assertions.
 
 ```ts
 const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {

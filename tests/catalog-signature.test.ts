@@ -46,7 +46,7 @@ function optionsFor(
 }
 
 const unsignedCatalog = {
-  specVersion: '1.0',
+  specVersion: '0.9',
   host: {
     displayName: 'Example Catalog',
     identifier: 'example.com',

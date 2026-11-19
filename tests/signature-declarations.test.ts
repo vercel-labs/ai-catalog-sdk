@@ -183,7 +183,7 @@ describe('static signature declarations', () => {
 
   it('checks the containing object-specific typ', () => {
     const value: Record<string, JsonValue> = {
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [],
       signature: {
         ...metadata,
@@ -212,7 +212,7 @@ describe('exact signed payload eligibility', () => {
     (nested.signature as Record<string, JsonValue>).jws = '\ud800';
     expect(validateSignedPayload(nested)).toBeUndefined();
     const catalog: Record<string, JsonValue> = {
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [{ trustManifests: [nested] }],
       signature: { ...metadata, jws: '' },
     };

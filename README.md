@@ -12,7 +12,7 @@ import {
 } from 'ai-catalog-sdk';
 
 const source = `{
-  "specVersion": "1.0",
+  "specVersion": "0.9",
   "entries": [
     {
       "identifier": "example-agent-plugin",
@@ -170,7 +170,7 @@ import {
 } from 'ai-catalog-sdk';
 
 const catalog = {
-  specVersion: '1.0',
+  specVersion: '0.9',
   entries: [
     {
       identifier: 'example-agent-plugin',
@@ -218,7 +218,7 @@ const manifest = await signTrustManifest(
 );
 
 const catalogWithEndorsement = {
-  specVersion: '1.0',
+  specVersion: '0.9',
   entries: [{ ...entry, trustManifests: [manifest] }],
 } satisfies AICatalog;
 
@@ -312,12 +312,12 @@ TypeScript NodeNext consumers also need `compilerOptions.resolveJsonModule: true
 
 ## What gets validated
 
-- The `parse*` and `safeParse*` functions check known field shapes and primitive types and reject non-JSON or excessively large or deeply nested inputs. Catalog parsers accept `1.x` values of `specVersion`, such as `1.0` and `1.1`. Declaration formats, ranges, and relationships are preserved for explicit validation. For example, a timestamp string such as `"yesterday"` is retained, while a number in that field fails parsing.
+- The `parse*` and `safeParse*` functions check known field shapes and primitive types and reject non-JSON or excessively large or deeply nested inputs. Catalog parsers accept `0.x` values of `specVersion`, such as `0.9` and `0.10`. Declaration formats, ranges, and relationships are preserved for explicit validation. For example, a timestamp string such as `"yesterday"` is retained, while a number in that field fails parsing.
 - `assertValidCatalog()` checks an assembled catalog’s declaration formats, constraints, and relationships, including entry uniqueness, subject/entry correspondence, signer/contributor equality, and timestamp ordering. It also checks digest declarations, signature representations and signed-payload eligibility, and locally checkable requirements of supported signer profiles. Unfamiliar but well-formed profiles and algorithms do not fail solely because the SDK cannot verify them.
 - The Zod schemas validate their declared structure and constraints with native Zod errors and behavior. They do not apply the root parsers’ defensive input limits or the complete authoring assertion’s checks.
 - The JSON Schema describes portable document constraints. Format enforcement depends on the validator; use `assertValidCatalog()` for the document relationships and signature/payload checks described above.
 
-The SDK targets an exact prerelease specification snapshot. See [Specification snapshot interpretation](./docs/spec-interpretation.md) for the pinned revision and how conflicts in that snapshot are handled.
+The SDK targets AI Catalog v0.9, the v1.0 release candidate, at an exact specification snapshot. See [Specification snapshot interpretation](./docs/spec-interpretation.md) for the pinned revision and how conflicts in that snapshot are handled.
 
 ## Requirements
 

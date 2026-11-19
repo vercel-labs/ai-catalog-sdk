@@ -51,8 +51,8 @@ import { checkCatalogEntry, createDigest } from '../src/verification.js';
 const url = 'https://publisher.example/catalog.json';
 const catalogType = 'application/ai-catalog+json';
 const urlEntry: CatalogEntryWithUrl = { identifier: 'catalog', type: catalogType, url };
-const catalog = { specVersion: '1.0', entries: [] };
-const body = ' {\n  "entries": [], "specVersion": "1.0"\n}\n';
+const catalog = { specVersion: '0.9', entries: [] };
+const body = ' {\n  "entries": [], "specVersion": "0.9"\n}\n';
 const artifactBytes = new TextEncoder().encode(body);
 const options = { resourceTimeoutMs: 2_000, maxResponseBytes: 16_384 };
 let server: Server;
@@ -140,7 +140,7 @@ describe('loadCatalogFromEntry', () => {
     const inlineEntry: CatalogEntryWithData = {
       identifier: 'inline', type: catalogType,
       data: {
-        specVersion: '1.0',
+        specVersion: '0.9',
         entries: [{ identifier: 'grandchild', type: catalogType, url: './grandchild.json' }],
       },
     };
@@ -148,7 +148,7 @@ describe('loadCatalogFromEntry', () => {
       if (request.url === '/catalog.json') {
         response.writeHead(302, { location: finalUrl }).end();
       } else if (request.url === '/releases/final.json') {
-        response.end(JSON.stringify({ specVersion: '1.0', entries: [inlineEntry] }));
+        response.end(JSON.stringify({ specVersion: '0.9', entries: [inlineEntry] }));
       } else if (request.url === '/releases/grandchild.json') {
         response.end(body);
       } else {
@@ -182,7 +182,7 @@ describe('loadCatalogFromEntry', () => {
 
   it('preserves unknown catalog fields and declarations for subsequent validation', async () => {
     const document = {
-      specVersion: '1.1', future: { retained: true },
+      specVersion: '0.10', future: { retained: true },
       entries: [{ identifier: 'not an AIR identifier', type: 'custom', url: './artifact', digest: 'invalid' }],
     };
     for (const entry of [urlEntry, { identifier: 'inline', type: catalogType, data: document }]) {
@@ -221,7 +221,7 @@ describe('loadCatalogFromEntry', () => {
     expect(requests).toEqual([url]);
   });
 
-  it.each(['{', '{"specVersion":"1.0","entries":[{}]}', Buffer.from([0xff, 0xfe])])(
+  it.each(['{', '{"specVersion":"0.9","entries":[{}]}', Buffer.from([0xff, 0xfe])])(
     'reports malformed fetched catalogs without returning source bytes: %j', async (source) => {
       respond = (_request, response) => response.end(source);
       await expect(loadCatalogFromEntry(urlEntry, options)).resolves.toEqual({

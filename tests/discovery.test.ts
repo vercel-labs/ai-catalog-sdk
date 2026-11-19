@@ -48,7 +48,7 @@ import { CatalogParseError } from '../src/types.js';
 
 const website = 'https://publisher.example/start';
 const wellKnown = '/.well-known/ai-catalog.json';
-const catalog = { specVersion: '1.0', entries: [] };
+const catalog = { specVersion: '0.9', entries: [] };
 const body = JSON.stringify(catalog);
 const options = { resourceTimeoutMs: 2_000, maxResponseBytes: 16_384 };
 let server: Server;
@@ -198,7 +198,7 @@ describe('native HTTPS catalog discovery', () => {
   it('reports an advertised invalid catalog without trying the well-known URL', async () => {
     respond = (request, response) => {
       if (request.url === '/start') response.writeHead(200, { link: '</broken>; rel="ai-catalog"' }).end();
-      else response.end('{"specVersion":"1.0","entries":[{}]}');
+      else response.end('{"specVersion":"0.9","entries":[{}]}');
     };
     await expect(discoverCatalog(website, options)).resolves.toMatchObject({
       status: 'invalid_catalog', url: 'https://publisher.example/broken', error: expect.any(CatalogParseError),
@@ -252,7 +252,7 @@ describe('native HTTPS catalog discovery', () => {
 
   it('parses structures without imposing authoring validation, media-type checks or artifact retrieval', async () => {
     const document = {
-      specVersion: '1.0',
+      specVersion: '0.9',
       futureCatalogField: { retained: true },
       entries: [{ identifier: 'not an AIR identifier', type: 'custom', url: 'not an absolute URL', digest: 'invalid' }],
     };
@@ -342,7 +342,7 @@ describe('native HTTPS catalog discovery', () => {
     respond = (request, response) => {
       if (request.url === '/start') response.end();
       else {
-        response.write('{"specVersion":"1.0","entries":[],"padding":"');
+        response.write('{"specVersion":"0.9","entries":[],"padding":"');
         response.end(`${'x'.repeat(1_000)}"}`);
       }
     };

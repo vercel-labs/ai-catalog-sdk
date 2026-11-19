@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { safeParseCatalog } from '../src/index.js';
 
 const minimal = (future?: unknown) => ({
-  specVersion: '1.0',
+  specVersion: '0.9',
   entries: [],
   ...(future === undefined ? {} : { future }),
 });
@@ -26,7 +26,7 @@ describe('programmatic JSON preflight', () => {
       safeParseCatalog(minimal({ first: shared, second: shared })).success,
     ).toBe(true);
     const catalog = Object.assign(Object.create(null), {
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [],
     });
     expect(safeParseCatalog(catalog).success).toBe(true);
@@ -46,7 +46,7 @@ describe('programmatic JSON preflight', () => {
   it('rejects non-JSON primitives and non-finite numbers', () => {
     for (const value of [undefined, 1n, Symbol('x'), () => {}, NaN, Infinity]) {
       expect(
-        safeParseCatalog({ specVersion: '1.0', entries: [], future: value })
+        safeParseCatalog({ specVersion: '0.9', entries: [], future: value })
           .success,
       ).toBe(false);
     }
@@ -87,7 +87,7 @@ describe('programmatic JSON preflight', () => {
     expect(
       safeParseCatalog(
         JSON.parse(
-          '{"specVersion":"1.0","entries":[],"future":{"__proto__":{}}}',
+          '{"specVersion":"0.9","entries":[],"future":{"__proto__":{}}}',
         ),
       ).success,
     ).toBe(false);
