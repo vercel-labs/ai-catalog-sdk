@@ -324,7 +324,7 @@ The SDK targets AI Catalog v0.9, the v1.0 release candidate, at an exact specifi
 - Node.js `>=22.20.0`
 - ES modules only
 - TypeScript `>=5.5` for typed consumers
-- Zod `^4.4.0` as a peer dependency
+- Zod `^4.6.6` as a peer dependency
 
 ## Development
 
