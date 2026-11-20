@@ -1,7 +1,6 @@
 {
   "name": "ai-catalog-sdk",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Parse, validate, and author JSON-native AI Catalog documents in TypeScript.",
   "repository": {
     "type": "git",
@@ -73,6 +72,11 @@
     "typescript-5-5": "npm:typescript@5.5.4",
     "vitest": "4.1.12",
     "zod": "4.6.6"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
   },
   "engines": {
     "node": ">=22.20.0"
