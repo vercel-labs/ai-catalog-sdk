@@ -251,7 +251,7 @@ describe('checkCatalogEntry', () => {
       expect.objectContaining({ path }),
     ]));
     expect(() => parseCatalogJson(JSON.stringify({
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [entryWithRawManifests([malformed])],
     }))).toThrow(CatalogParseError);
     expect(resolver.mock.calls.map(([identity]) => identity)).toEqual([publisher]);
@@ -298,7 +298,7 @@ describe('checkCatalogEntry', () => {
     if (!malformed.signature) throw new Error('Expected signed manifest');
     Object.assign(malformed.signature, fields);
     const parsed = parseCatalogJson(JSON.stringify({
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [entryFor([malformed, manifestFor()])],
     }));
     const entry = parsed.entries[0];
@@ -425,7 +425,7 @@ describe('checkCatalogEntry', () => {
     affected.identifier = 'urn:air:example.com:agent:other';
     malformed.subject.identifier = affected.identifier;
     const catalog = parseCatalogJson(JSON.stringify({
-      specVersion: '1.0',
+      specVersion: '0.9',
       signature: {
         signer: publisher,
         profile: 'did-web-v1',

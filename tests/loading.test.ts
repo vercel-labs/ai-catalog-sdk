@@ -51,8 +51,8 @@ import { checkCatalogEntry, createDigest } from '../src/verification.js';
 const url = 'https://publisher.example/catalog.json';
 const catalogType = 'application/ai-catalog+json';
 const urlEntry: CatalogEntryWithUrl = { identifier: 'catalog', type: catalogType, url };
-const catalog = { specVersion: '1.0', entries: [] };
-const body = ' {\n  "entries": [], "specVersion": "1.0"\n}\n';
+const catalog = { specVersion: '0.9', entries: [] };
+const body = ' {\n  "entries": [], "specVersion": "0.9"\n}\n';
 const artifactBytes = new TextEncoder().encode(body);
 const options = { resourceTimeoutMs: 2_000, maxResponseBytes: 16_384 };
 let server: Server;
@@ -102,22 +102,27 @@ beforeEach(() => {
 });
 
 describe('loadCatalogFromEntry', () => {
-  it('loads a URL directly and retains the exact bytes used for entry verification', async () => {
-    const entry = { ...urlEntry, digest: createDigest(artifactBytes) };
+  it.each(['0.9', '1.0'])('loads specification version %s from a URL and retains the exact bytes for verification', async (specVersion) => {
+    const document = { ...catalog, specVersion };
+    const source = ` {\n  "entries": [], "specVersion": "${specVersion}"\n}\n`;
+    const bytes = new TextEncoder().encode(source);
+    respond = (_request, response) => response.end(source);
+    const entry = { ...urlEntry, digest: createDigest(bytes) };
     const result = await loadCatalogFromEntry(entry, options);
-    expect(result).toMatchObject({ status: 'found', catalog, url });
+    expect(result).toMatchObject({ status: 'found', catalog: document, url });
     if (result.status !== 'found') throw new Error('Expected a loaded catalog.');
-    expect([...result.bytes]).toEqual([...artifactBytes]);
+    expect([...result.bytes]).toEqual([...bytes]);
     await expect(checkCatalogEntry(entry, result.bytes)).resolves.toEqual({ status: 'checked', manifests: [] });
     await expect(checkCatalogEntry(entry, new TextEncoder().encode(JSON.stringify(result.catalog))))
       .resolves.toEqual({ status: 'artifact_digest_mismatch' });
     expect(requests).toEqual([url]);
   });
 
-  it('parses an inline catalog without network activity, URL metadata or manufactured bytes', async () => {
-    const entry: CatalogEntryWithData = { identifier: 'inline', type: catalogType, data: catalog };
+  it.each(['0.9', '1.0'])('loads inline specification version %s unchanged without network activity', async (specVersion) => {
+    const document = { ...catalog, specVersion };
+    const entry: CatalogEntryWithData = { identifier: 'inline', type: catalogType, data: document };
     const result = await loadCatalogFromEntry(entry);
-    expect(result).toEqual({ status: 'found', catalog });
+    expect(result).toEqual({ status: 'found', catalog: document });
     await expect(checkCatalogEntry({ ...entry, digest: createDigest(entry.data) })).resolves.toEqual({
       status: 'checked', manifests: [],
     });
@@ -140,7 +145,7 @@ describe('loadCatalogFromEntry', () => {
     const inlineEntry: CatalogEntryWithData = {
       identifier: 'inline', type: catalogType,
       data: {
-        specVersion: '1.0',
+        specVersion: '0.9',
         entries: [{ identifier: 'grandchild', type: catalogType, url: './grandchild.json' }],
       },
     };
@@ -148,7 +153,7 @@ describe('loadCatalogFromEntry', () => {
       if (request.url === '/catalog.json') {
         response.writeHead(302, { location: finalUrl }).end();
       } else if (request.url === '/releases/final.json') {
-        response.end(JSON.stringify({ specVersion: '1.0', entries: [inlineEntry] }));
+        response.end(JSON.stringify({ specVersion: '0.9', entries: [inlineEntry] }));
       } else if (request.url === '/releases/grandchild.json') {
         response.end(body);
       } else {
@@ -182,7 +187,7 @@ describe('loadCatalogFromEntry', () => {
 
   it('preserves unknown catalog fields and declarations for subsequent validation', async () => {
     const document = {
-      specVersion: '1.1', future: { retained: true },
+      specVersion: '0.10', future: { retained: true },
       entries: [{ identifier: 'not an AIR identifier', type: 'custom', url: './artifact', digest: 'invalid' }],
     };
     for (const entry of [urlEntry, { identifier: 'inline', type: catalogType, data: document }]) {
@@ -221,7 +226,7 @@ describe('loadCatalogFromEntry', () => {
     expect(requests).toEqual([url]);
   });
 
-  it.each(['{', '{"specVersion":"1.0","entries":[{}]}', Buffer.from([0xff, 0xfe])])(
+  it.each(['{', '{"specVersion":"0.9","entries":[{}]}', Buffer.from([0xff, 0xfe])])(
     'reports malformed fetched catalogs without returning source bytes: %j', async (source) => {
       respond = (_request, response) => response.end(source);
       await expect(loadCatalogFromEntry(urlEntry, options)).resolves.toEqual({

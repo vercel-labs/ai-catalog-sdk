@@ -1,6 +1,5 @@
 import type * as z from 'zod';
 
-import { implementedSpecRevision } from '../spec-revision.js';
 import {
   CatalogParseError,
   type AICatalog,
@@ -27,6 +26,9 @@ import {
 
 const hasOwn = (value: object, key: PropertyKey): boolean =>
   Object.hasOwn(value, key);
+
+// Draft catalogs used major 1 before the specification adopted 0.9 for the RC.
+const supportedSpecMajors = ['0', '1'];
 
 function parseStringArray(
   values: readonly unknown[],
@@ -211,17 +213,15 @@ function parseCatalogValue(
   }
 
   const [major] = result.data.specVersion.split('.');
-  const [supportedMajor] = implementedSpecRevision.specVersion.split('.');
   if (
     major === undefined ||
-    supportedMajor === undefined ||
-    normalizedDecimal(major) !== normalizedDecimal(supportedMajor)
+    !supportedSpecMajors.includes(normalizedDecimal(major))
   ) {
     collector.add(
       issue(
         'unsupported_spec_version',
         ['specVersion'],
-        `This SDK supports AI Catalog major version ${supportedMajor}.`,
+        `This SDK supports AI Catalog major versions ${supportedSpecMajors.join(' and ')}.`,
       ),
     );
     return undefined;

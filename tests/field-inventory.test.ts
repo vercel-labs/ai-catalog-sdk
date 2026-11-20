@@ -158,7 +158,7 @@ describe('pinned specification field inventory', () => {
   it('preserves unknown fields at every nested object boundary', () => {
     const digest = `sha256:${'a'.repeat(64)}`;
     const parsed = parseCatalog({
-      specVersion: '1.0',
+      specVersion: '0.9',
       futureCatalog: true,
       host: {
         displayName: 'Host',

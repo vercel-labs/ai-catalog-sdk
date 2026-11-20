@@ -34,7 +34,7 @@ function signature(fields: Partial<Signature> = {}): Signature {
 
 function catalogFor(manifest?: TrustManifest): AICatalog {
   return {
-    specVersion: '1.0',
+    specVersion: '0.9',
     entries: [
       {
         identifier: 'urn:air:example.com:artifact:one',
@@ -76,12 +76,12 @@ function firstManifest(catalog: AICatalog): TrustManifest {
 describe('assertValidCatalog', () => {
   it('accepts unsigned catalogs and returns no useful value', () => {
     const catalog = {
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [{ identifier: 'x', type: 'custom', data: null }],
     };
     expect(assertValidCatalog(catalog)).toBeUndefined();
     expect(catalog).toEqual({
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [{ identifier: 'x', type: 'custom', data: null }],
     });
   });
@@ -102,7 +102,7 @@ describe('assertValidCatalog', () => {
   it('preserves rather than transforms compatible unknown fields', () => {
     const input = {
       ...catalogFor(),
-      specVersion: '1.99',
+      specVersion: '0.99',
       futureCatalog: { nested: ['x', null] },
     };
     const originalFuture = input.futureCatalog;
@@ -206,7 +206,7 @@ describe('assertValidCatalog', () => {
   it('reports duplicate paths using original input indexes', () => {
     const entry = { identifier: 'x', type: 'custom', data: null };
     const input = {
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [{ ...entry, identifier: 'other' }, entry, entry],
     };
     expect(validationIssues(input)).toEqual(
@@ -227,7 +227,7 @@ describe('assertValidCatalog', () => {
   ] as const)('checks catalog release uniqueness: %j and %j', (first, second, valid) => {
     const entry = { identifier: 'x', type: 'custom', data: null };
     const input = {
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [
         { ...entry, ...(first === undefined ? {} : { version: first }) },
         { ...entry, ...(second === undefined ? {} : { version: second }) },
@@ -371,7 +371,7 @@ describe('assertValidCatalog', () => {
   });
 
   it('rejects unencodable signed payloads but preserves unrelated unsigned metadata', () => {
-    const unsigned = { specVersion: '1.0', entries: [], future: '\ud800' };
+    const unsigned = { specVersion: '0.9', entries: [], future: '\ud800' };
     expect(() => assertValidCatalog(unsigned)).not.toThrow();
     const signedCatalog = {
       ...unsigned,
@@ -395,7 +395,7 @@ describe('assertValidCatalog', () => {
 
   it('provides bounded diagnostics for invalid declarations throughout the assembled document', () => {
     const input = {
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: Array.from({ length: 120 }, () => ({
         identifier: 'x',
         type: 'custom',

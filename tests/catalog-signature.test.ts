@@ -3,7 +3,7 @@ import { generateKeyPairSync, sign, webcrypto } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import type { AICatalog, JsonValue } from '../src/index.js';
+import { type AICatalog, type JsonValue, parseCatalogJson } from '../src/index.js';
 import {
   checkCatalogSignature,
   createCatalogSignaturePayload,
@@ -46,7 +46,7 @@ function optionsFor(
 }
 
 const unsignedCatalog = {
-  specVersion: '1.0',
+  specVersion: '0.9',
   host: {
     displayName: 'Example Catalog',
     identifier: 'example.com',
@@ -84,8 +84,10 @@ const unsignedCatalog = {
 } satisfies AICatalog & { future: JsonValue };
 
 describe('checkCatalogSignature', () => {
-  it('checks a catalog signature with both native public-key handles', async () => {
-    const catalog = signCatalog(unsignedCatalog);
+  it.each(['0.9', '1.0'])('preserves the signed specification version %s through parsing and checks both native public-key handles', async (specVersion) => {
+    const signed = signCatalog({ ...unsignedCatalog, specVersion });
+    const catalog = parseCatalogJson(JSON.stringify(signed));
+    expect(catalog).toEqual(signed);
 
     await expect(checkCatalogSignature(catalog, optionsFor())).resolves.toEqual(
       { status: 'valid' },

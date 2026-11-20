@@ -24,6 +24,18 @@ describe('schema declaration fixtures', () => {
   const withFormats = createValidator(true);
   const withoutFormats = createValidator(false);
 
+  it.each(['2.0', '3.0'])('rejects unsupported major %s only at the root parser boundary', (specVersion) => {
+    const value = { specVersion, entries: [] };
+    const result = safeParseCatalog(value);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.code).toBe('unsupported_spec_version');
+    }
+    expect(aiCatalogSchema.safeParse(value).success).toBe(true);
+    expect(withFormats(value)).toBe(true);
+    expect(withoutFormats(value)).toBe(true);
+  });
+
   it.each(
     validFixtures.map((value, index) => [index, value] as const),
   )('accepts valid fixture %s across root, Zod, and JSON Schema', (_index, value) => {
@@ -43,7 +55,7 @@ describe('schema declaration fixtures', () => {
 
   it('documents calendar validation as format-dependent in JSON Schema', () => {
     const invalidCalendar = {
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [
         {
           identifier: 'x',
@@ -89,7 +101,7 @@ describe('schema declaration fixtures', () => {
         },
       ],
     };
-    const value = { specVersion: '1.0', entries: [entry] };
+    const value = { specVersion: '0.9', entries: [entry] };
     expect(safeParseCatalog(value).success).toBe(true);
     expect(aiCatalogSchema.safeParse(value).success).toBe(true);
     expect(catalogEntrySchema.safeParse(entry).success).toBe(true);
@@ -106,7 +118,7 @@ describe('schema declaration fixtures', () => {
     ),
   )('treats host.trustManifest as generic JSON across schemas: %j', (trustManifest) => {
     const value = {
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [],
       host: { displayName: 'Host', trustManifest },
     };
@@ -119,7 +131,7 @@ describe('schema declaration fixtures', () => {
 describe('public schemas and generated artifact', () => {
   it('exports only complete, independently meaningful Zod schemas', () => {
     expect(
-      aiCatalogSchema.safeParse({ specVersion: '1.0', entries: [] }).success,
+      aiCatalogSchema.safeParse({ specVersion: '0.9', entries: [] }).success,
     ).toBe(true);
     expect(
       catalogEntrySchema.safeParse({ identifier: 'x', type: 'x', data: null })
@@ -135,7 +147,7 @@ describe('public schemas and generated artifact', () => {
 
   it('preserves unknown fields but rejects explicit undefined', () => {
     const value = {
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [],
       future: { retained: true },
     };
@@ -238,7 +250,7 @@ describe('signature structure and schema coverage', () => {
     ] as const) {
       const manifest = { contributor: 'urn:auditor:one', ...content };
       const value = {
-        specVersion: '1.0',
+        specVersion: '0.9',
         entries: [
           {
             identifier: 'x',
@@ -278,7 +290,7 @@ describe('signature structure and schema coverage', () => {
         digest,
         trustManifests: [manifest],
       };
-      const value = { specVersion: '1.0', entries: [entry] };
+      const value = { specVersion: '0.9', entries: [entry] };
       expect(safeParseCatalog(value).success).toBe(parseable);
       expect(aiCatalogSchema.safeParse(value).success).toBe(false);
       expect(catalogEntrySchema.safeParse(entry).success).toBe(false);
@@ -301,7 +313,7 @@ describe('signature structure and schema coverage', () => {
         },
       ],
     };
-    const value = { specVersion: '1.0', entries: [entry] };
+    const value = { specVersion: '0.9', entries: [entry] };
     expect(safeParseCatalog(value).success).toBe(true);
     expect(aiCatalogSchema.safeParse(value).success).toBe(true);
     expect(validate(value)).toBe(true);
@@ -309,7 +321,7 @@ describe('signature structure and schema coverage', () => {
 
   it('enforces timestamp ordering in Zod, beyond ingestion and JSON Schema coverage', () => {
     const value = {
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [],
       signature: { ...signature, expiresAt: signature.issuedAt },
     };
@@ -321,7 +333,7 @@ describe('signature structure and schema coverage', () => {
   it('enforces contributor attribution in Zod, beyond ingestion and JSON Schema coverage', () => {
     const digest = `sha256:${'a'.repeat(64)}`;
     const value = {
-      specVersion: '1.0',
+      specVersion: '0.9',
       entries: [
         {
           identifier: 'x',

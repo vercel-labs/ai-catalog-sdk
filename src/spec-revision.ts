@@ -6,20 +6,15 @@
  * `x-ai-catalog-specification`.
  */
 export const implementedSpecRevision = {
-  /**
-   * Catalog specification version represented by this snapshot.
-   *
-   * Whole-catalog parsers accept `Major.Minor` versions with the same major
-   * component, not only this exact value.
-   */
-  specVersion: '1.0',
+  /** Catalog specification version represented by this snapshot. */
+  specVersion: '0.9',
 
   /** Status of the upstream specification at this snapshot. */
-  status: "editor's-draft",
+  status: 'release-candidate',
 
   /** Path to the specification source within the upstream repository. */
   source: 'specification/ai-catalog.md',
 
   /** Full Git commit identifying the exact upstream source revision. */
-  commit: '66def4ad23fe11bb7a5cc21d169b8fe7fce78636',
+  commit: '19208af2f8adbc0a6457e3ff36ce691a304fbd97',
 } as const;
