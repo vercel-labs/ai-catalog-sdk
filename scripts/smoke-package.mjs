@@ -77,7 +77,7 @@ try {
       '--fetch-retries=1',
       '--fetch-timeout=30000',
       '@types/node@24.12.4',
-      'zod@4.4.0',
+      'zod@4.6.6',
       join(temporaryDirectory, packed.filename),
     ],
     { cwd: consumerDirectory },

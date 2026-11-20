@@ -9,39 +9,44 @@
     "source": "specification/ai-catalog.md",
     "commit": "19208af2f8adbc0a6457e3ff36ce691a304fbd97"
   },
-  "type": "object",
-  "properties": {
-    "specVersion": {
-      "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+$"
-    },
-    "host": {
-      "$ref": "#/$defs/HostInfo"
-    },
-    "entries": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/CatalogEntry"
-      }
-    },
-    "extensions": {
-      "$ref": "#/$defs/__schema17"
-    },
-    "signature": {
-      "$ref": "#/$defs/Signature"
-    },
-    "additionalSignatures": {
-      "$ref": "#/$defs/__schema49"
-    }
-  },
-  "required": [
-    "specVersion",
-    "entries"
-  ],
-  "additionalProperties": {
-    "$ref": "#/$defs/__schema50"
-  },
+  "$ref": "#/$defs/AICatalog",
   "$defs": {
+    "AICatalog": {
+      "type": "object",
+      "properties": {
+        "specVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+$"
+        },
+        "host": {
+          "$ref": "#/$defs/HostInfo"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CatalogEntry"
+          }
+        },
+        "extensions": {
+          "$ref": "#/$defs/__schema17"
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        },
+        "additionalSignatures": {
+          "$ref": "#/$defs/__schema49"
+        }
+      },
+      "required": [
+        "specVersion",
+        "entries"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema50"
+      },
+      "title": "AI Catalog",
+      "description": "An SDK-maintained structural schema for an AI Catalog."
+    },
     "HostInfo": {
       "type": "object",
       "properties": {
