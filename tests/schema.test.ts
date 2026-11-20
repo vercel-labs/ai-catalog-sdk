@@ -24,7 +24,7 @@ describe('schema declaration fixtures', () => {
   const withFormats = createValidator(true);
   const withoutFormats = createValidator(false);
 
-  it.each(['1.0', '2.0'])('rejects unsupported major %s only at the root parser boundary', (specVersion) => {
+  it.each(['2.0', '3.0'])('rejects unsupported major %s only at the root parser boundary', (specVersion) => {
     const value = { specVersion, entries: [] };
     const result = safeParseCatalog(value);
     expect(result.success).toBe(false);

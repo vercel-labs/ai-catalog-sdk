@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 
 import {
+  assertValidCatalog,
   CatalogParseError,
   entryTypes,
   isEntryType,
@@ -116,10 +117,11 @@ describe('root parsing', () => {
     }
   });
 
-  it.each(['0.9', '0.10'])('accepts specification version %s through object and JSON parsers', (specVersion) => {
+  it.each(['0.9', '0.10', '1.0', '1.99', '01.999'])('preserves supported specification version %s through parsing and authoring validation', (specVersion) => {
     const catalog = { specVersion, entries: [] };
     expect(parseCatalog(catalog)).toEqual(catalog);
     expect(parseCatalogJson(JSON.stringify(catalog))).toEqual(catalog);
+    expect(assertValidCatalog(catalog)).toBeUndefined();
   });
 
   it('dispatches supported majors without numeric precision loss', () => {
@@ -136,9 +138,9 @@ describe('root parsing', () => {
     }
   });
 
-  it('preserves unknown-only manifest content in higher 0.x minors', () => {
+  it.each(['0.99', '1.99'])('preserves unknown-only manifest content in specification version %s', (specVersion) => {
     const value = {
-      specVersion: '0.99',
+      specVersion,
       entries: [
         {
           identifier: 'x',

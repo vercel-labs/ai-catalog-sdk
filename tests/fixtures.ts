@@ -3,7 +3,7 @@ const sha256 = `sha256:${'a'.repeat(64)}`;
 export const validFixtures: readonly unknown[] = [
   { specVersion: '0.9', entries: [] },
   {
-    specVersion: '0.99',
+    specVersion: '1.99',
     futureCatalogField: { preserved: true },
     host: {
       displayName: 'Example Host',

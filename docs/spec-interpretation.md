@@ -2,6 +2,8 @@
 
 This SDK targets AI Catalog v0.9 (the v1.0 release candidate) at one exact [upstream specification snapshot](https://github.com/Agent-Card/ai-catalog/blob/19208af2f8adbc0a6457e3ff36ce691a304fbd97/specification/ai-catalog.md) rather than a moving branch. The authoritative revision metadata lives in [`src/spec-revision.ts`](https://github.com/vercel-labs/ai-catalog-sdk/blob/main/src/spec-revision.ts); the generated [JSON Schema](../schema/ai-catalog.schema.json) copies it under `x-ai-catalog-specification`.
 
+Catalog parsers accept specification majors 0 and 1, retaining compatibility with catalogs authored against the preceding `1.0` draft. The declared `specVersion` is preserved. Use `0.9` when authoring new catalogs against this snapshot.
+
 The upstream specification and documentation are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); this SDK is an independent implementation. This document records consequential interpretation choices and differences from the pinned snapshot.
 
 ## Duplicate JSON member names

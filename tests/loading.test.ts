@@ -102,22 +102,27 @@ beforeEach(() => {
 });
 
 describe('loadCatalogFromEntry', () => {
-  it('loads a URL directly and retains the exact bytes used for entry verification', async () => {
-    const entry = { ...urlEntry, digest: createDigest(artifactBytes) };
+  it.each(['0.9', '1.0'])('loads specification version %s from a URL and retains the exact bytes for verification', async (specVersion) => {
+    const document = { ...catalog, specVersion };
+    const source = ` {\n  "entries": [], "specVersion": "${specVersion}"\n}\n`;
+    const bytes = new TextEncoder().encode(source);
+    respond = (_request, response) => response.end(source);
+    const entry = { ...urlEntry, digest: createDigest(bytes) };
     const result = await loadCatalogFromEntry(entry, options);
-    expect(result).toMatchObject({ status: 'found', catalog, url });
+    expect(result).toMatchObject({ status: 'found', catalog: document, url });
     if (result.status !== 'found') throw new Error('Expected a loaded catalog.');
-    expect([...result.bytes]).toEqual([...artifactBytes]);
+    expect([...result.bytes]).toEqual([...bytes]);
     await expect(checkCatalogEntry(entry, result.bytes)).resolves.toEqual({ status: 'checked', manifests: [] });
     await expect(checkCatalogEntry(entry, new TextEncoder().encode(JSON.stringify(result.catalog))))
       .resolves.toEqual({ status: 'artifact_digest_mismatch' });
     expect(requests).toEqual([url]);
   });
 
-  it('parses an inline catalog without network activity, URL metadata or manufactured bytes', async () => {
-    const entry: CatalogEntryWithData = { identifier: 'inline', type: catalogType, data: catalog };
+  it.each(['0.9', '1.0'])('loads inline specification version %s unchanged without network activity', async (specVersion) => {
+    const document = { ...catalog, specVersion };
+    const entry: CatalogEntryWithData = { identifier: 'inline', type: catalogType, data: document };
     const result = await loadCatalogFromEntry(entry);
-    expect(result).toEqual({ status: 'found', catalog });
+    expect(result).toEqual({ status: 'found', catalog: document });
     await expect(checkCatalogEntry({ ...entry, digest: createDigest(entry.data) })).resolves.toEqual({
       status: 'checked', manifests: [],
     });

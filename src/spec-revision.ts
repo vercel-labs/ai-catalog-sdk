@@ -6,12 +6,7 @@
  * `x-ai-catalog-specification`.
  */
 export const implementedSpecRevision = {
-  /**
-   * Catalog specification version represented by this snapshot.
-   *
-   * Whole-catalog parsers accept `Major.Minor` versions with the same major
-   * component, not only this exact value.
-   */
+  /** Catalog specification version represented by this snapshot. */
   specVersion: '0.9',
 
   /** Status of the upstream specification at this snapshot. */

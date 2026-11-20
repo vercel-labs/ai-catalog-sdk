@@ -151,7 +151,12 @@ await assert.rejects(loadCatalogFromEntry(catalogLoadEntry, {
   signal: discoveryCancellation.signal,
 }), error => error === discoveryCancellationReason);
 assert.deepEqual(parseCatalog(value).entries, []);
-assert.throws(() => parseCatalog({ ...value, specVersion: '1.0' }), CatalogParseError);
+for (const specVersion of ['1.0', '1.99']) {
+  const draftCatalog = { ...value, specVersion };
+  assert.deepEqual(parseCatalog(draftCatalog), draftCatalog);
+  assert.equal(assertValidCatalog(draftCatalog), undefined);
+}
+assert.throws(() => parseCatalog({ ...value, specVersion: '2.0' }), CatalogParseError);
 assert.equal(assertValidCatalog(value), undefined);
 assert.throws(() => parseCatalog({ ...value, entries: [null] }), CatalogParseError);
 const opaqueHostManifest = { formerField: ['opaque', 1, null] };

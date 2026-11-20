@@ -102,7 +102,8 @@ beforeEach(() => {
 });
 
 describe('native HTTPS catalog discovery', () => {
-  it('follows the first advertised HTTP Link across header lines and relation tokens', async () => {
+  it.each(['0.9', '1.0'])('discovers specification version %s through the first advertised HTTP Link', async (specVersion) => {
+    const document = { ...catalog, specVersion };
     respond = (request, response) => {
       if (request.url === '/start') {
         response.setHeader('link', [
@@ -110,10 +111,10 @@ describe('native HTTPS catalog discovery', () => {
           '</selected>; rel="alternate ai-catalog"; title="first", </ignored>; rel="ai-catalog"',
         ]);
         response.end();
-      } else response.end(body);
+      } else response.end(JSON.stringify(document));
     };
     await expect(discoverCatalog(website, options)).resolves.toEqual({
-      status: 'found', catalog, url: 'https://publisher.example/selected',
+      status: 'found', catalog: document, url: 'https://publisher.example/selected',
     });
     expect(requests).toEqual([website, 'https://publisher.example/selected']);
     expect(network.addresses).toEqual(['8.8.8.8', '8.8.8.8']);
