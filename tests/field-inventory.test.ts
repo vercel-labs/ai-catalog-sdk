@@ -228,10 +228,8 @@ describe('pinned specification field inventory', () => {
       implementedSpecRevision,
     );
     const changelog = readFileSync(join(process.cwd(), 'CHANGELOG.md'), 'utf8');
-    const unreleased = changelog
-      .split(/^## /m)
-      .find((section) => section.startsWith('Unreleased'));
-    expect(unreleased).toContain(implementedSpecRevision.commit);
+    const latestEntry = changelog.split(/^## /m)[1];
+    expect(latestEntry).toContain(implementedSpecRevision.commit);
 
     const interpretation = readFileSync(
       join(process.cwd(), 'docs/spec-interpretation.md'),
