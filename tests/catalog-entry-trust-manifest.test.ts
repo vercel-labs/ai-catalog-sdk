@@ -710,17 +710,15 @@ describe('checkCatalogEntryTrustManifest', () => {
   it.each([
     'entry',
     'subject',
-  ] as const)('rejects a proxied %s without invoking traps', async (location) => {
+  ] as const)('propagates a %s proxy trap error', async (location) => {
     const { entry, manifest } = dataFixture(null);
-    let reads = 0;
+    const failure = new Error('proxy trap');
     const handler = {
       getOwnPropertyDescriptor() {
-        reads += 1;
-        throw new Error('must not inspect');
+        throw failure;
       },
       get() {
-        reads += 1;
-        throw new Error('must not read');
+        throw failure;
       },
     };
     const input = location === 'entry' ? new Proxy(entry, handler) : entry;
@@ -728,8 +726,7 @@ describe('checkCatalogEntryTrustManifest', () => {
       manifest.subject = new Proxy(manifest.subject as TrustSubject, handler);
     await expect(
       checkCatalogEntryTrustManifest(input, manifest, optionsFor()),
-    ).rejects.toThrow(TypeError);
-    expect(reads).toBe(0);
+    ).rejects.toBe(failure);
   });
   it('rejects calls that do not match the entry artifact representation', async () => {
     const bytes = new TextEncoder().encode('test');

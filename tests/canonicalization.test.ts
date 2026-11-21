@@ -231,7 +231,7 @@ describe('canonicalizeJsonValueToBytes', () => {
     expect(() => canonicalizeJsonValueToBytes(inherited)).toThrow(TypeError);
   });
 
-  it('rejects accessors, toJSON methods, and proxies without invoking them', () => {
+  it('rejects accessors and toJSON methods without invoking them', () => {
     let reads = 0;
     const accessor = {};
     Object.defineProperty(accessor, 'secret', {
@@ -256,18 +256,6 @@ describe('canonicalizeJsonValueToBytes', () => {
     expect(() =>
       canonicalizeJsonValueToBytes(withToJson as unknown as JsonValue),
     ).toThrow(TypeError);
-    expect(reads).toBe(0);
-
-    const proxy = new Proxy(
-      { value: true },
-      {
-        get(target, key, receiver) {
-          reads += 1;
-          return Reflect.get(target, key, receiver);
-        },
-      },
-    );
-    expect(() => canonicalizeJsonValueToBytes(proxy)).toThrow(TypeError);
     expect(reads).toBe(0);
   });
 

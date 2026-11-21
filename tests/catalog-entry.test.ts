@@ -838,21 +838,14 @@ describe('checkCatalogEntry', () => {
     expect(resolver).not.toHaveBeenCalled();
   });
 
-  it('rejects excluded proxies and accessors without running caller code', async () => {
+  it('rejects excluded accessors without running caller code', async () => {
     const read = vi.fn(() => { throw new Error('must not inspect'); });
-    const proxy = new Proxy({}, {
-      get: read,
-      getOwnPropertyDescriptor: read,
-      ownKeys: read,
-    });
     const accessor = Object.defineProperty({}, 'contributor', { enumerable: true, get: read });
-    for (const value of [proxy, accessor]) {
-      await expect(checkCatalogEntry(
-        entryWithRawManifests([manifestFor(), value]),
-        artifact,
-        { contributors: [publisher] },
-      )).rejects.toBeInstanceOf(TypeError);
-    }
+    await expect(checkCatalogEntry(
+      entryWithRawManifests([manifestFor(), accessor]),
+      artifact,
+      { contributors: [publisher] },
+    )).rejects.toBeInstanceOf(TypeError);
     expect(read).not.toHaveBeenCalled();
     expect(resolver).not.toHaveBeenCalled();
   });

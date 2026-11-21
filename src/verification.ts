@@ -164,7 +164,6 @@ function assertCanonicalizableJsonValue(
 ): asserts value is JsonValue {
   const preflightIssue = preflightJsonValue(value, {
     allowOwnProtoMember: true,
-    isDisallowedObject: utilTypes.isProxy,
     requireIJsonStrings: true,
   });
   if (preflightIssue) {
@@ -181,14 +180,12 @@ function assertCanonicalizableJsonObject(
   if (
     value === null ||
     typeof value !== 'object' ||
-    utilTypes.isProxy(value) ||
     Array.isArray(value)
   ) {
     throw new TypeError(`${name} must be a plain JSON object.`);
   }
   const issue = preflightJsonValue(value, {
     allowOwnProtoMember: true,
-    isDisallowedObject: utilTypes.isProxy,
     requireIJsonStrings: false,
   });
   if (issue)
@@ -239,7 +236,6 @@ function assertCatalogEntryObject(
   if (
     entry === null ||
     typeof entry !== 'object' ||
-    utilTypes.isProxy(entry) ||
     Array.isArray(entry) ||
     (Object.getPrototypeOf(entry) !== Object.prototype &&
       Object.getPrototypeOf(entry) !== null)
@@ -284,11 +280,7 @@ function assertEs256PublicKey(
 function snapshotSignatureCheckOptions(
   options: unknown,
 ): SignatureCheckOptions {
-  if (
-    options === null ||
-    typeof options !== 'object' ||
-    utilTypes.isProxy(options)
-  ) {
+  if (options === null || typeof options !== 'object') {
     throw new TypeError('options must be an object.');
   }
 
@@ -579,7 +571,7 @@ export class DigestAlgorithmUnavailableError extends Error {
  *
  * @throws {TypeError} If `value` is not a plain I-JSON value, including when
  * it contains non-finite numbers, forbidden Unicode code points, cycles,
- * sparse arrays, accessors, proxies, or exotic objects.
+ * sparse arrays, accessors, or exotic objects.
  * @throws {RangeError} If `value` exceeds the SDK's supported node or nesting
  * depth limit.
  */
@@ -615,7 +607,7 @@ export function canonicalizeJsonValueToBytes(value: JsonValue): Uint8Array {
  * JWS, select keys or algorithms, or establish trust.
  *
  * @throws {TypeError} If `catalog` contains non-JSON values, cycles, accessors,
- * proxies, exotic objects, or forbidden Unicode in the covered payload.
+ * exotic objects, or forbidden Unicode in the covered payload.
  * @throws {RangeError} If `catalog` exceeds the SDK's supported node or nesting
  * depth limit.
  */
@@ -640,7 +632,7 @@ export function createCatalogSignaturePayload(
  * JWS, select keys or algorithms, or establish trust.
  *
  * @throws {TypeError} If `manifest` contains non-JSON values, cycles, accessors,
- * proxies, exotic objects, or forbidden Unicode in the covered payload.
+ * exotic objects, or forbidden Unicode in the covered payload.
  * @throws {RangeError} If `manifest` exceeds the SDK's supported node or
  * nesting depth limit.
  */
@@ -872,7 +864,6 @@ export async function checkCatalogEntryTrustManifest(
 function assertJsonInput(value: unknown): void {
   const inputIssue = preflightJsonValue(value, {
     allowOwnProtoMember: true,
-    isDisallowedObject: utilTypes.isProxy,
     requireIJsonStrings: false,
   });
   if (inputIssue)
@@ -940,7 +931,6 @@ function precheckArtifact(
     if (hasData) {
       const issue = preflightJsonValue(data, {
         allowOwnProtoMember: true,
-        isDisallowedObject: utilTypes.isProxy,
         requireIJsonStrings: true,
       });
       if (issue)
@@ -1026,7 +1016,6 @@ function snapshotEntryCheckOptions(value: unknown): CapturedEntryCheckOptions {
   if (
     value === null ||
     typeof value !== 'object' ||
-    utilTypes.isProxy(value) ||
     Array.isArray(value)
   )
     throw new TypeError('options must be an object.');
@@ -1075,7 +1064,6 @@ function snapshotEntryCheckOptions(value: unknown): CapturedEntryCheckOptions {
   if (options.contributors !== undefined) {
     const issue = preflightJsonValue(options.contributors, {
       allowOwnProtoMember: true,
-      isDisallowedObject: utilTypes.isProxy,
       requireIJsonStrings: false,
     });
     if (
@@ -1090,11 +1078,7 @@ function snapshotEntryCheckOptions(value: unknown): CapturedEntryCheckOptions {
   }
   const signal = options.signal;
   if (signal !== undefined) {
-    if (
-      signal === null ||
-      typeof signal !== 'object' ||
-      utilTypes.isProxy(signal)
-    )
+    if (signal === null || typeof signal !== 'object')
       throw new TypeError('signal must be an AbortSignal.');
     try {
       Object.getOwnPropertyDescriptor(

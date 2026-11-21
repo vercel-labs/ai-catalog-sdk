@@ -1,5 +1,4 @@
 import { Buffer } from 'node:buffer';
-import { types as utilTypes } from 'node:util';
 
 import type {
   CatalogEntry,
@@ -86,7 +85,6 @@ function snapshotObject(
 ): Record<string, JsonValue> {
   const issue = preflightJsonValue(value, {
     allowOwnProtoMember: true,
-    isDisallowedObject: utilTypes.isProxy,
     requireIJsonStrings,
   });
   if (issue) {
@@ -243,7 +241,7 @@ export async function signTrustManifest(
   if (entryForm) {
     const entry = entryOrManifest;
     if (
-      entry === null || typeof entry !== 'object' || utilTypes.isProxy(entry) ||
+      entry === null || typeof entry !== 'object' ||
       Array.isArray(entry) ||
       (Object.getPrototypeOf(entry) !== Object.prototype && Object.getPrototypeOf(entry) !== null)
     ) throw new TypeError('entry must be a plain object.');

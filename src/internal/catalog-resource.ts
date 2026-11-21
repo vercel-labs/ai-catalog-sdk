@@ -1,5 +1,3 @@
-import { types as utilTypes } from 'node:util';
-
 import { type AICatalog, CatalogParseError } from '../types.js';
 import {
   fetchHttpsResource,
@@ -20,7 +18,7 @@ export function snapshotCatalogResourceOptions(value: unknown): CapturedCatalogR
     return { resourceTimeoutMs: 120_000, maxResponseBytes: 64 * 1024 * 1024 };
   if (
     value === null || typeof value !== 'object' ||
-    utilTypes.isProxy(value) || Array.isArray(value)
+    Array.isArray(value)
   ) throw new TypeError('options must be an object.');
   const options: Record<string, unknown> = Object.create(null);
   for (const name of ['signal', 'resourceTimeoutMs', 'maxResponseBytes']) {
@@ -42,7 +40,7 @@ export function snapshotCatalogResourceOptions(value: unknown): CapturedCatalogR
   ) throw new TypeError('maxResponseBytes must be a positive safe integer.');
   const signal = options.signal;
   if (signal !== undefined) {
-    if (signal === null || typeof signal !== 'object' || utilTypes.isProxy(signal))
+    if (signal === null || typeof signal !== 'object')
       throw new TypeError('signal must be an AbortSignal.');
     try {
       Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')?.get?.call(signal);

@@ -133,51 +133,6 @@ describe('createTrustManifestSignaturePayload', () => {
     expect(reads).toBe(0);
   });
 
-  it('rejects root, nested, and signature proxies without invoking traps', () => {
-    let traps = 0;
-    const proxied = () =>
-      new Proxy(
-        { value: true },
-        {
-          get(target, key, receiver) {
-            traps += 1;
-            return Reflect.get(target, key, receiver);
-          },
-          getOwnPropertyDescriptor(target, key) {
-            traps += 1;
-            return Reflect.getOwnPropertyDescriptor(target, key);
-          },
-          getPrototypeOf(target) {
-            traps += 1;
-            return Reflect.getPrototypeOf(target);
-          },
-          ownKeys(target) {
-            traps += 1;
-            return Reflect.ownKeys(target);
-          },
-        },
-      );
-
-    expect(() =>
-      createTrustManifestSignaturePayload(
-        proxied() as unknown as TrustManifest,
-      ),
-    ).toThrow(TypeError);
-    expect(() =>
-      createTrustManifestSignaturePayload({
-        contributor: 'did:example:alice',
-        future: proxied(),
-      } as unknown as TrustManifest),
-    ).toThrow(TypeError);
-    expect(() =>
-      createTrustManifestSignaturePayload({
-        contributor: 'did:example:alice',
-        signature: proxied(),
-      } as unknown as TrustManifest),
-    ).toThrow(TypeError);
-    expect(traps).toBe(0);
-  });
-
   it('rejects non-enumerable and non-JSON signature members', () => {
     const hidden = { contributor: 'did:example:alice' };
     Object.defineProperty(hidden, 'signature', {

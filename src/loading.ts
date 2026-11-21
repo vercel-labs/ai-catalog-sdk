@@ -1,5 +1,3 @@
-import { types as utilTypes } from 'node:util';
-
 import { mediaTypes } from './entry-types.js';
 import {
   fetchCatalogResource,
@@ -77,7 +75,7 @@ type CapturedEntry = { url: string } | { data: unknown };
 function snapshotEntry(value: unknown): CapturedEntry {
   if (
     value === null || typeof value !== 'object' ||
-    utilTypes.isProxy(value) || Array.isArray(value)
+    Array.isArray(value)
   ) throw new TypeError('entry must be a catalog entry object.');
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null)
@@ -98,7 +96,6 @@ function snapshotEntry(value: unknown): CapturedEntry {
   }
   const issue = preflightJsonValue(envelope, {
     allowOwnProtoMember: false,
-    isDisallowedObject: utilTypes.isProxy,
     requireIJsonStrings: false,
   });
   if (issue) throw new TypeError('entry must be a bounded JSON catalog entry.');
@@ -145,7 +142,6 @@ export async function loadCatalogFromEntry(
   if ('data' in captured) {
     const issue = preflightJsonValue(captured.data, {
       allowOwnProtoMember: false,
-      isDisallowedObject: utilTypes.isProxy,
       requireIJsonStrings: false,
     });
     const parsed = issue

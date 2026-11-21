@@ -256,7 +256,6 @@ describe('signTrustManifest', () => {
       { contributor: body().contributor },
       { ...body(), contributor: 'not an absolute URI' },
       Object.defineProperty(body(), 'contributor', { get() { throw new Error('getter invoked'); } }),
-      new Proxy(body(), {}),
     ];
     for (const invalid of invalidBodies) {
       await expect(signTrustManifest(invalid as ReturnType<typeof body>, signer, metadata())).rejects.toThrow(TypeError);

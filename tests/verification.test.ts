@@ -162,7 +162,7 @@ describe('checkDigest', () => {
     });
   });
 
-  it('rejects invalid JSON without executing accessors or proxy traps', () => {
+  it('rejects invalid JSON without executing accessors', () => {
     const forbidden = vi.fn(() => {
       throw new Error('must not execute');
     });
@@ -170,15 +170,6 @@ describe('checkDigest', () => {
       enumerable: true,
       get: forbidden,
     });
-    const proxy = new Proxy(
-      {},
-      {
-        get: forbidden,
-        getPrototypeOf: forbidden,
-        getOwnPropertyDescriptor: forbidden,
-        ownKeys: forbidden,
-      },
-    );
     const cyclic: JsonValue[] = [];
     cyclic.push(cyclic);
     for (const value of [
@@ -189,7 +180,6 @@ describe('checkDigest', () => {
       Array(1),
       cyclic,
       accessor,
-      proxy,
     ]) {
       expect(() => checkDigest(value as JsonValue, emptySha256)).toThrow(
         TypeError,
