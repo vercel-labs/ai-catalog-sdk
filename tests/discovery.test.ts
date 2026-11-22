@@ -121,6 +121,29 @@ describe('native HTTPS catalog discovery', () => {
     expect(network.options.every((value) => value.agent === false && value.rejectUnauthorized === true)).toBe(true);
   });
 
+  it('requests only the input origin well-known catalog when selected', async () => {
+    await expect(discoverCatalog(website, { ...options, strategy: 'well-known' })).resolves.toEqual({
+      status: 'found', catalog, url: `https://publisher.example${wellKnown}`,
+    });
+    expect(requests).toEqual([`https://publisher.example${wellKnown}`]);
+  });
+
+  it.each([404, 410])('reports an absent well-known catalog for HTTP %s', async (status) => {
+    respond = (_request, response) => response.writeHead(status).end();
+    await expect(discoverCatalog(website, { ...options, strategy: 'well-known' })).resolves.toEqual({ status: 'not_found' });
+    expect(requests).toEqual([`https://publisher.example${wellKnown}`]);
+  });
+
+  it('validates and captures the discovery strategy before I/O', async () => {
+    await expect(discoverCatalog(website, { strategy: 'invalid' } as never)).rejects.toThrow(TypeError);
+    await expect(discoverCatalog(website, Object.defineProperty({}, 'strategy', { get() { throw new Error('must not read'); } }))).rejects.toThrow(TypeError);
+    const mutable = { ...options, strategy: 'well-known' as 'auto' | 'well-known' };
+    const pending = discoverCatalog(website, mutable);
+    mutable.strategy = 'auto';
+    await expect(pending).resolves.toMatchObject({ status: 'found' });
+    expect(requests).toEqual([`https://publisher.example${wellKnown}`]);
+  });
+
   it('reads an advertised Link even when the website returns HTTP 404', async () => {
     respond = (request, response) => {
       if (request.url === '/start') response.writeHead(404, { link: '</catalog>; rel="ai-catalog"' }).end();

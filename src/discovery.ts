@@ -14,6 +14,8 @@ import type { AICatalog, CatalogParseError } from './types.js';
 
 /** Controls cancellation and the bounds of each website or catalog request. */
 export interface DiscoverCatalogOptions {
+  /** `well-known` skips website advertisements and requests only the input origin's well-known catalog. */
+  strategy?: 'auto' | 'well-known';
   /** Caller cancellation rejects with this signal's original abort reason. */
   signal?: AbortSignal;
   /** Per-resource timeout, including redirects and body processing; defaults to 120,000 ms. */
@@ -64,6 +66,7 @@ async function fetchCatalog(url: URL, options: CapturedCatalogResourceOptions) {
  * The first advertised ai-catalog link is authoritative; its failure is terminal.
  * Without an advertisement, the first parsed well-known candidate wins and
  * `not_found` means every candidate returned HTTP 404 or 410.
+ * `strategy: 'well-known'` skips the website request and uses only the input origin.
  * Reads website headers only, without HTML discovery or nested catalog traversal.
  * Inputs are captured before I/O. Invalid arguments reject with `TypeError`;
  * caller cancellation and unexpected failures reject rather than becoming results.
@@ -74,7 +77,17 @@ export async function discoverCatalog(
 ): Promise<CatalogDiscoveryResult> {
   const originalUrl = snapshotWebsiteUrl(websiteUrl);
   const captured = snapshotCatalogResourceOptions(options);
+  const descriptor = options === undefined ? undefined : Object.getOwnPropertyDescriptor(options, 'strategy');
+  if (descriptor && !('value' in descriptor))
+    throw new TypeError('options.strategy must be an own data property.');
+  const strategy: unknown = descriptor?.value === undefined ? 'auto' : descriptor.value;
+  if (strategy !== 'auto' && strategy !== 'well-known')
+    throw new TypeError('strategy must be auto or well-known.');
   throwIfAborted(captured.signal);
+  if (strategy === 'well-known') {
+    const lookup = await fetchCatalog(new URL('/.well-known/ai-catalog.json', originalUrl), captured);
+    return lookup.absent ? { status: 'not_found' } : lookup.result;
+  }
   let page: { url: URL; target: string | undefined };
   try {
     page = await fetchHttpsResource(

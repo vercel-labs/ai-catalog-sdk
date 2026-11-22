@@ -91,6 +91,8 @@ if (result.status === 'found') {
 
 Discovery follows website redirects, then checks the final response for an HTTP `Link` with `rel="ai-catalog"`. If no catalog link is advertised, it tries `/.well-known/ai-catalog.json` at the website's origin. When the website redirects to a different origin, it tries the destination origin first, then the original origin if needed. A selected HTTP link takes precedence: if its catalog cannot be fetched or parsed, discovery returns that failure without trying the well-known locations. HTML `<link>` elements are not inspected, so catalogs advertised only in HTML will not be discovered.
 
+To use a domain's well-known catalog without requesting the website or inspecting its HTTP `Link` header, pass `{ strategy: 'well-known' }`. This requests `/.well-known/ai-catalog.json` only at the input URL's origin.
+
 A `found` result contains the parsed catalog and the URL it was retrieved from after any redirects. The catalog remains unverified; apply the [verification utilities](./docs/verification.md) when your application needs artifact or endorsement checks. Discovery does not traverse nested catalogs or fetch referenced artifacts.
 
 ## Load a catalog from an entry
