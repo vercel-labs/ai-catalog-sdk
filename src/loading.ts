@@ -3,7 +3,7 @@ import {
   fetchCatalogResource,
   snapshotCatalogResourceOptions,
 } from './internal/catalog-resource.js';
-import { HttpFetchError, throwIfAborted } from './internal/http-fetch.js';
+import { HttpFetchError, normalizeHttpFetchError, throwIfAborted } from './internal/http-fetch.js';
 import { preflightJsonValue } from './internal/json-value.js';
 import { safeParseCatalog, safeParseCatalogEntry } from './internal/parser.js';
 import {
@@ -34,8 +34,9 @@ export interface LoadCatalogFromEntryOptions {
  * The result of loading a catalog from a URL entry.
  * `found` contains the final response URL and decoded body bytes before text or
  * JSON parsing, suitable for `checkCatalogEntry(entry, bytes)`.
- * Failure URLs identify the final response when available, otherwise the
- * attempted URL or original reference. Failure results do not retain body bytes.
+ * `invalid_catalog` identifies the final response URL. Retrieval failures use
+ * the final response URL when available, or the attempted URL or original
+ * reference otherwise. Failure results do not retain body bytes.
  */
 export type UrlCatalogLoadResult =
   | { status: 'found'; catalog: AICatalog; url: string; bytes: Uint8Array }
@@ -161,10 +162,10 @@ export async function loadCatalogFromEntry(
     return {
       status: 'fetch_failed',
       url: captured.url,
-      error: new HttpFetchError(
+      error: normalizeHttpFetchError(new HttpFetchError(
         'The catalog entry URL is invalid or cannot be resolved without a base URL.',
         { cause },
-      ),
+      ), capturedOptions),
     };
   }
   const lookup = await fetchCatalogResource(url, capturedOptions);

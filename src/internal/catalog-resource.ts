@@ -1,3 +1,4 @@
+import { captureSdkConfiguration } from '../configure.js';
 import { type AICatalog, CatalogParseError } from '../types.js';
 import {
   fetchHttpsResource,
@@ -11,11 +12,13 @@ export interface CapturedCatalogResourceOptions {
   signal?: AbortSignal;
   resourceTimeoutMs: number;
   maxResponseBytes: number;
+  requirePublicAccessHeaders: boolean;
 }
 
 export function snapshotCatalogResourceOptions(value: unknown): CapturedCatalogResourceOptions {
+  const configuration = captureSdkConfiguration();
   if (value === undefined)
-    return { resourceTimeoutMs: 120_000, maxResponseBytes: 64 * 1024 * 1024 };
+    return { resourceTimeoutMs: 120_000, maxResponseBytes: 64 * 1024 * 1024, ...configuration };
   if (
     value === null || typeof value !== 'object' ||
     Array.isArray(value)
@@ -49,6 +52,7 @@ export function snapshotCatalogResourceOptions(value: unknown): CapturedCatalogR
     }
   }
   return {
+    ...configuration,
     resourceTimeoutMs,
     maxResponseBytes,
     ...(signal === undefined ? {} : { signal: signal as AbortSignal }),
@@ -65,6 +69,7 @@ export function catalogTransportOptions(
     timeoutMs: options.resourceTimeoutMs,
     timeoutLabel: 'resourceTimeoutMs',
     accept,
+    requirePublicAccessHeaders: options.requirePublicAccessHeaders,
   };
 }
 
@@ -122,6 +127,9 @@ export async function fetchCatalogResource(
     if (error instanceof CatalogParseError)
       return { result: { status: 'invalid_catalog', url: responseUrl, error }, absent: false };
     if (!(error instanceof HttpFetchError)) throw error;
-    return { result: { status: 'fetch_failed', url: responseUrl, error }, absent };
+    return {
+      result: { status: 'fetch_failed', url: responseUrl, error },
+      absent,
+    };
   }
 }

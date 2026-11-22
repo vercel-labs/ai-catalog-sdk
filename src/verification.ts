@@ -1,4 +1,6 @@
 import canonicalize from 'canonicalize';
+
+import { captureSdkConfiguration } from './configure.js';
 import { flattenedVerify } from 'jose/jws/flattened/verify';
 import * as joseErrors from 'jose/errors';
 
@@ -1118,6 +1120,7 @@ export async function checkCatalogEntry(
   bytesOrOptions?: Uint8Array | CatalogEntryCheckOptions,
   maybeOptions?: CatalogEntryCheckOptions,
 ): Promise<CatalogEntryCheckResult> {
+  const configuration = captureSdkConfiguration();
   const isDataCall = !isUint8Array(bytesOrOptions);
   if (isDataCall && maybeOptions !== undefined)
     throw new TypeError('Inline entries take options as the second argument.');
@@ -1151,6 +1154,7 @@ export async function checkCatalogEntry(
   const publisher = publisherIdentityFor(snapshot.identifier);
   const resolutions = new Map<string, Promise<unknown>>();
   const resolutionOptions = {
+    ...configuration,
     resolutionTimeoutMs: options.resolutionTimeoutMs,
     maxResponseBytes: options.maxResponseBytes,
     ...(options.signal === undefined ? {} : { signal: options.signal }),

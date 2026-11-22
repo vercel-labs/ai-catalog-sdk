@@ -156,6 +156,7 @@ describe('checkCatalogEntry', () => {
     });
     expect(resolver).toHaveBeenCalledTimes(2);
     expect(resolver).toHaveBeenCalledWith(publisher, {
+      requirePublicAccessHeaders: false,
       resolutionTimeoutMs: 60_000,
       maxResponseBytes: 16 * 1024 * 1024,
     });
@@ -766,6 +767,7 @@ describe('checkCatalogEntry', () => {
     options.resolutionTimeoutMs = 1;
     const result = await pending;
     expect(resolver).toHaveBeenCalledWith(publisher, {
+      requirePublicAccessHeaders: false,
       resolutionTimeoutMs: 123_456,
       maxResponseBytes: 789_012,
     });

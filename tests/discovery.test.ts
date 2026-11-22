@@ -43,7 +43,8 @@ vi.mock('node:https', async (importOriginal) => {
 });
 
 import { discoverCatalog } from '../src/discovery.js';
-import { HttpFetchError } from '../src/internal/http-fetch.js';
+import { configure } from '../src/configure.js';
+import { HTTP_FETCH_FAILURE_MESSAGE, HttpFetchError } from '../src/internal/http-fetch.js';
 import { CatalogParseError } from '../src/types.js';
 
 const website = 'https://publisher.example/start';
@@ -83,9 +84,132 @@ afterAll(async () => {
 });
 
 afterEach(() => {
+  configure({ requirePublicAccessHeaders: false });
   for (const timer of timers) clearTimeout(timer);
   timers.clear();
   server.closeAllConnections();
+});
+
+describe('discovery response contract', () => {
+  const contract = {
+    'access-control-allow-origin': '*',
+    'access-control-expose-headers': 'Access-Control-Allow-Origin, Access-Control-Expose-Headers',
+  };
+  const pageContract = { ...contract, 'access-control-expose-headers': `${contract['access-control-expose-headers']}, Link` };
+
+  it('requires exposed Link on the page, but not on the selected catalog', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    respond = (request, response) => {
+      if (request.url === '/start')
+        response.writeHead(200, { ...pageContract, link: '</catalog>; rel="ai-catalog"' }).end();
+      else response.writeHead(200, contract).end(body);
+    };
+    await expect(discoverCatalog(website, options)).resolves.toMatchObject({ status: 'found' });
+    expect(requests).toEqual([website, 'https://publisher.example/catalog']);
+  });
+
+  it('follows public page redirects without requiring header or Link exposure on them', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    respond = (request, response) => {
+      if (request.url === '/start') {
+        response.writeHead(302, { 'access-control-allow-origin': '*', location: '/page' }).end();
+      } else if (request.url === '/page') {
+        response.writeHead(200, { ...pageContract, link: '</catalog>; rel="ai-catalog"' }).end();
+      } else response.writeHead(200, contract).end(body);
+    };
+    await expect(discoverCatalog(website, options)).resolves.toMatchObject({ status: 'found' });
+    expect(requests).toEqual([website, 'https://publisher.example/page', 'https://publisher.example/catalog']);
+  });
+
+  it('permits well-known fallback after a verified absent advertisement', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    respond = (request, response) => {
+      response.writeHead(200, request.url === '/start' ? pageContract : contract).end(body);
+    };
+    await expect(discoverCatalog(website, options)).resolves.toMatchObject({ status: 'found' });
+    expect(requests).toEqual([website, `https://publisher.example${wellKnown}`]);
+  });
+
+  it('fails when page exposure is missing, without treating it as an absent advertisement', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    respond = (_request, response) => response.writeHead(200, contract).end(body);
+    const result = await discoverCatalog(website, options);
+    expect(result).toMatchObject({ status: 'fetch_failed', url: website, error: { name: 'HttpFetchError', message: HTTP_FETCH_FAILURE_MESSAGE } });
+    if (result.status !== 'fetch_failed') throw new Error('Expected a fetch failure.');
+    expect(result.error.cause).toMatchObject({
+      message: 'The HTTPS response does not satisfy the public-access header requirements.',
+    });
+    expect(requests).toEqual([website]);
+  });
+
+  it('captures the policy once for the page and its later catalog request', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    respond = (request, response) => {
+      if (request.url === '/start') {
+        configure({ requirePublicAccessHeaders: false });
+        response.writeHead(200, { ...pageContract, link: '</catalog>; rel="ai-catalog"' }).end();
+      } else response.end(body);
+    };
+    await expect(discoverCatalog(website, options)).resolves.toMatchObject({
+      status: 'fetch_failed', url: 'https://publisher.example/catalog',
+      error: { name: 'HttpFetchError', message: HTTP_FETCH_FAILURE_MESSAGE },
+    });
+    expect(requests).toEqual([website, 'https://publisher.example/catalog']);
+  });
+
+  it('does not accept a per-call override of the SDK policy', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    await expect(discoverCatalog(website, { ...options, requirePublicAccessHeaders: false } as never))
+      .resolves.toMatchObject({ status: 'fetch_failed' });
+    configure({ requirePublicAccessHeaders: false });
+    await expect(discoverCatalog(website, { ...options, requirePublicAccessHeaders: true } as never))
+      .resolves.toMatchObject({ status: 'found' });
+  });
+
+  it.each([404, 410])('requires cooperation before classifying HTTP %s as absence', async (status) => {
+    configure({ requirePublicAccessHeaders: true });
+    respond = (_request, response) => response.writeHead(status).end();
+    await expect(discoverCatalog(website, { ...options, strategy: 'well-known' })).resolves.toMatchObject({ status: 'fetch_failed' });
+    respond = (_request, response) => response.writeHead(status, contract).end();
+    await expect(discoverCatalog(website, { ...options, strategy: 'well-known' })).resolves.toEqual({ status: 'not_found' });
+  });
+
+  it('keeps the primary failure stable while retaining redirect and DNS diagnostics', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    respond = (request, response) => {
+      if (request.url === wellKnown) response.writeHead(302, { location: '/hidden' }).end();
+      else response.end(body);
+    };
+    const redirected = await discoverCatalog(website, { ...options, strategy: 'well-known' });
+    const diagnostic = new Error('DNS backend diagnostic');
+    network.resolve.mockRejectedValueOnce(diagnostic);
+    const failed = await discoverCatalog(website, { ...options, strategy: 'well-known' });
+    for (const result of [redirected, failed]) {
+      expect(result).toMatchObject({
+        status: 'fetch_failed', url: `https://publisher.example${wellKnown}`,
+        error: { name: 'HttpFetchError', message: HTTP_FETCH_FAILURE_MESSAGE },
+      });
+      if (result.status !== 'fetch_failed') throw new Error('Expected a fetch failure.');
+    }
+    if (redirected.status !== 'fetch_failed' || failed.status !== 'fetch_failed') throw new Error('Expected fetch failures.');
+    expect(redirected.error.cause).toMatchObject({
+      message: 'The HTTPS redirect response does not allow public browser access.',
+    });
+    expect(failed.error.cause).toMatchObject({
+      message: 'The HTTPS resource hostname could not be resolved.', cause: diagnostic,
+    });
+  });
+
+  it('preserves cancellation reasons and unexpected runtime failures', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    const controller = new AbortController();
+    const reason = { cancelled: true };
+    controller.abort(reason);
+    await expect(discoverCatalog(website, { ...options, signal: controller.signal })).rejects.toBe(reason);
+    const error = new RangeError('unexpected DNS backend failure');
+    network.resolve.mockRejectedValueOnce(error);
+    await expect(discoverCatalog(website, options)).rejects.toBe(error);
+  });
 });
 
 beforeEach(() => {

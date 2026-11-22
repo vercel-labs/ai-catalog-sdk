@@ -7,6 +7,7 @@ import {
 import {
   fetchHttpsResource,
   HttpFetchError,
+  normalizeHttpFetchError,
   throwIfAborted,
 } from './internal/http-fetch.js';
 import { firstCatalogLink } from './internal/link-header.js';
@@ -27,8 +28,9 @@ export interface DiscoverCatalogOptions {
 /**
  * A structurally parsed catalog, an absent well-known catalog, or an expected failure.
  * `found` establishes neither cryptographic integrity nor publisher trust.
- * URLs identify the final response when available, otherwise the attempted URL
- * or advertised reference.
+ * `found` and `invalid_catalog` URLs identify the final response. Retrieval
+ * failures identify the final response URL when available, or the attempted URL
+ * or advertised reference otherwise.
  */
 export type CatalogDiscoveryResult =
   | { status: 'found'; catalog: AICatalog; url: string }
@@ -92,7 +94,7 @@ export async function discoverCatalog(
   try {
     page = await fetchHttpsResource(
       originalUrl,
-      catalogTransportOptions(captured, '*/*'),
+      { ...catalogTransportOptions(captured, '*/*'), requireLinkExposure: true },
       (response) => ({
         url: new URL(response.url.href),
         target: firstCatalogLink(response.headers.link),
@@ -110,11 +112,11 @@ export async function discoverCatalog(
       target = new URL(page.target, page.url);
     } catch (cause) {
       if (!(cause instanceof TypeError) ||
-        (cause as NodeJS.ErrnoException).code !== 'ERR_INVALID_URL') throw cause;
+      (cause as NodeJS.ErrnoException).code !== 'ERR_INVALID_URL') throw cause;
       return {
         status: 'fetch_failed',
         url: page.target,
-        error: new HttpFetchError('The advertised catalog URL is invalid.', { cause }),
+        error: normalizeHttpFetchError(new HttpFetchError('The advertised catalog URL is invalid.', { cause }), captured),
       };
     }
     const lookup = await fetchCatalog(target, captured);

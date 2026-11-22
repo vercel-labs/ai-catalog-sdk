@@ -1,3 +1,4 @@
+export { configure, type SDKConfiguration } from './configure.js';
 export {
   entryTypes,
   isCatalogEntryWithData,

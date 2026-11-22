@@ -6,6 +6,8 @@ import { performance } from 'node:perf_hooks';
 import type { Readable, Transform } from 'node:stream';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 
+import { hasPublicAccessHeaders } from './response-contract.js';
+
 export class HttpFetchError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -13,10 +15,12 @@ export class HttpFetchError extends Error {
   }
 }
 
+export const HTTP_FETCH_FAILURE_MESSAGE = 'The HTTPS resource could not be retrieved.';
+
 export interface HttpsResource {
   readonly url: URL;
   readonly statusCode: number;
-  readonly headers: IncomingHttpHeaders;
+  readonly headers: Readonly<Record<string, string | undefined>>;
   readBody(): Promise<Uint8Array>;
 }
 
@@ -26,6 +30,30 @@ export interface HttpsResourceOptions {
   maxResponseBytes: number;
   accept: string;
   timeoutLabel?: string;
+  requirePublicAccessHeaders?: boolean;
+  requireLinkExposure?: boolean;
+}
+
+export function validateResponseContract(response: HttpsResource, options: HttpsResourceOptions): void {
+  if (options.requirePublicAccessHeaders &&
+    !hasPublicAccessHeaders(response.headers, options.requireLinkExposure)) {
+    throw new HttpFetchError('The HTTPS response does not satisfy the public-access header requirements.');
+  }
+}
+
+export function normalizeHttpFetchError(
+  error: HttpFetchError,
+  options: Pick<HttpsResourceOptions, 'requirePublicAccessHeaders'>,
+): HttpFetchError {
+  if (!options.requirePublicAccessHeaders || error.message === HTTP_FETCH_FAILURE_MESSAGE) return error;
+  return new HttpFetchError(HTTP_FETCH_FAILURE_MESSAGE, { cause: error });
+}
+
+function responseHeaders(headers: IncomingHttpHeaders): Readonly<Record<string, string | undefined>> {
+  const normalized: Record<string, string | undefined> = {};
+  for (const [name, value] of Object.entries(headers))
+    normalized[name.toLowerCase()] = Array.isArray(value) ? value.join(', ') : value;
+  return normalized;
 }
 
 const signalAborted = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')?.get;
@@ -275,6 +303,13 @@ export async function fetchHttpsResource<T>(
       const status = response.statusCode;
       const location = response.headers.location;
       if (location && (status === 301 || status === 302 || status === 303 || status === 307 || status === 308)) {
+        // Requiring public permission keeps Node successes independent of a
+        // future browser application's origin. Redirect headers need no exposure:
+        // browser Fetch follows these responses without exposing them to SDK code.
+        if (options.requirePublicAccessHeaders &&
+          response.headers['access-control-allow-origin']?.trim() !== '*') {
+          throw new HttpFetchError('The HTTPS redirect response does not allow public browser access.');
+        }
         response.destroy();
         try {
           url = new URL(location, url);
@@ -286,18 +321,24 @@ export async function fetchHttpsResource<T>(
       }
       const finalResponse = response;
       let body: Promise<Uint8Array> | undefined;
-      const result = await abortable(Promise.resolve(consume({
+      const resource: HttpsResource = {
         url,
         statusCode: status ?? 0,
-        headers: finalResponse.headers,
+        headers: responseHeaders(finalResponse.headers),
         readBody: () => body ??= readBody(finalResponse, controller.signal, options.maxResponseBytes),
-      })), controller.signal);
+      };
+      validateResponseContract(resource, options);
+      const result = await abortable(Promise.resolve(consume(resource)), controller.signal);
       // Synchronous consumption can keep the timer from firing, so explicitly
       // sample the monotonic deadline after parsing or other callback work.
       if (performance.now() >= deadline) throw timeoutError();
       controller.signal.throwIfAborted();
       return result;
     }
+  } catch (error) {
+    throwIfAborted(options.signal);
+    if (error instanceof HttpFetchError) throw normalizeHttpFetchError(error, options);
+    throw error;
   } finally {
     response?.destroy();
     if (timer !== undefined) clearTimeout(timer);

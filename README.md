@@ -321,6 +321,39 @@ TypeScript NodeNext consumers also need `compilerOptions.resolveJsonModule: true
 
 The SDK targets AI Catalog v0.9, the v1.0 release candidate, at an exact specification snapshot. See [Specification snapshot interpretation](./docs/spec-interpretation.md) for the pinned revision and how conflicts in that snapshot are handled.
 
+## Configure portable network access
+
+By default, discovery can select different catalogs in Node.js and browsers. A browser application fetching from another origin may be able to read the response’s status and body without being allowed to read its HTTP `Link` header.
+
+For example, a website might return `Link: </tools/catalog.json>; rel="ai-catalog"` with `Access-Control-Allow-Origin: *`, but no `Access-Control-Expose-Headers`. The SDK in Node.js requests `/tools/catalog.json`, while in a browser it tries `/.well-known/ai-catalog.json`. Those URLs can serve different catalogs.
+
+To check for these browser permissions while running in Node.js, enable `requirePublicAccessHeaders` once at startup:
+
+```ts
+import { configure } from 'ai-catalog-sdk';
+
+configure({ requirePublicAccessHeaders: true });
+```
+
+This setting applies to discovery, catalog loading, and automatic DID resolution, including their nested requests. Each invocation captures the setting when it starts.
+
+With `requirePublicAccessHeaders` enabled, missing required headers are treated as retrieval failures: `fetch_failed` for discovery and loading, or `issuer_check_failed` for DID resolution.
+
+Servers can satisfy the contract with these headers on their final responses:
+
+```http
+Access-Control-Allow-Origin: *
+Access-Control-Expose-Headers: Access-Control-Allow-Origin, Access-Control-Expose-Headers, Link
+```
+
+Alternatively, use `Access-Control-Expose-Headers: *` in place of the explicit header list.
+
+The `Link` entry lets discovery check the `Link` header, including to confirm when a catalog link is not provided.
+
+Exposing the two access-control headers lets the SDK check the same declarations in both environments. The check applies even to same-origin requests and error responses. When discovery would otherwise return `not_found`, missing required headers produce `fetch_failed` instead.
+
+When following redirects with `requirePublicAccessHeaders` enabled, the SDK in Node.js stops retrieval if any redirect response lacks `Access-Control-Allow-Origin: *`, though only the final response needs the `Access-Control-Expose-Headers` declaration shown above. Browsers follow redirects under their own permission rules and may accept a redirect that the SDK rejects in Node.js—for example, one that permits only the application's origin.
+
 ## Requirements
 
 - Node.js `>=22.20.0`
