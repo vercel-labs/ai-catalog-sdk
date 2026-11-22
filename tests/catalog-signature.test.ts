@@ -40,7 +40,7 @@ function signCatalog(
 }
 
 function optionsFor(
-  publicKey: SignatureCheckOptions['publicKey'] = trustedKeys.publicKey,
+  publicKey: SignatureCheckOptions['publicKey'] = trustedKeys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']),
 ): SignatureCheckOptions {
   return { publicKey, expectedAlgorithm: 'ES256' };
 }
@@ -84,7 +84,7 @@ const unsignedCatalog = {
 } satisfies AICatalog & { future: JsonValue };
 
 describe('checkCatalogSignature', () => {
-  it.each(['0.9', '1.0'])('preserves the signed specification version %s through parsing and checks both native public-key handles', async (specVersion) => {
+  it.each(['0.9', '1.0'])('preserves the signed specification version %s through parsing and checks P-256 CryptoKeys', async (specVersion) => {
     const signed = signCatalog({ ...unsignedCatalog, specVersion });
     const catalog = parseCatalogJson(JSON.stringify(signed));
     expect(catalog).toEqual(signed);
@@ -196,7 +196,7 @@ describe('checkCatalogSignature', () => {
     await expect(
       checkCatalogSignature(
         signCatalog(unsignedCatalog),
-        optionsFor(otherKeys.publicKey),
+        optionsFor(otherKeys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'])),
       ),
     ).resolves.toEqual({ status: 'invalid_signature' });
   });
@@ -250,7 +250,7 @@ describe('checkCatalogSignature', () => {
     catalog.entries.reverse();
     catalog.future = { retained: false };
     if (catalog.signature) catalog.signature.jws = 'mutated';
-    options.publicKey = otherKeys.publicKey;
+    options.publicKey = otherKeys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
     options.expectedAlgorithm = 'ES256';
 
     await expect(pending).resolves.toEqual({ status: 'valid' });

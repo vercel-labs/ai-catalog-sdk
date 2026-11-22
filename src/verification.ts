@@ -1,10 +1,8 @@
-import { Buffer } from 'node:buffer';
-import { createHash, type KeyObject, type webcrypto } from 'node:crypto';
-import { types as utilTypes } from 'node:util';
 import canonicalize from 'canonicalize';
 import { flattenedVerify } from 'jose/jws/flattened/verify';
 import * as joseErrors from 'jose/errors';
 
+import { assertStableBytes, isUint8Array, encodeBase64Url, decodeBase64Url, hex } from './internal/bytes.js';
 import { DIGEST_PATTERN, DIGEST_HEX_LENGTHS } from './internal/digest.js';
 import { preflightJsonValue } from './internal/json-value.js';
 import { resolveDidWeb } from './internal/did-web.js';
@@ -33,11 +31,6 @@ import type {
 
 const utf8Encoder = new TextEncoder();
 const strictUtf8Decoder = new TextDecoder('utf-8', { fatal: true });
-const typedArrayBufferGetter = Object.getOwnPropertyDescriptor(
-  Object.getPrototypeOf(Uint8Array.prototype) as object,
-  'buffer',
-)?.get;
-
 const registeredJoseHeaderParameters = new Set([
   'alg',
   'jku',
@@ -71,32 +64,40 @@ interface SignaturePayloadSnapshot {
   jws: ParsedDetachedJws;
 }
 
+type NativeCryptoKey = Parameters<typeof globalThis.crypto.subtle.verify>[1];
+
+// Mixed Node/DOM projects resolve global crypto to the DOM declarations. Accept
+// Node's additional key usages there without widening either platform alone.
+type CryptoKey =
+  | NativeCryptoKey
+  | (typeof globalThis extends {
+      onmessage: unknown;
+      process: { versions: { node: string } };
+    }
+      ? Omit<NativeCryptoKey, 'usages'> & {
+          readonly usages: (
+            | NativeCryptoKey['usages'][number]
+            | 'encapsulateBits'
+            | 'decapsulateBits'
+            | 'encapsulateKey'
+            | 'decapsulateKey'
+          )[];
+        }
+      : never);
+
+type CapturedSignatureCheckOptions = {
+  publicKey: InstanceType<typeof globalThis.CryptoKey>;
+  expectedAlgorithm: 'ES256';
+};
+
 interface SignatureCheckSnapshot extends SignaturePayloadSnapshot {
-  publicKey: webcrypto.CryptoKey | KeyObject;
+  publicKey: CapturedSignatureCheckOptions['publicKey'];
 }
 
 function isImplementedDigestAlgorithm(
   algorithm: string,
 ): algorithm is DigestAlgorithm {
   return Object.hasOwn(DIGEST_HEX_LENGTHS, algorithm);
-}
-
-function assertStableBytes(bytes: unknown): asserts bytes is Uint8Array {
-  if (!utilTypes.isUint8Array(bytes)) {
-    throw new TypeError('bytes must be a Uint8Array.');
-  }
-  const buffer = typedArrayBufferGetter?.call(bytes);
-  if (buffer === undefined) {
-    throw new TypeError('bytes must be a Uint8Array.');
-  }
-  if (utilTypes.isSharedArrayBuffer(buffer)) {
-    throw new TypeError('bytes must not be backed by a SharedArrayBuffer.');
-  }
-  try {
-    Uint8Array.prototype.subarray.call(bytes, 0, 0);
-  } catch {
-    throw new TypeError('bytes must not have a detached ArrayBuffer.');
-  }
 }
 
 function canonicalizationArrayMap(
@@ -246,40 +247,27 @@ function assertCatalogEntryObject(
 
 function assertEs256PublicKey(
   publicKey: unknown,
-): asserts publicKey is webcrypto.CryptoKey | KeyObject {
-  if (utilTypes.isCryptoKey(publicKey)) {
-    const algorithm = publicKey.algorithm;
-    if (
-      publicKey.type !== 'public' ||
-      algorithm.name !== 'ECDSA' ||
-      !('namedCurve' in algorithm) ||
-      algorithm.namedCurve !== 'P-256' ||
-      !publicKey.usages.includes('verify')
-    ) {
-      throw new TypeError(
-        'publicKey must be a public P-256 CryptoKey usable for verification.',
-      );
-    }
-    return;
+): asserts publicKey is CapturedSignatureCheckOptions['publicKey'] {
+  if (!(publicKey instanceof CryptoKey)) {
+    throw new TypeError('publicKey must be a CryptoKey.');
   }
-
-  if (utilTypes.isKeyObject(publicKey)) {
-    if (
-      publicKey.type !== 'public' ||
-      publicKey.asymmetricKeyType !== 'ec' ||
-      publicKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1'
-    ) {
-      throw new TypeError('publicKey must be a public P-256 KeyObject.');
-    }
-    return;
+  const algorithm = publicKey.algorithm;
+  if (
+    publicKey.type !== 'public' ||
+    algorithm.name !== 'ECDSA' ||
+    !('namedCurve' in algorithm) ||
+    algorithm.namedCurve !== 'P-256' ||
+    !publicKey.usages.includes('verify')
+  ) {
+    throw new TypeError(
+      'publicKey must be a public P-256 CryptoKey usable for verification.',
+    );
   }
-
-  throw new TypeError('publicKey must be a CryptoKey or KeyObject.');
 }
 
 function snapshotSignatureCheckOptions(
   options: unknown,
-): SignatureCheckOptions {
+): CapturedSignatureCheckOptions {
   if (options === null || typeof options !== 'object') {
     throw new TypeError('options must be an object.');
   }
@@ -333,7 +321,7 @@ function decodeProtectedHeader(
   try {
     const header: unknown = JSON.parse(
       strictUtf8Decoder.decode(
-        Buffer.from(value.slice(0, separator), 'base64url'),
+        decodeBase64Url(value.slice(0, separator)),
       ),
     );
     if (
@@ -432,8 +420,8 @@ export type DigestCheckResult =
  * Manifest detached-JWS signature checks.
  */
 export interface SignatureCheckOptions {
-  /** The exact public key selected by the caller's trust policy. */
-  publicKey: webcrypto.CryptoKey | KeyObject;
+  /** The native CryptoKey selected by the caller's trust policy. */
+  publicKey: CryptoKey;
 
   /** The exact algorithm the caller expects the protected JWS header to use. */
   expectedAlgorithm: 'ES256';
@@ -676,7 +664,7 @@ function snapshotSignaturePayload(
 function snapshotSignatureCheck(
   value: object,
   valueName: 'catalog' | 'manifest',
-  options: SignatureCheckOptions,
+  options: CapturedSignatureCheckOptions,
 ): SignatureCheckSnapshot | SignatureCheckResult {
   const snapshot = snapshotSignaturePayload(value, valueName);
   if ('status' in snapshot) return snapshot;
@@ -685,14 +673,14 @@ function snapshotSignatureCheck(
 
 function snapshotCatalogSignatureCheck(
   catalog: AICatalog,
-  options: SignatureCheckOptions,
+  options: CapturedSignatureCheckOptions,
 ): SignatureCheckSnapshot | SignatureCheckResult {
   return snapshotSignatureCheck(catalog, 'catalog', options);
 }
 
 function snapshotTrustManifestSignatureCheck(
   manifest: TrustManifest,
-  options: SignatureCheckOptions,
+  options: CapturedSignatureCheckOptions,
 ): SignatureCheckSnapshot | SignatureCheckResult {
   return snapshotSignatureCheck(manifest, 'manifest', options);
 }
@@ -701,14 +689,15 @@ async function executeSignatureCheck(
   snapshot: SignatureCheckSnapshot | SignatureCheckResult,
 ): Promise<SignatureCheckResult> {
   if ('status' in snapshot) return snapshot;
-  if (Buffer.from(snapshot.jws.signatureSegment, 'base64url').length !== 64)
+  // A canonical unpadded base64url ES256 signature has 86 characters (64 bytes).
+  if (snapshot.jws.signatureSegment.length !== 86)
     return { status: 'invalid_signature' };
 
   try {
     await flattenedVerify(
       {
         protected: snapshot.jws.protectedSegment,
-        payload: Buffer.from(snapshot.payload).toString('base64url'),
+        payload: encodeBase64Url(snapshot.payload),
         signature: snapshot.jws.signatureSegment,
       },
       snapshot.publicKey,
@@ -826,11 +815,20 @@ export async function checkCatalogEntryTrustManifest(
   const timeOptions = snapshotTimeCheckOptions(rawOptions as object);
   const captured = captureEntryFields(entry, bytesOrManifest, isDataCall);
   if ('status' in captured) return captured;
-  const artifact = precheckArtifact(captured.entry, bytesOrManifest);
-  if (artifact !== undefined) return artifact;
+  const artifactCheck = precheckArtifact(captured.entry, bytesOrManifest);
   const input = isDataCall ? bytesOrManifest : manifestOrOptions;
-  assertJsonInput(input);
-  const parsed = safeParseTrustManifest(input);
+  let manifestSnapshot: { parsed: ReturnType<typeof safeParseTrustManifest> } | { error: unknown };
+  // Capture before hashing yields, while retaining artifact-failure precedence.
+  try {
+    assertJsonInput(input);
+    manifestSnapshot = { parsed: safeParseTrustManifest(input) };
+  } catch (error) {
+    manifestSnapshot = { error };
+  }
+  const artifact = await artifactCheck;
+  if (artifact !== undefined) return artifact;
+  if ('error' in manifestSnapshot) throw manifestSnapshot.error;
+  const { parsed } = manifestSnapshot;
   if (!parsed.success)
     return {
       status: 'invalid_manifest',
@@ -921,10 +919,10 @@ function captureJson(value: JsonValue): JsonValue {
 }
 
 /** Check the artifact against the captured entry's declared digest. */
-function precheckArtifact(
+async function precheckArtifact(
   entry: CatalogEntry,
   bytes: unknown,
-): EntryCheckFailure | undefined {
+): Promise<EntryCheckFailure | undefined> {
   if (Object.hasOwn(entry, 'digest')) {
     const hasData = Object.hasOwn(entry, 'data');
     const data = readOwnDataProperty(entry, 'data');
@@ -944,7 +942,7 @@ function precheckArtifact(
     const artifactBytes = hasData
       ? canonicalizeJsonValueToBytes(data as JsonValue)
       : (bytes as Uint8Array);
-    const result = checkDigest(
+    const result = await checkDigest(
       artifactBytes,
       readOwnDataProperty(entry, 'digest') as string,
     );
@@ -1120,7 +1118,7 @@ export async function checkCatalogEntry(
   bytesOrOptions?: Uint8Array | CatalogEntryCheckOptions,
   maybeOptions?: CatalogEntryCheckOptions,
 ): Promise<CatalogEntryCheckResult> {
-  const isDataCall = !utilTypes.isUint8Array(bytesOrOptions);
+  const isDataCall = !isUint8Array(bytesOrOptions);
   if (isDataCall && maybeOptions !== undefined)
     throw new TypeError('Inline entries take options as the second argument.');
   const options = snapshotEntryCheckOptions(
@@ -1146,7 +1144,8 @@ export async function checkCatalogEntry(
       ]),
     };
   const manifests = captureJson((attached ?? []) as JsonValue) as JsonValue[];
-  const artifact = precheckArtifact(captured.entry, bytesOrOptions);
+  const artifact = await precheckArtifact(captured.entry, bytesOrOptions);
+  throwIfCanceled(options.signal);
   if (artifact !== undefined) return artifact;
   const snapshot = captured.entry;
   const publisher = publisherIdentityFor(snapshot.identifier);
@@ -1212,7 +1211,7 @@ export async function checkCatalogEntry(
               document = resolveDidWeb(profile.identity, resolutionOptions);
               resolutions.set(profile.identity, document);
             }
-            const publicKey = authorizePublisherKey(
+            const publicKey = await authorizePublisherKey(
               await document,
               profile.identity,
               profile.kid,
@@ -1266,9 +1265,14 @@ export async function checkCatalogEntry(
   return { status: 'checked', manifests: results };
 }
 
-function digestHex(bytes: Uint8Array, algorithm: DigestAlgorithm): string {
+async function digestHex(bytes: Uint8Array, algorithm: DigestAlgorithm): Promise<string> {
   try {
-    return createHash(algorithm).update(bytes).digest('hex');
+    // Web Crypto captures the validated byte view before returning its promise.
+    const digest = await crypto.subtle.digest(
+      { sha256: 'SHA-256', sha384: 'SHA-384', sha512: 'SHA-512' }[algorithm],
+      bytes as BufferSource,
+    );
+    return hex(new Uint8Array(digest));
   } catch (cause) {
     throw new DigestAlgorithmUnavailableError(algorithm, cause);
   }
@@ -1288,17 +1292,17 @@ function digestHex(bytes: Uint8Array, algorithm: DigestAlgorithm): string {
  * @throws {DigestAlgorithmUnavailableError} If the runtime cannot execute the
  * selected algorithm.
  */
-export function createDigest(
+export async function createDigest(
   value: Uint8Array | JsonValue,
   algorithm: DigestAlgorithm = 'sha256',
-): string {
+): Promise<string> {
   if (typeof algorithm !== 'string' || !isImplementedDigestAlgorithm(algorithm))
     throw new TypeError('algorithm must be sha256, sha384, or sha512.');
-  const bytes = utilTypes.isUint8Array(value)
+  const bytes = isUint8Array(value)
     ? value
     : canonicalizeJsonValueToBytes(value);
   assertStableBytes(bytes);
-  return `${algorithm}:${digestHex(bytes, algorithm)}`;
+  return `${algorithm}:${await digestHex(bytes, algorithm)}`;
 }
 
 /**
@@ -1321,11 +1325,11 @@ export function createDigest(
  * @throws {DigestAlgorithmUnavailableError} If the runtime cannot execute a
  * digest algorithm implemented by this SDK.
  */
-export function checkDigest(
+export async function checkDigest(
   value: Uint8Array | JsonValue,
   expectedDigest: string,
-): DigestCheckResult {
-  const bytes = utilTypes.isUint8Array(value)
+): Promise<DigestCheckResult> {
+  const bytes = isUint8Array(value)
     ? value
     : canonicalizeJsonValueToBytes(value);
   assertStableBytes(bytes);
@@ -1346,7 +1350,7 @@ export function checkDigest(
     return { status: 'invalid_digest' };
   }
 
-  const actualHex = digestHex(bytes, algorithm);
+  const actualHex = await digestHex(bytes, algorithm);
 
   return { status: actualHex === expectedHex ? 'match' : 'mismatch' };
 }

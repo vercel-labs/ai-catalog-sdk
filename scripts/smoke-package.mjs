@@ -210,28 +210,28 @@ assert.equal(Object.hasOwn(catalogPayload, 'additionalSignatures'), false);
 assert.deepEqual(catalogPayload.extension, payloadCatalog.extension);
 const manifestPayload = JSON.parse(decode(createTrustManifestSignaturePayload({ contributor: 'did:example:alice', signature: { ...signatureMetadata, jws: 'excluded' }, additionalSignatures: null })));
 assert.deepEqual(manifestPayload, { contributor: 'did:example:alice', signature: signatureMetadata });
-assert.equal(checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855').status, 'match');
-assert.equal(createDigest(new Uint8Array()), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+assert.equal((await checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')).status, 'match');
+assert.equal(await createDigest(new Uint8Array()), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
 const canonicalDigest = 'sha256:43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777';
-assert.equal(createDigest({ b: 2, a: 1 }), canonicalDigest);
-assert.equal(createDigest({ a: 1, b: 2 }), canonicalDigest);
-assert.equal(checkDigest(new TextEncoder().encode('{"a":1,"b":2}'), canonicalDigest).status, 'match');
-assert.equal(checkDigest({ b: 2, a: 1 }, canonicalDigest).status, 'match');
-assert.equal(checkDigest({ a: 1, b: 2 }, canonicalDigest).status, 'match');
-assert.equal(checkDigest({ a: 1, b: 3 }, canonicalDigest).status, 'mismatch');
+assert.equal(await createDigest({ b: 2, a: 1 }), canonicalDigest);
+assert.equal(await createDigest({ a: 1, b: 2 }), canonicalDigest);
+assert.equal((await checkDigest(new TextEncoder().encode('{"a":1,"b":2}'), canonicalDigest)).status, 'match');
+assert.equal((await checkDigest({ b: 2, a: 1 }, canonicalDigest)).status, 'match');
+assert.equal((await checkDigest({ a: 1, b: 2 }, canonicalDigest)).status, 'match');
+assert.equal((await checkDigest({ a: 1, b: 3 }, canonicalDigest)).status, 'mismatch');
 const stringDigest = 'sha256:' + createHash('sha256').update('"abc"').digest('hex');
-assert.equal(createDigest('abc'), stringDigest);
-assert.notEqual(stringDigest, createDigest(new TextEncoder().encode('abc')));
-assert.equal(checkDigest(new TextEncoder().encode('"abc"'), stringDigest).status, 'match');
-assert.equal(checkDigest('abc', stringDigest).status, 'match');
-assert.equal(checkDigest(new TextEncoder().encode('abc'), stringDigest).status, 'mismatch');
+assert.equal(await createDigest('abc'), stringDigest);
+assert.notEqual(stringDigest, await createDigest(new TextEncoder().encode('abc')));
+assert.equal((await checkDigest(new TextEncoder().encode('"abc"'), stringDigest)).status, 'match');
+assert.equal((await checkDigest('abc', stringDigest)).status, 'match');
+assert.equal((await checkDigest(new TextEncoder().encode('abc'), stringDigest)).status, 'mismatch');
 for (const [jsonValue, canonicalText] of [[[97, 98, 99], '[97,98,99]'], [null, 'null']]) {
   const expectedDigest = 'sha256:' + createHash('sha256').update(canonicalText).digest('hex');
-  assert.equal(checkDigest(jsonValue, expectedDigest).status, 'match');
+  assert.equal((await checkDigest(jsonValue, expectedDigest)).status, 'match');
 }
-const sha384Digest = createDigest(Buffer.from('abc'), 'sha384');
+const sha384Digest = await createDigest(Buffer.from('abc'), 'sha384');
 assert.ok(sha384Digest.startsWith('sha384:'));
-assert.equal(checkDigest(Buffer.from('abc'), sha384Digest).status, 'match');
+assert.equal((await checkDigest(Buffer.from('abc'), sha384Digest)).status, 'match');
 
 const keys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 function createJws({ payload, typ }, representation = 'compact', headerFields = {}) {
@@ -246,7 +246,8 @@ function createJws({ payload, typ }, representation = 'compact', headerFields = 
 const catalogForSignature = { ...value, signature: signatureMetadata };
 const catalogJws = createJws({ payload: createCatalogSignaturePayload(catalogForSignature), typ: 'ai-catalog+jws' }, 'detached');
 const signedCatalog = { ...catalogForSignature, signature: { ...signatureMetadata, jws: catalogJws } };
-const bindingOptions = { publicKey: keys.publicKey, expectedAlgorithm: 'ES256' };
+const publicKey = keys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+const bindingOptions = { publicKey, expectedAlgorithm: 'ES256' };
 assert.equal((await checkCatalogSignature(signedCatalog, bindingOptions)).status, 'valid');
 assertValidCatalog(signedCatalog);
 
@@ -775,18 +776,18 @@ const entriesWithData: CatalogEntryWithData[] = authored.entries.filter(isCatalo
 const entriesWithUrl: CatalogEntryWithUrl[] = authored.entries.filter(isCatalogEntryWithUrl);
 aiCatalogSchema.parse(authored);
 const schema: JsonSchema = aiCatalogJsonSchema;
-const digestResult: DigestCheckResult = checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+const digestResult: DigestCheckResult = await checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
 const canonicalBytes: Uint8Array = canonicalizeJsonValueToBytes({ b: 2, a: 1 });
 const metadata = { profile: 'custom-v1', issuedAt: '2026-08-31T00:00:00Z' } satisfies TrustManifestSignatureMetadata;
 const expiryMetadata: TrustManifestSignatureMetadata = { expiresAt: '2100-01-01T00:00:00Z' };
 const digestAlgorithm: DigestAlgorithm = 'sha384';
-const generatedDigest: string = createDigest(new Uint8Array(), digestAlgorithm);
-const jsonDigest: string = createDigest({ b: 2, a: 1 });
-const unionDigest: string = createDigest({} as Uint8Array | JsonValue);
-const jsonDigestResult: DigestCheckResult = checkDigest({} as JsonValue, jsonDigest);
-const stringDigestResult: DigestCheckResult = checkDigest('abc', jsonDigest);
-const nullDigestResult: DigestCheckResult = checkDigest(null, jsonDigest);
-const unionDigestResult: DigestCheckResult = checkDigest({} as Uint8Array | JsonValue, jsonDigest);
+const generatedDigest: string = await createDigest(new Uint8Array(), digestAlgorithm);
+const jsonDigest: string = await createDigest({ b: 2, a: 1 });
+const unionDigest: string = await createDigest({} as Uint8Array | JsonValue);
+const jsonDigestResult: DigestCheckResult = await checkDigest({} as JsonValue, jsonDigest);
+const stringDigestResult: DigestCheckResult = await checkDigest('abc', jsonDigest);
+const nullDigestResult: DigestCheckResult = await checkDigest(null, jsonDigest);
+const unionDigestResult: DigestCheckResult = await checkDigest({} as Uint8Array | JsonValue, jsonDigest);
 // @ts-expect-error Only Uint8Array byte views and JSON values are accepted.
 checkDigest(new Uint16Array(), jsonDigest);
 // @ts-expect-error The expected digest must be a string.
@@ -803,7 +804,7 @@ const catalogSignaturePayload: Uint8Array = createCatalogSignaturePayload({ ...a
 const signaturePublicKey = createPublicKey({
   key: { kty: 'EC', crv: 'P-256', x: 'f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU', y: 'x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0' },
   format: 'jwk',
-});
+}).toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
 const signatureOptions: SignatureCheckOptions = { publicKey: signaturePublicKey, expectedAlgorithm: 'ES256' };
 const signatureCheck: Promise<SignatureCheckResult> = checkTrustManifestSignature(trustManifest, signatureOptions);
 const catalogSignatureCheck: Promise<SignatureCheckResult> = checkCatalogSignature(authored, signatureOptions);

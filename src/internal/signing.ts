@@ -1,4 +1,4 @@
-import { Buffer } from 'node:buffer';
+import { encodeBase64Url, decodeBase64Url } from './bytes.js';
 
 import type {
   CatalogEntry,
@@ -110,7 +110,8 @@ function base64UrlSegment(value: unknown, name: string): string {
     typeof value !== 'string' ||
     value.length === 0 ||
     !/^[A-Za-z0-9_-]+$/.test(value) ||
-    Buffer.from(value, 'base64url').toString('base64url') !== value
+    value.length % 4 === 1 ||
+    encodeBase64Url(decodeBase64Url(value)) !== value
   ) {
     throw new TypeError(`The JWS ${name} must be canonical unpadded base64url.`);
   }
@@ -149,7 +150,7 @@ function detachJws(value: unknown, expectedPayload: string): string {
   let header: Record<string, JsonValue>;
   try {
     const decoded: unknown = JSON.parse(
-      strictUtf8Decoder.decode(Buffer.from(encodedHeader, 'base64url')),
+      strictUtf8Decoder.decode(decodeBase64Url(encodedHeader)),
     );
     header = snapshotObject(decoded, 'JWS protected header');
   } catch (cause) {
@@ -268,7 +269,7 @@ export async function signTrustManifest(
   }
   const signed = completed as unknown as SignedTrustManifest;
   const payload = createTrustManifestSignaturePayload(signed);
-  const expectedPayload = Buffer.from(payload).toString('base64url');
+  const expectedPayload = encodeBase64Url(payload);
   const result = await createJws({ payload: new Uint8Array(payload), typ: signatureTyp });
   signed.signature.jws = detachJws(result, expectedPayload);
   return signed;

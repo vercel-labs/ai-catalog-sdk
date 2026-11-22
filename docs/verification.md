@@ -219,7 +219,7 @@ const manifestResult = await checkTrustManifestSignature(manifest, {
 });
 ```
 
-They share `SignatureCheckOptions` and `SignatureCheckResult`. The SDK implements the exact algorithm token `ES256`; supply a native public P-256 `KeyObject` or a P-256 `CryptoKey` usable for verification.
+They share `SignatureCheckOptions` and `SignatureCheckResult`. The SDK implements the exact algorithm token `ES256`; supply a public P-256 `CryptoKey` usable for verification.
 
 A `valid` result establishes only that the supplied key verifies the captured payload. It does not authenticate the claimed contributor or catalog operator, enforce issuance or expiration, check artifact binding, or establish trust. Header fields do not select a key or trigger network requests.
 
@@ -243,7 +243,7 @@ These functions validate the materialized JSON value without performing catalog 
 ```ts
 import { checkDigest } from 'ai-catalog-sdk/node';
 
-const result = checkDigest(
+const result = await checkDigest(
   artifactBytes, // or entry.data for an inline artifact
   'sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
 );
@@ -264,22 +264,22 @@ The result statuses have deliberately narrow meanings:
 | `invalid_digest` | The declaration is malformed, or a known algorithm has an invalid output length. |
 | `algorithm_not_implemented` | The declaration is syntactically valid, but the SDK does not implement its exact algorithm token. |
 
-The SDK currently implements the exact, case-sensitive `sha256`, `sha384`, and `sha512` tokens with 64, 96, and 128 lowercase hexadecimal characters, respectively. This is an SDK capability boundary, not a claim that other algorithms are forbidden or insecure. If the runtime cannot execute a registered implementation, the function throws `DigestAlgorithmUnavailableError` and preserves the underlying error as `cause`.
+The SDK currently implements the exact, case-sensitive `sha256`, `sha384`, and `sha512` tokens with 64, 96, and 128 lowercase hexadecimal characters, respectively. This is an SDK capability boundary, not a claim that other algorithms are forbidden or insecure. If the runtime cannot execute a registered implementation, the function rejects with `DigestAlgorithmUnavailableError` and preserves the underlying error as `cause`.
 
-`Buffer` values and `Uint8Array` subviews are accepted. Shared or detached backing buffers are rejected because they cannot provide a stable byte view for the check. Wrong JavaScript argument types, shared or detached byte views, and JSON values that cannot satisfy JCS throw `TypeError`. JSON values beyond the SDK's node or nesting-depth limits throw `RangeError`.
+`Buffer` values and `Uint8Array` subviews are accepted. Shared or detached backing buffers are rejected because they cannot provide a stable byte view for the check. The function rejects with `TypeError` for wrong JavaScript argument types, shared or detached byte views, and JSON values that cannot satisfy JCS. JSON values beyond the SDK's node or nesting-depth limits produce a rejection with `RangeError`.
 
 A `match` result establishes only that the supplied bytes or JCS-canonicalized JSON value match a declared digest. It does not establish who made the declaration, whether the digest is authoritative, or whether the content is trustworthy.
 
 ## Create a digest
 
-`createDigest(value, algorithm?)` returns an artifact digest in `algorithm:lowercase-hex` form. The algorithm defaults to `sha256`; `sha384` and `sha512` are also supported:
+`createDigest(value, algorithm?)` computes an artifact digest in `algorithm:lowercase-hex` form. The algorithm defaults to `sha256`; `sha384` and `sha512` are also supported:
 
 ```ts
 import { createDigest } from 'ai-catalog-sdk/node';
 
-const artifactDigest = createDigest(artifactBytes);
-const inlineDigest = createDigest(entry.data);
-const sha384Digest = createDigest(artifactBytes, 'sha384');
+const artifactDigest = await createDigest(artifactBytes);
+const inlineDigest = await createDigest(entry.data);
+const sha384Digest = await createDigest(artifactBytes, 'sha384');
 ```
 
 A `Uint8Array` or `Buffer` is hashed as its exact byte range. Other logical JSON values are JCS-canonicalized before hashing. Strings are JSON string values, including their JSON quotes and escapes; ordinary arrays are JSON arrays. To hash text as raw bytes, encode it with `TextEncoder` first.

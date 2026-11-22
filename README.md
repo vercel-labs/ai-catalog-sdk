@@ -236,7 +236,7 @@ const entry = {
   identifier: 'urn:air:example.com:agent:example-plugin',
   type: mediaTypes.agentPluginZip,
   url: 'https://example.com/example-agent-plugin.zip',
-  digest: createDigest(artifactBytes),
+  digest: await createDigest(artifactBytes),
 };
 
 const manifest = await signTrustManifest(

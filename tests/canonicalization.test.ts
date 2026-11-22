@@ -192,9 +192,9 @@ describe('canonicalizeJsonValueToBytes', () => {
     expect(value).toEqual(before);
   });
 
-  it('composes its exact output bytes with checkDigest', () => {
+  it('composes its exact output bytes with checkDigest', async () => {
     const bytes = canonicalizeJsonValueToBytes({ b: 2, a: 1 });
-    const result = checkDigest(
+    const result = await checkDigest(
       bytes,
       'sha256:43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777',
     );

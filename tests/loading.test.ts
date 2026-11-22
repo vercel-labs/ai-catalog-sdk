@@ -107,7 +107,7 @@ describe('loadCatalogFromEntry', () => {
     const source = ` {\n  "entries": [], "specVersion": "${specVersion}"\n}\n`;
     const bytes = new TextEncoder().encode(source);
     respond = (_request, response) => response.end(source);
-    const entry = { ...urlEntry, digest: createDigest(bytes) };
+    const entry = { ...urlEntry, digest: await createDigest(bytes) };
     const result = await loadCatalogFromEntry(entry, options);
     expect(result).toMatchObject({ status: 'found', catalog: document, url });
     if (result.status !== 'found') throw new Error('Expected a loaded catalog.');
@@ -123,7 +123,7 @@ describe('loadCatalogFromEntry', () => {
     const entry: CatalogEntryWithData = { identifier: 'inline', type: catalogType, data: document };
     const result = await loadCatalogFromEntry(entry);
     expect(result).toEqual({ status: 'found', catalog: document });
-    await expect(checkCatalogEntry({ ...entry, digest: createDigest(entry.data) })).resolves.toEqual({
+    await expect(checkCatalogEntry({ ...entry, digest: await createDigest(entry.data) })).resolves.toEqual({
       status: 'checked', manifests: [],
     });
     expect(requests).toEqual([]);

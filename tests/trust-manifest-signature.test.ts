@@ -39,7 +39,7 @@ const fixedManifest = {
   },
   signature: { ...metadata, jws: fixedSignature },
 } as TrustManifest;
-const fixedPublicKey = fixedKeys.publicKey;
+const fixedPublicKey = fixedKeys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
 const fixedOptions: SignatureCheckOptions = {
   publicKey: fixedPublicKey,
   expectedAlgorithm: 'ES256',
@@ -85,7 +85,7 @@ function signManifest(
 }
 
 function optionsFor(
-  publicKey: SignatureCheckOptions['publicKey'] = trustedKeys.publicKey,
+  publicKey: SignatureCheckOptions['publicKey'] = trustedKeys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']),
 ): SignatureCheckOptions {
   return { publicKey, expectedAlgorithm: 'ES256' };
 }
@@ -105,11 +105,12 @@ function replaceSignatureSegment(
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe('checkTrustManifestSignature', () => {
-  it('checks an independently signed manifest vector with both native key handles', async () => {
+  it('checks an independently signed manifest vector with P-256 CryptoKeys', async () => {
     await expect(
       checkTrustManifestSignature(fixedManifest, fixedOptions),
     ).resolves.toEqual({ status: 'valid' });
@@ -190,6 +191,7 @@ describe('checkTrustManifestSignature', () => {
 
   it('classifies an oversized canonical signature without decoding it', async () => {
     const oversizedSignature = 'A'.repeat(1_000_000);
+    const decodedSegments = vi.spyOn(globalThis, 'atob');
     await expect(
       checkTrustManifestSignature(
         {
@@ -231,6 +233,8 @@ describe('checkTrustManifestSignature', () => {
         fixedOptions,
       ),
     ).resolves.toEqual({ status: 'jws_feature_not_implemented' });
+
+    expect(decodedSegments.mock.calls.some(([segment]) => segment === oversizedSignature)).toBe(false);
   });
 
   it.each([
@@ -342,7 +346,7 @@ describe('checkTrustManifestSignature', () => {
   it('reports wrong keys, changed signatures, and wrong ES256 lengths', async () => {
     const manifest = signManifest(fixedManifest);
     await expect(
-      checkTrustManifestSignature(manifest, optionsFor(otherKeys.publicKey)),
+      checkTrustManifestSignature(manifest, optionsFor(otherKeys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']))),
     ).resolves.toEqual({ status: 'invalid_signature' });
 
     const signatureBytes = Buffer.from(
@@ -438,7 +442,7 @@ describe('checkTrustManifestSignature', () => {
     manifest.contributor = 'did:example:mutated';
     manifest.future = { nested: 'mutated' };
     if (manifest.signature) manifest.signature.jws = 'mutated';
-    options.publicKey = otherKeys.publicKey;
+    options.publicKey = otherKeys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
     options.expectedAlgorithm = 'ES256';
 
     await expect(pending).resolves.toEqual({ status: 'valid' });
