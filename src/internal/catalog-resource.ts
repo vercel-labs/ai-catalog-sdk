@@ -78,8 +78,7 @@ function catalogText(bytes: Uint8Array): string {
   try {
     return decoder.decode(bytes);
   } catch (cause) {
-    if (!(cause instanceof TypeError) ||
-      (cause as NodeJS.ErrnoException).code !== 'ERR_ENCODING_INVALID_ENCODED_DATA') throw cause;
+    if (!(cause instanceof TypeError)) throw cause;
     throw new CatalogParseError([
       { code: 'invalid_json', path: [], message: 'The catalog text is not valid UTF-8 JSON.' },
     ], cause);

@@ -65,8 +65,7 @@ function snapshotBaseUrl(options: LoadCatalogFromEntryOptions | undefined): stri
     new URL(descriptor.value);
     return descriptor.value;
   } catch (cause) {
-    if (!(cause instanceof TypeError) ||
-      (cause as NodeJS.ErrnoException).code !== 'ERR_INVALID_URL') throw cause;
+    if (!(cause instanceof TypeError)) throw cause;
     throw new TypeError('baseUrl must be an absolute URL string.', { cause });
   }
 }
@@ -108,7 +107,7 @@ function snapshotEntry(value: unknown): CapturedEntry {
 
 /**
  * Loads exactly the catalog represented by a catalog-typed entry.
- * URL entries use public HTTPS retrieval; inline entries use ordinary catalog
+ * URL entries use HTTPS retrieval; inline entries use ordinary catalog
  * parsing. Relative URLs are resolved against `options.baseUrl`; without a
  * base, they return `fetch_failed`. On success, `url` supplies context for the
  * returned catalog's relative references: the final response URL for URL entries,
@@ -157,8 +156,7 @@ export async function loadCatalogFromEntry(
   try {
     url = new URL(captured.url, baseUrl);
   } catch (cause) {
-    if (!(cause instanceof TypeError) ||
-      (cause as NodeJS.ErrnoException).code !== 'ERR_INVALID_URL') throw cause;
+    if (!(cause instanceof TypeError)) throw cause;
     return {
       status: 'fetch_failed',
       url: captured.url,

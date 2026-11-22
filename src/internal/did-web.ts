@@ -9,7 +9,7 @@ interface ResolutionOptions {
   requirePublicAccessHeaders?: boolean;
 }
 
-/** Resolves a validated root did:web issuer through a bounded native HTTPS request. */
+/** Resolves a validated root did:web issuer through a bounded HTTPS request. */
 export async function resolveDidWeb(identity: string, options: ResolutionOptions): Promise<unknown> {
   const requirePublicAccessHeaders = options.requirePublicAccessHeaders ?? captureSdkConfiguration().requirePublicAccessHeaders;
   try {
@@ -35,8 +35,7 @@ export async function resolveDidWeb(identity: string, options: ResolutionOptions
         try {
           json = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
         } catch (cause) {
-          if (!(cause instanceof TypeError) || !('code' in cause) ||
-            cause.code !== 'ERR_ENCODING_INVALID_ENCODED_DATA') throw cause;
+          if (!(cause instanceof TypeError)) throw cause;
           throw new IssuerCheckError('The publisher DID document is not valid UTF-8.', { cause });
         }
         try {

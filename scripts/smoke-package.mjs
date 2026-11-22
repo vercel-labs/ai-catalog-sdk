@@ -88,19 +88,17 @@ try {
     `import { strict as assert } from 'node:assert';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import * as core from ${JSON.stringify(pkg.name)};
-import * as nodeApi from ${JSON.stringify(`${pkg.name}/node`)};
 import { assertValidCatalog, CatalogParseError, CatalogValidationError, implementedSpecRevision, parseCatalog } from ${JSON.stringify(pkg.name)};
 import { aiCatalogSchema } from ${JSON.stringify(`${pkg.name}/zod`)};
 import { aiCatalogJsonSchema } from ${JSON.stringify(`${pkg.name}/json-schema`)};
-import { discoverCatalog, loadCatalogFromEntry, canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryTrustManifest, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(`${pkg.name}/node`)};
+import { discoverCatalog, loadCatalogFromEntry, canonicalizeJsonValueToBytes, checkCatalogEntry, checkCatalogEntryTrustManifest, checkCatalogSignature, checkDigest, checkTrustManifestSignature, createDigest, createCatalogSignaturePayload, createTrustManifestSignaturePayload, signTrustManifest } from ${JSON.stringify(pkg.name)};
 import rawSchema from ${JSON.stringify(`${pkg.name}/schema/ai-catalog.schema.json`)} with { type: 'json' };
 
 const value = { specVersion: '0.9', entries: [] };
-for (const [name, value] of Object.entries(core)) assert.equal(nodeApi[name], value);
 for (const name of ['discoverCatalog', 'loadCatalogFromEntry', 'checkCatalogEntry', 'createDigest', 'signTrustManifest']) {
-  assert.equal(Object.hasOwn(core, name), false);
+  assert.equal(typeof core[name], 'function');
 }
-for (const path of ['discovery', 'verification']) {
+for (const path of ['node', 'browser', 'discovery', 'verification']) {
   await assert.rejects(import(${JSON.stringify(pkg.name)} + '/' + path), {
     code: 'ERR_PACKAGE_PATH_NOT_EXPORTED',
   });
@@ -463,16 +461,16 @@ await assert.rejects(checkCatalogEntry(signedEntry, artifactBytes, { signal: abo
   );
   run(node, ['smoke.mjs'], { cwd: consumerDirectory });
 
-  // Keep the import hook in its own process so it only constrains the core graph.
+  // Resolve with browser conditions in isolation and reject all Node built-ins.
   await writeFile(
-    join(consumerDirectory, 'core-smoke.mjs'),
+    join(consumerDirectory, 'browser-graph-smoke.mjs'),
     `import { strict as assert } from 'node:assert';
 import { isBuiltin, registerHooks } from 'node:module';
 
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
-    assert.equal(isBuiltin(specifier), false, 'The core import graph must not depend on ' + specifier);
-    return nextResolve(specifier, context);
+    assert.equal(isBuiltin(specifier), false, 'The browser import graph must not depend on ' + specifier);
+    return nextResolve(specifier, { ...context, conditions: context.conditions.filter(condition => condition !== 'node') });
   },
 });
 try {
@@ -493,7 +491,33 @@ try {
 }
 `,
   );
-  run(node, ['core-smoke.mjs'], { cwd: consumerDirectory });
+  run(node, ['browser-graph-smoke.mjs'], { cwd: consumerDirectory });
+
+  const cryptoKeyTypeChecks = `type SDKCryptoKey = SignatureCheckOptions['publicKey'];
+declare const sdkAnnotatedKey: SDKCryptoKey;
+// @ts-expect-error Native key kinds retain their recognized literal values.
+const invalidKeyKind: SDKCryptoKey = { ...sdkAnnotatedKey, type: 'publci' };
+// @ts-expect-error Unknown key usages must not be accepted.
+const invalidKeyUsage: SDKCryptoKey = { ...sdkAnnotatedKey, usages: ['verfiy'] };
+// @ts-expect-error Native key algorithms require a string name.
+const invalidKeyAlgorithm: SDKCryptoKey = { ...sdkAnnotatedKey, algorithm: { name: 1 } };
+const readonlyUsages: readonly ['verify'] = ['verify'];
+// @ts-expect-error Native usages are mutable arrays, not readonly arrays.
+const invalidReadonlyUsages: SDKCryptoKey = { ...sdkAnnotatedKey, usages: readonlyUsages };
+// @ts-expect-error Native key properties remain readonly.
+sdkAnnotatedKey.type = 'public';
+// @ts-expect-error The native usages property remains readonly.
+sdkAnnotatedKey.usages = ['verify'];
+sdkAnnotatedKey.usages.push('verify');
+`;
+  const nativeCryptoKeyTypeChecks = `type NativeCryptoKey = Parameters<typeof globalThis.crypto.subtle.verify>[1];
+type Equal<Left, Right> = (<Value>() => Value extends Left ? 1 : 2) extends
+  (<Value>() => Value extends Right ? 1 : 2) ? true : false;
+type Assert<Value extends true> = Value;
+type ExactNativeCryptoKey = Assert<Equal<SignatureCheckOptions['publicKey'], NativeCryptoKey>>;
+declare const nativeAnnotatedKey: SignatureCheckOptions['publicKey'];
+crypto.subtle.exportKey('jwk', nativeAnnotatedKey);
+`;
 
   await writeFile(
     join(consumerDirectory, 'core-consumer.ts'),
@@ -502,9 +526,16 @@ try {
   type CatalogEntryWithData,
   type CatalogEntryWithUrl,
   type CatalogIssue,
+  type SignatureCheckOptions,
   CatalogParseError,
   CatalogValidationError,
   assertValidCatalog,
+  configure,
+  createDigest,
+  checkDigest,
+  checkCatalogSignature,
+  discoverCatalog,
+  loadCatalogFromEntry,
   entryTypes,
   isCatalogEntryWithData,
   isCatalogEntryWithUrl,
@@ -515,6 +546,16 @@ try {
   safeParseCatalogJson,
 } from '${pkg.name}';
 
+const key = {} as CryptoKey;
+configure({ requirePublicAccessHeaders: true });
+const digest: Promise<string> = createDigest(new Uint8Array());
+const digestCheck = checkDigest(null, 'sha256:' + '0'.repeat(64));
+const signatureCheck = checkCatalogSignature({ specVersion: '0.9', entries: [] }, { publicKey: key, expectedAlgorithm: 'ES256' });
+${cryptoKeyTypeChecks}
+${nativeCryptoKeyTypeChecks}
+const discovery = discoverCatalog('https://example.com/', { strategy: 'well-known' });
+const loaded = loadCatalogFromEntry({ identifier: 'nested', type: 'application/ai-catalog+json', data: { specVersion: '0.9', entries: [] } });
+void digest; void digestCheck; void signatureCheck; void discovery; void loaded;
 const authored: AICatalog = { specVersion: '0.9', entries: [] };
 const parsed: AICatalog = parseCatalog(authored);
 const candidate: unknown = parsed;
@@ -601,19 +642,21 @@ import {
   CatalogValidationError,
   CatalogParseError,
   type CatalogIssue,
-} from '${pkg.name}/node';
+} from '${pkg.name}';
 import { aiCatalogSchema } from '${pkg.name}/zod';
 import { aiCatalogJsonSchema, type JsonSchema } from '${pkg.name}/json-schema';
 import {
   discoverCatalog,
   type DiscoverCatalogOptions,
   type CatalogDiscoveryResult,
-} from '${pkg.name}/node';
-// @ts-expect-error Discovery is available through the Node.js subpath.
-import { discoverCatalog as rootDiscovery } from '${pkg.name}';
-// @ts-expect-error Operational subpaths were consolidated into the Node.js subpath.
+  configure,
+  type SDKConfiguration,
+} from '${pkg.name}';
+// @ts-expect-error Platform-specific public subpaths are not exported.
+import {} from '${pkg.name}/node';
+// @ts-expect-error Internal operational modules are not public subpaths.
 import {} from '${pkg.name}/discovery';
-// @ts-expect-error Operational subpaths were consolidated into the Node.js subpath.
+// @ts-expect-error Internal operational modules are not public subpaths.
 import {} from '${pkg.name}/verification';
 import {
   canonicalizeJsonValueToBytes,
@@ -638,23 +681,18 @@ import {
   type TrustManifestSignatureMetadata,
   type TrustManifestSigner,
   type JwsSigningResult,
-} from '${pkg.name}/node';
+} from '${pkg.name}';
 import rawSchema from '${pkg.name}/schema/ai-catalog.schema.json' with { type: 'json' };
-import * as nodeApi from '${pkg.name}/node';
-
-const nodeCore: typeof import('${pkg.name}') = nodeApi;
-const nodeCatalog: import('${pkg.name}/node').AICatalog = { specVersion: '0.9', entries: [] };
-const coreCatalog: import('${pkg.name}').AICatalog = nodeCatalog;
-void nodeCore; void coreCatalog;
+import * as sdk from '${pkg.name}';
 
 const authored: AICatalog = { specVersion: '0.9', entries: [] };
-const loaderOptions: import('${pkg.name}/node').LoadCatalogFromEntryOptions = {
+const loaderOptions: import('${pkg.name}').LoadCatalogFromEntryOptions = {
   baseUrl: 'https://example.com/root.json', signal: new AbortController().signal,
   resourceTimeoutMs: 120_000, maxResponseBytes: 64 * 1024 * 1024,
 };
 async function checkUrlCatalog(entry: CatalogEntryWithUrl) {
-  const loaded: import('${pkg.name}/node').UrlCatalogLoadResult =
-    await nodeApi.loadCatalogFromEntry(entry, loaderOptions);
+  const loaded: import('${pkg.name}').UrlCatalogLoadResult =
+    await sdk.loadCatalogFromEntry(entry, loaderOptions);
   if (loaded.status === 'found') {
     const bytes: Uint8Array = loaded.bytes;
     const url: string = loaded.url;
@@ -664,8 +702,8 @@ async function checkUrlCatalog(entry: CatalogEntryWithUrl) {
   }
 }
 async function checkInlineCatalog(entry: CatalogEntryWithData) {
-  const loaded: import('${pkg.name}/node').InlineCatalogLoadResult =
-    await nodeApi.loadCatalogFromEntry(entry);
+  const loaded: import('${pkg.name}').InlineCatalogLoadResult =
+    await sdk.loadCatalogFromEntry(entry);
   if (loaded.status === 'found') {
     const catalog: AICatalog = loaded.catalog;
     const url: string | undefined = loaded.url;
@@ -676,18 +714,21 @@ async function checkInlineCatalog(entry: CatalogEntryWithData) {
   }
 }
 async function loadEitherCatalog(entry: import('${pkg.name}').CatalogEntry) {
-  const loaded: import('${pkg.name}/node').CatalogLoadResult =
-    await nodeApi.loadCatalogFromEntry(entry, loaderOptions);
+  const loaded: import('${pkg.name}').CatalogLoadResult =
+    await sdk.loadCatalogFromEntry(entry, loaderOptions);
   if (loaded.status === 'found') {
     const url: string | undefined = loaded.url;
     void url;
   }
   return loaded;
 }
-// @ts-expect-error Entry loading is only available through the Node entry point.
-import { loadCatalogFromEntry as coreLoader } from '${pkg.name}';
 void checkUrlCatalog; void checkInlineCatalog; void loadEitherCatalog;
+const configuration: SDKConfiguration = { requirePublicAccessHeaders: true };
+configure(configuration);
+// @ts-expect-error Response contract checking is configured application-wide.
+discoverCatalog('https://example.com/', { requirePublicAccessHeaders: true });
 const discoveryOptions: DiscoverCatalogOptions = {
+  strategy: 'well-known',
   signal: new AbortController().signal,
   resourceTimeoutMs: 120_000,
   maxResponseBytes: 64 * 1024 * 1024,
@@ -740,7 +781,7 @@ for (const discoveryResult of discoveryResults) {
   }
   void catalogWithoutNarrowing;
 }
-void discovery; void defaultDiscovery; void rootDiscovery;
+void discovery; void defaultDiscovery;
 const candidate: unknown = authored;
 assertValidCatalog(candidate);
 const assertedCatalog: AICatalog = candidate;
@@ -776,6 +817,9 @@ const entriesWithData: CatalogEntryWithData[] = authored.entries.filter(isCatalo
 const entriesWithUrl: CatalogEntryWithUrl[] = authored.entries.filter(isCatalogEntryWithUrl);
 aiCatalogSchema.parse(authored);
 const schema: JsonSchema = aiCatalogJsonSchema;
+const pendingDigest: Promise<string> = createDigest(new Uint8Array());
+const pendingDigestCheck: Promise<DigestCheckResult> = checkDigest(null, 'sha256:' + '0'.repeat(64));
+void pendingDigest; void pendingDigestCheck;
 const digestResult: DigestCheckResult = await checkDigest(new Uint8Array(), 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
 const canonicalBytes: Uint8Array = canonicalizeJsonValueToBytes({ b: 2, a: 1 });
 const metadata = { profile: 'custom-v1', issuedAt: '2026-08-31T00:00:00Z' } satisfies TrustManifestSignatureMetadata;
@@ -806,6 +850,7 @@ const signaturePublicKey = createPublicKey({
   format: 'jwk',
 }).toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
 const signatureOptions: SignatureCheckOptions = { publicKey: signaturePublicKey, expectedAlgorithm: 'ES256' };
+${cryptoKeyTypeChecks}
 const signatureCheck: Promise<SignatureCheckResult> = checkTrustManifestSignature(trustManifest, signatureOptions);
 const catalogSignatureCheck: Promise<SignatureCheckResult> = checkCatalogSignature(authored, signatureOptions);
 const entryWithData: CatalogEntryWithData = { identifier: subject.identifier, type: subject.type, digest: subject.digest, data: null, trustManifests: [trustManifest] };
@@ -931,11 +976,27 @@ void assertedCatalog; void assertionResult; void validationIssues;
 `,
   );
   await writeFile(
+    join(consumerDirectory, 'key-node-consumer.ts'),
+    `import type { SignatureCheckOptions } from '${pkg.name}';
+${nativeCryptoKeyTypeChecks}
+`,
+  );
+  await writeFile(
+    join(consumerDirectory, 'key-dom-consumer.ts'),
+    `import { checkCatalogSignature, type SignatureCheckOptions } from '${pkg.name}';
+declare const browserKey: Parameters<typeof globalThis.crypto.subtle.verify>[1];
+const options = { publicKey: browserKey, expectedAlgorithm: 'ES256' } satisfies SignatureCheckOptions;
+checkCatalogSignature({ specVersion: '0.9', entries: [] }, options);
+crypto.subtle.exportKey('jwk', options.publicKey);
+`,
+  );
+  await writeFile(
     join(consumerDirectory, 'tsconfig.json'),
     JSON.stringify(
       {
         compilerOptions: {
           target: 'ES2020',
+          lib: ['ES2022'],
           module: 'NodeNext',
           moduleResolution: 'NodeNext',
           strict: true,
@@ -945,18 +1006,40 @@ void assertedCatalog; void assertionResult; void validationIssues;
           types: ['node'],
           noEmit: true,
         },
-        include: ['consumer.ts'],
+        include: ['consumer.ts', 'key-node-consumer.ts'],
       },
       null,
       2,
     ),
   );
-  run(node, [join(root, 'node_modules', 'typescript', 'bin', 'tsc')], {
-    cwd: consumerDirectory,
-  });
-  run(node, [join(root, 'node_modules', 'typescript-5-5', 'bin', 'tsc')], {
-    cwd: consumerDirectory,
-  });
+  await writeFile(
+    join(consumerDirectory, 'tsconfig.node-dom.json'),
+    JSON.stringify({
+      extends: './tsconfig.json',
+      compilerOptions: { lib: ['ES2022', 'DOM'] },
+      include: ['consumer.ts', 'key-dom-consumer.ts'],
+    }, null, 2),
+  );
+  for (const configuration of ['tsconfig.json', 'tsconfig.node-dom.json']) {
+    for (const compiler of ['typescript', 'typescript-5-5']) {
+      run(node, [join(root, 'node_modules', compiler, 'bin', 'tsc'), '-p', configuration], {
+        cwd: consumerDirectory,
+      });
+    }
+  }
+  // Node 22 declares Web Crypto without declaring globalThis.CryptoKey.
+  run(npm, [
+    'install', '--ignore-scripts', '--no-package-lock', '--no-audit', '--no-fund',
+    '--fetch-retries=1', '--fetch-timeout=30000', '@types/node@22.20.5',
+  ], { cwd: consumerDirectory });
+  for (const configuration of ['tsconfig.json', 'tsconfig.node-dom.json']) {
+    for (const compiler of ['typescript', 'typescript-5-5']) {
+      run(node, [join(root, 'node_modules', compiler, 'bin', 'tsc'), '-p', configuration], {
+        cwd: consumerDirectory,
+      });
+    }
+  }
+  run(node, [join(root, 'scripts', 'smoke-browser.mjs'), join(consumerDirectory, 'node_modules', pkg.name)]);
 } finally {
   await rm(temporaryDirectory, { recursive: true, force: true });
 }

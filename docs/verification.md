@@ -1,13 +1,13 @@
 # Verification utilities
 
-Verification and signing utilities are available from `ai-catalog-sdk/node`. Authoring validation checks a catalog’s declarations and internal consistency. Verification checks signatures, artifact binding, and the applicable authentication and time requirements. Applications decide which endorsements satisfy their requirements.
+Verification and signing utilities are available from `ai-catalog-sdk`. Authoring validation checks a catalog’s declarations and internal consistency. Verification checks signatures, artifact binding, and the applicable authentication and time requirements. Applications decide which endorsements satisfy their requirements.
 
 ## Check a catalog entry
 
 `checkCatalogEntry()` validates one captured entry and evaluates its selected Trust Manifests:
 
 ```ts
-import { checkCatalogEntry } from 'ai-catalog-sdk/node';
+import { checkCatalogEntry } from 'ai-catalog-sdk';
 
 const report = await checkCatalogEntry(entryWithUrl, artifactBytes);
 
@@ -132,7 +132,13 @@ const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {
 });
 ```
 
-`resolutionTimeoutMs` sets the deadline for each DID resolution, covering DNS, redirects, and reading and parsing the response; it defaults to 60,000 ms. The decoded body limit defaults to 16 MiB. Requests use HTTPS and check resolved addresses, including after redirects. A resolution timeout or size failure becomes that manifest's `issuer_check_failed` result. Selected manifests sharing a signer reuse one DID resolution within the invocation; calls do not share a DID cache. The number of selected contributors therefore affects total latency. Use `signal` to cancel the entire operation or impose an overall deadline.
+`resolutionTimeoutMs` sets the deadline for each DID resolution, covering DNS, redirects, and reading and parsing the response; it defaults to 60,000 ms. The decoded body limit defaults to 16 MiB. A resolution timeout or size failure becomes that manifest's `issuer_check_failed` result.
+
+Selected manifests sharing a signer reuse one DID resolution within the invocation; calls do not share a DID cache. The number of selected contributors therefore affects total latency. Use `signal` to cancel the entire operation or impose an overall deadline.
+
+Requests use HTTPS. In Node.js, the SDK rejects private-network destinations, including after redirects; browser network policies can permit private-network access.
+
+When the application-wide [`requirePublicAccessHeaders` setting](../README.md#configure-portable-network-access) is enabled, the SDK requires DID responses to include headers declaring public browser access. Missing required headers produce that manifest's `issuer_check_failed` result.
 
 `checkCatalogEntry()` accepts `nowMs`, an optional safe integer UTC epoch time in milliseconds used to evaluate the time window. When omitted, the SDK samples the machine's UTC clock near completion; `checkCatalogEntry()` applies the same instant to all selected endorsements. `clockToleranceMs` defaults to 60,000 and accepts non-negative safe integer milliseconds, including zero. Issuance beyond the tolerance produces `not_yet_valid`; reaching expiration plus tolerance produces `expired`. Tolerance does not repair an expiration that is at or before issuance. `issuedAt` remains an authenticated assertion by the signer, not an independently trusted timestamp.
 
@@ -143,7 +149,7 @@ Entry, manifest, option, and artifact inputs are captured before asynchronous wo
 `checkCatalogEntryTrustManifest()` checks one explicit manifest against an entry and its artifact representation using your application's verification key:
 
 ```ts
-import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/node';
+import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk';
 
 const resultForEntryWithUrl = await checkCatalogEntryTrustManifest(
   entryWithUrl,
@@ -206,7 +212,7 @@ The table below describes each status and shows where it appears in each functio
 import {
   checkCatalogSignature,
   checkTrustManifestSignature,
-} from 'ai-catalog-sdk/node';
+} from 'ai-catalog-sdk';
 
 const catalogResult = await checkCatalogSignature(catalog, {
   publicKey,
@@ -241,7 +247,7 @@ These functions validate the materialized JSON value without performing catalog 
 `checkDigest(value, expectedDigest)` compares exact bytes or a JCS-canonicalized JSON value with an AI Catalog digest:
 
 ```ts
-import { checkDigest } from 'ai-catalog-sdk/node';
+import { checkDigest } from 'ai-catalog-sdk';
 
 const result = await checkDigest(
   artifactBytes, // or entry.data for an inline artifact
@@ -275,7 +281,7 @@ A `match` result establishes only that the supplied bytes or JCS-canonicalized J
 `createDigest(value, algorithm?)` computes an artifact digest in `algorithm:lowercase-hex` form. The algorithm defaults to `sha256`; `sha384` and `sha512` are also supported:
 
 ```ts
-import { createDigest } from 'ai-catalog-sdk/node';
+import { createDigest } from 'ai-catalog-sdk';
 
 const artifactDigest = await createDigest(artifactBytes);
 const inlineDigest = await createDigest(entry.data);
@@ -290,7 +296,7 @@ A `Uint8Array` or `Buffer` is hashed as its exact byte range. Other logical JSON
 
 ```ts
 import { CompactSign } from 'jose';
-import { signTrustManifest } from 'ai-catalog-sdk/node';
+import { signTrustManifest } from 'ai-catalog-sdk';
 
 const manifest = await signTrustManifest(
   entry,
@@ -335,7 +341,7 @@ These are standard JWS representations. The helper rejects unprotected headers, 
 import {
   createCatalogSignaturePayload,
   createTrustManifestSignaturePayload,
-} from 'ai-catalog-sdk/node';
+} from 'ai-catalog-sdk';
 
 const catalogPayload = createCatalogSignaturePayload(catalog);
 const manifestPayload = createTrustManifestSignaturePayload(manifest);
@@ -350,7 +356,7 @@ The helpers accept plain JSON objects and do not perform schema validation. Thei
 `canonicalizeJsonValueToBytes(value)` produces fresh RFC 8785 JCS UTF-8 bytes from a materialized JSON value:
 
 ```ts
-import { canonicalizeJsonValueToBytes } from 'ai-catalog-sdk/node';
+import { canonicalizeJsonValueToBytes } from 'ai-catalog-sdk';
 
 const bytes = canonicalizeJsonValueToBytes({ b: 2, a: 1 });
 // UTF-8 bytes for {"a":1,"b":2}

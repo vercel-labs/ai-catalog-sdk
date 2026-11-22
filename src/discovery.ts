@@ -111,8 +111,7 @@ export async function discoverCatalog(
     try {
       target = new URL(page.target, page.url);
     } catch (cause) {
-      if (!(cause instanceof TypeError) ||
-      (cause as NodeJS.ErrnoException).code !== 'ERR_INVALID_URL') throw cause;
+      if (!(cause instanceof TypeError)) throw cause;
       return {
         status: 'fetch_failed',
         url: page.target,

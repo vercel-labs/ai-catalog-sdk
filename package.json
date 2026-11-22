@@ -28,10 +28,6 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./node": {
-      "types": "./dist/node.d.ts",
-      "default": "./dist/node.js"
-    },
     "./zod": {
       "types": "./dist/zod.d.ts",
       "default": "./dist/zod.js"
@@ -53,7 +49,8 @@
     "schema:check": "pnpm build && node scripts/generate-schema.mjs --check",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm schema:check && pnpm build && pnpm package:check",
     "package:check": "npm pack --dry-run && publint && attw --pack . --profile esm-only && node scripts/smoke-package.mjs",
-    "prepack": "pnpm build"
+    "prepack": "pnpm build",
+    "test:browser": "node scripts/smoke-browser.mjs"
   },
   "dependencies": {
     "canonicalize": "4.0.0",
@@ -81,5 +78,11 @@
   "engines": {
     "node": ">=22.20.0"
   },
-  "packageManager": "pnpm@11.1.3"
+  "packageManager": "pnpm@11.1.3",
+  "imports": {
+    "#transport": {
+      "node": "./dist/internal/http-fetch.node.js",
+      "default": "./dist/internal/http-fetch.browser.js"
+    }
+  }
 }
