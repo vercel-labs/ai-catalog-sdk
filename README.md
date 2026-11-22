@@ -39,6 +39,36 @@ The parsed result is an ordinary mutable, JSON-shaped object. Parsing checks fie
 
 Parsing provides structurally usable data, including declarations that may fail authoring validation or verification. Use [authoring validation](#author-a-catalog) to check an assembled document’s declarations and consistency, and verification to evaluate its artifacts and endorsements.
 
+## Handle invalid input
+
+Use a safe parser when validation failures are expected and should be handled as values:
+
+```ts
+import { safeParseCatalogJson } from 'ai-catalog-sdk';
+
+function parseCatalogInput(source: string) {
+  const result = safeParseCatalogJson(source);
+
+  if (result.success) {
+    return result.data;
+  }
+
+  for (const issue of result.error.issues) {
+    console.error({
+      code: issue.code, // Example: "invalid_value"
+      path: issue.path, // Example: ["entries", 0]
+      message: issue.message,
+    });
+  }
+
+  return undefined;
+}
+```
+
+Use `code` to classify an issue and `path` to locate it in the input. Present `message` to users, but do not branch on its exact wording.
+
+See [Validation diagnostics](./docs/verification.md#validation-diagnostics) for diagnostic codes and handling guidance.
+
 ## Discover a website's catalog
 
 Pass an absolute HTTPS website URL to `discoverCatalog()`:
@@ -248,36 +278,6 @@ The `ai-catalog-sdk` entry point provides parsing and authoring without importin
 | Use raw JSON Schema with another validator or tool | `ai-catalog.schema.json` | `ai-catalog-sdk/schema/ai-catalog.schema.json` |
 
 The `parse*` functions throw `CatalogParseError` when input is invalid. The matching `safeParse*` functions return a discriminated `ParseResult` instead. All SDK parsers apply defensive input validation that the standalone schemas do not. See [What gets validated](#what-gets-validated) for the parsing, authoring, and schema boundaries.
-
-## Handle invalid input
-
-Use a safe parser when validation failures are expected and should be handled as values:
-
-```ts
-import { safeParseCatalogJson } from 'ai-catalog-sdk';
-
-function parseCatalogInput(source: string) {
-  const result = safeParseCatalogJson(source);
-
-  if (result.success) {
-    return result.data;
-  }
-
-  for (const issue of result.error.issues) {
-    console.error({
-      code: issue.code, // Example: "invalid_value"
-      path: issue.path, // Example: ["entries", 0]
-      message: issue.message,
-    });
-  }
-
-  return undefined;
-}
-```
-
-Use `code` to classify an issue and `path` to locate it in the input. Present `message` to users, but do not branch on its exact wording.
-
-See [Validation diagnostics](./docs/verification.md#validation-diagnostics) for diagnostic codes and handling guidance.
 
 ## Use lower-level verification utilities
 
