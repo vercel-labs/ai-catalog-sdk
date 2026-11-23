@@ -7,6 +7,7 @@ import {
 import {
   fetchHttpsResource,
   HttpFetchError,
+  normalizeHttpFetchError,
   throwIfAborted,
 } from './internal/http-fetch.js';
 import { firstCatalogLink } from './internal/link-header.js';
@@ -14,6 +15,8 @@ import type { AICatalog, CatalogParseError } from './types.js';
 
 /** Controls cancellation and the bounds of each website or catalog request. */
 export interface DiscoverCatalogOptions {
+  /** `well-known` skips website advertisements and requests only the input origin's well-known catalog. */
+  strategy?: 'auto' | 'well-known';
   /** Caller cancellation rejects with this signal's original abort reason. */
   signal?: AbortSignal;
   /** Per-resource timeout, including redirects and body processing; defaults to 120,000 ms. */
@@ -25,8 +28,9 @@ export interface DiscoverCatalogOptions {
 /**
  * A structurally parsed catalog, an absent well-known catalog, or an expected failure.
  * `found` establishes neither cryptographic integrity nor publisher trust.
- * URLs identify the final response when available, otherwise the attempted URL
- * or advertised reference.
+ * `found` and `invalid_catalog` URLs identify the final response. Retrieval
+ * failures identify the final response URL when available, or the attempted URL
+ * or advertised reference otherwise.
  */
 export type CatalogDiscoveryResult =
   | { status: 'found'; catalog: AICatalog; url: string }
@@ -64,6 +68,7 @@ async function fetchCatalog(url: URL, options: CapturedCatalogResourceOptions) {
  * The first advertised ai-catalog link is authoritative; its failure is terminal.
  * Without an advertisement, the first parsed well-known candidate wins and
  * `not_found` means every candidate returned HTTP 404 or 410.
+ * `strategy: 'well-known'` skips the website request and uses only the input origin.
  * Reads website headers only, without HTML discovery or nested catalog traversal.
  * Inputs are captured before I/O. Invalid arguments reject with `TypeError`;
  * caller cancellation and unexpected failures reject rather than becoming results.
@@ -74,12 +79,22 @@ export async function discoverCatalog(
 ): Promise<CatalogDiscoveryResult> {
   const originalUrl = snapshotWebsiteUrl(websiteUrl);
   const captured = snapshotCatalogResourceOptions(options);
+  const descriptor = options === undefined ? undefined : Object.getOwnPropertyDescriptor(options, 'strategy');
+  if (descriptor && !('value' in descriptor))
+    throw new TypeError('options.strategy must be an own data property.');
+  const strategy: unknown = descriptor?.value === undefined ? 'auto' : descriptor.value;
+  if (strategy !== 'auto' && strategy !== 'well-known')
+    throw new TypeError('strategy must be auto or well-known.');
   throwIfAborted(captured.signal);
+  if (strategy === 'well-known') {
+    const lookup = await fetchCatalog(new URL('/.well-known/ai-catalog.json', originalUrl), captured);
+    return lookup.absent ? { status: 'not_found' } : lookup.result;
+  }
   let page: { url: URL; target: string | undefined };
   try {
     page = await fetchHttpsResource(
       originalUrl,
-      catalogTransportOptions(captured, '*/*'),
+      { ...catalogTransportOptions(captured, '*/*'), requireLinkExposure: true },
       (response) => ({
         url: new URL(response.url.href),
         target: firstCatalogLink(response.headers.link),
@@ -96,12 +111,11 @@ export async function discoverCatalog(
     try {
       target = new URL(page.target, page.url);
     } catch (cause) {
-      if (!(cause instanceof TypeError) ||
-        (cause as NodeJS.ErrnoException).code !== 'ERR_INVALID_URL') throw cause;
+      if (!(cause instanceof TypeError)) throw cause;
       return {
         status: 'fetch_failed',
         url: page.target,
-        error: new HttpFetchError('The advertised catalog URL is invalid.', { cause }),
+        error: normalizeHttpFetchError(new HttpFetchError('The advertised catalog URL is invalid.', { cause }), captured),
       };
     }
     const lookup = await fetchCatalog(target, captured);

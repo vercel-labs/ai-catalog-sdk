@@ -261,7 +261,6 @@ function safeParseWith<T>(
 ): ParseResult<T> {
   const preflightIssue = preflightJsonValue(input, {
     allowOwnProtoMember: false,
-    isDisallowedObject: undefined,
     requireIJsonStrings: false,
   });
   if (preflightIssue) {

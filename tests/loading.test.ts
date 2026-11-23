@@ -44,6 +44,7 @@ vi.mock('node:https', async (importOriginal) => {
 
 import { HttpFetchError } from '../src/internal/http-fetch.js';
 import { loadCatalogFromEntry } from '../src/loading.js';
+import { configure } from '../src/configure.js';
 import type { CatalogEntry, CatalogEntryWithData, CatalogEntryWithUrl } from '../src/types.js';
 import { CatalogParseError } from '../src/types.js';
 import { checkCatalogEntry, createDigest } from '../src/verification.js';
@@ -87,9 +88,93 @@ afterAll(async () => {
 });
 
 afterEach(() => {
+  configure({ requirePublicAccessHeaders: false });
   for (const timer of timers) clearTimeout(timer);
   timers.clear();
   server.closeAllConnections();
+});
+
+describe('catalog loading response contract', () => {
+  const contract = {
+    'access-control-allow-origin': '*',
+    'access-control-expose-headers': 'Access-Control-Allow-Origin, Access-Control-Expose-Headers',
+  };
+
+  it('uses the application policy for catalog URLs without requiring Link exposure', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    await expect(loadCatalogFromEntry(urlEntry, options)).resolves.toMatchObject({ status: 'fetch_failed' });
+    respond = (_request, response) => response.writeHead(200, contract).end(body);
+    const result = await loadCatalogFromEntry(urlEntry, options);
+    expect(result).toMatchObject({ status: 'found', url });
+    if (result.status !== 'found') throw new Error('Expected a loaded catalog.');
+    expect([...result.bytes]).toEqual([...artifactBytes]);
+  });
+
+  it('does not impose response requirements on inline catalogs', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    await expect(loadCatalogFromEntry({ identifier: 'inline', type: catalogType, data: catalog }))
+      .resolves.toMatchObject({ status: 'found', catalog });
+    expect(requests).toEqual([]);
+  });
+
+  it('retains the readable final URL for an invalid catalog after a contracted redirect', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    respond = (request, response) => {
+      if (request.url === '/catalog.json') response.writeHead(302, { 'access-control-allow-origin': '*', location: '/invalid' }).end();
+      else response.writeHead(200, contract).end('{');
+    };
+    await expect(loadCatalogFromEntry(urlEntry, options)).resolves.toMatchObject({
+      status: 'invalid_catalog', url: 'https://publisher.example/invalid',
+    });
+  });
+
+  it('retains the final failure URL and HTTP diagnostic after a contracted redirect', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    respond = (request, response) => {
+      if (request.url === '/catalog.json') {
+        response.writeHead(302, { 'access-control-allow-origin': '*', location: '/unavailable' }).end();
+      } else response.writeHead(500, contract).end();
+    };
+    await expect(loadCatalogFromEntry(urlEntry, options)).resolves.toMatchObject({
+      status: 'fetch_failed', url: 'https://publisher.example/unavailable',
+      error: {
+        message: 'The HTTPS resource could not be retrieved.',
+        cause: { message: 'Catalog request returned HTTP 500.' },
+      },
+    });
+  });
+
+  it.each([undefined, 'https://publisher.example', 'https://app.example', 'null'])(
+    'requires public permission on every redirect, including same-host redirects (origin: %s)',
+    async (allowedOrigin) => {
+      configure({ requirePublicAccessHeaders: true });
+      respond = (request, response) => {
+        if (request.url === '/catalog.json') {
+          response.writeHead(302, { 'access-control-allow-origin': '*', location: '/middle' }).end();
+        } else if (request.url === '/middle') {
+          response.writeHead(302, {
+            ...(allowedOrigin === undefined ? {} : { 'access-control-allow-origin': allowedOrigin }),
+            location: '/final',
+          }).end();
+        } else response.writeHead(200, contract).end(body);
+      };
+      await expect(loadCatalogFromEntry(urlEntry, options)).resolves.toMatchObject({
+        status: 'fetch_failed', url,
+        error: { cause: { message: 'The HTTPS redirect response does not allow public browser access.' } },
+      });
+      expect(requests).toEqual([url, 'https://publisher.example/middle']);
+    },
+  );
+
+  it('does not require public redirect permission when the application policy is disabled', async () => {
+    respond = (request, response) => {
+      if (request.url === '/catalog.json') {
+        response.writeHead(302, { 'access-control-allow-origin': 'https://app.example', location: '/final' }).end();
+      } else response.end(body);
+    };
+    await expect(loadCatalogFromEntry(urlEntry, options)).resolves.toMatchObject({ status: 'found' });
+    expect(requests).toEqual([url, 'https://publisher.example/final']);
+  });
 });
 
 beforeEach(() => {
@@ -107,7 +192,7 @@ describe('loadCatalogFromEntry', () => {
     const source = ` {\n  "entries": [], "specVersion": "${specVersion}"\n}\n`;
     const bytes = new TextEncoder().encode(source);
     respond = (_request, response) => response.end(source);
-    const entry = { ...urlEntry, digest: createDigest(bytes) };
+    const entry = { ...urlEntry, digest: await createDigest(bytes) };
     const result = await loadCatalogFromEntry(entry, options);
     expect(result).toMatchObject({ status: 'found', catalog: document, url });
     if (result.status !== 'found') throw new Error('Expected a loaded catalog.');
@@ -123,7 +208,7 @@ describe('loadCatalogFromEntry', () => {
     const entry: CatalogEntryWithData = { identifier: 'inline', type: catalogType, data: document };
     const result = await loadCatalogFromEntry(entry);
     expect(result).toEqual({ status: 'found', catalog: document });
-    await expect(checkCatalogEntry({ ...entry, digest: createDigest(entry.data) })).resolves.toEqual({
+    await expect(checkCatalogEntry({ ...entry, digest: await createDigest(entry.data) })).resolves.toEqual({
       status: 'checked', manifests: [],
     });
     expect(requests).toEqual([]);

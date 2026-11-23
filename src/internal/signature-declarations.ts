@@ -74,7 +74,6 @@ function inspectJws(value: JsonValue | undefined):
   if (!isObject(header)) return undefined;
   const inputIssue = preflightJsonValue(header, {
     allowOwnProtoMember: true,
-    isDisallowedObject: undefined,
     requireIJsonStrings: false,
   });
   return inputIssue === undefined ? { header, signature } : undefined;
@@ -120,7 +119,6 @@ export function validateSignedPayload(
   }
   return preflightJsonValue(payload, {
     allowOwnProtoMember: true,
-    isDisallowedObject: undefined,
     requireIJsonStrings: true,
   });
 }

@@ -1,7 +1,4 @@
-import { Buffer } from 'node:buffer';
-import { createPublicKey, type KeyObject } from 'node:crypto';
-import { isIP } from 'node:net';
-import { domainToASCII } from 'node:url';
+import { decodeBase64Url, encodeBase64Url, hex } from './bytes.js';
 
 import type { Signature, TrustManifest } from '../types.js';
 import { compareRfc3339DateTimes, isRfc3339DateTime } from './rfc3339.js';
@@ -34,9 +31,7 @@ function own(value: Record<string, unknown>, name: string): unknown {
 function validPublisherDomain(domain: string): boolean {
   if (
     domain.length > 253 ||
-    !/^[a-z0-9.-]+$/.test(domain) ||
-    domainToASCII(domain) !== domain ||
-    isIP(domain) !== 0
+    !/^[a-z0-9.-]+$/.test(domain)
   )
     return false;
 
@@ -52,7 +47,8 @@ function validPublisherDomain(domain: string): boolean {
 
   // WHATWG also recognizes shortened, hexadecimal, and integer IPv4 forms.
   try {
-    return isIP(new URL(`https://${domain}/`).hostname) === 0;
+    const hostname = new URL(`https://${domain}/`).hostname;
+    return hostname === domain && !/^(?:[0-9]+\.){3}[0-9]+$/.test(hostname);
   } catch {
     return false;
   }
@@ -146,12 +142,12 @@ const p256B = 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b
 
 function coordinate(value: unknown): bigint | undefined {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(value)) return undefined;
-  const bytes = Buffer.from(value, 'base64url');
-  if (bytes.length !== 32 || bytes.toString('base64url') !== value) return undefined;
-  return BigInt(`0x${bytes.toString('hex')}`);
+  const bytes = decodeBase64Url(value);
+  if (bytes.length !== 32 || encodeBase64Url(bytes) !== value) return undefined;
+  return BigInt(`0x${hex(bytes)}`);
 }
 
-function importPublisherKey(method: Record<string, unknown>, identity: string): KeyObject {
+function importPublisherKey(method: Record<string, unknown>, identity: string): Promise<CryptoKey> {
   if (own(method, 'controller') !== identity) throw new IssuerCheckError('The assertion key controller must exactly equal the issuer DID.');
   const jwk = own(method, 'publicKeyJwk');
   if (!isRecord(jwk) || own(jwk, 'kty') !== 'EC' || own(jwk, 'crv') !== 'P-256') {
@@ -178,11 +174,17 @@ function importPublisherKey(method: Record<string, unknown>, identity: string): 
   }
   // Mathematical validation above separates malformed points from unexpected
   // failures in the crypto backend; the latter must propagate to the caller.
-  return createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: jwk.x as string, y: jwk.y as string }, format: 'jwk' });
+  return crypto.subtle.importKey(
+    'jwk',
+    { kty: 'EC', crv: 'P-256', x: jwk.x as string, y: jwk.y as string },
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['verify'],
+  );
 }
 
 /** Authorizes a key from the current resolved DID document, without further I/O. */
-export function authorizePublisherKey(document: unknown, identity: string, kid: string): KeyObject {
+export function authorizePublisherKey(document: unknown, identity: string, kid: string): Promise<CryptoKey> {
   if (!isRecord(document) || own(document, 'id') !== identity) throw new IssuerCheckError('The DID document id must exactly equal the issuer DID.');
   if (Object.hasOwn(document, '@context')) {
     const context = own(document, '@context');

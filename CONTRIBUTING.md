@@ -16,6 +16,8 @@ pnpm check
 
 This runs linting, typechecking, tests, generated-schema checks, builds, and package validation. The package checks install a locally packed tarball in a temporary consumer and check runtime imports and TypeScript compatibility. They require package-registry access and do not publish the package.
 
+The package checks also run headless browser checks against the installed tarball. Install Google Chrome, or set `CHROME_PATH` to a compatible Chromium executable. Use `pnpm test:browser` to run those checks against the current build.
+
 Use `pnpm test` or `pnpm test:watch` for focused iteration.
 
 ## Changing the SDK

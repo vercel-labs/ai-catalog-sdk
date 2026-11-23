@@ -21,7 +21,6 @@ type PreflightFrame = EnterFrame | ExitFrame;
 
 interface JsonValuePreflightOptions {
   allowOwnProtoMember: boolean;
-  isDisallowedObject: ((value: object) => boolean) | undefined;
   requireIJsonStrings: boolean;
 }
 
@@ -130,14 +129,6 @@ export function preflightJsonValue(
         'invalid_json_value',
         frame.path,
         'The value contains a cycle.',
-      );
-    }
-
-    if (options.isDisallowedObject?.(value)) {
-      return issue(
-        'invalid_json_value',
-        frame.path,
-        'Programmatic input must not contain Proxy objects.',
       );
     }
 

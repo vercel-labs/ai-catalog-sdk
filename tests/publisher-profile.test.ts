@@ -184,28 +184,28 @@ describe('Signer and Publisher Profile requirements', () => {
 });
 
 describe('DID assertion-key authorization', () => {
-  it('imports real assertion-authorized P-256 keys from absolute or relative references', () => {
+  it('imports real assertion-authorized P-256 keys from absolute or relative references', async () => {
     for (const reference of [kid, '#release-key']) {
       const result = authorizePublisherKey(
         document({ assertionMethod: [reference] }),
         identity,
         kid,
       );
-      expect(result.export({ format: 'jwk' })).toEqual(publicJwk);
+      expect(await crypto.subtle.exportKey('jwk', await result)).toMatchObject(publicJwk);
     }
     expect(
-      authorizePublisherKey(
+      await crypto.subtle.exportKey('jwk', await authorizePublisherKey(
         document({
           verificationMethod: [method({ id: '#release-key' })],
           assertionMethod: ['#release-key'],
         }),
         identity,
         kid,
-      ).export({ format: 'jwk' }),
-    ).toEqual(publicJwk);
+      )),
+    ).toMatchObject(publicJwk);
   });
 
-  it('supports directly embedded assertion methods and ignores a conflicting JWK kid', () => {
+  it('supports directly embedded assertion methods and ignores a conflicting JWK kid', async () => {
     const result = authorizePublisherKey(
       {
         id: identity,
@@ -225,10 +225,10 @@ describe('DID assertion-key authorization', () => {
       identity,
       kid,
     );
-    expect(result.export({ format: 'jwk' })).toEqual(publicJwk);
+    expect(await crypto.subtle.exportKey('jwk', await result)).toMatchObject(publicJwk);
   });
 
-  it('accepts DID Core JSON-LD context forms and rejects invalid core contexts', () => {
+  it('accepts DID Core JSON-LD context forms and rejects invalid core contexts', async () => {
     for (const context of [
       'https://www.w3.org/ns/did/v1',
       [
@@ -237,12 +237,12 @@ describe('DID assertion-key authorization', () => {
       ],
     ]) {
       expect(
-        authorizePublisherKey(
+        await crypto.subtle.exportKey('jwk', await authorizePublisherKey(
           document({ '@context': context }),
           identity,
           kid,
-        ).export({ format: 'jwk' }),
-      ).toEqual(publicJwk);
+        )),
+      ).toMatchObject(publicJwk);
     }
     for (const context of [
       null,
@@ -283,7 +283,7 @@ describe('DID assertion-key authorization', () => {
     ).toThrow(IssuerCheckError);
   });
 
-  it('rejects duplicate definitions while a repeated reference still identifies one method', () => {
+  it('rejects duplicate definitions while a repeated reference still identifies one method', async () => {
     expect(() =>
       authorizePublisherKey(
         document({
@@ -301,12 +301,12 @@ describe('DID assertion-key authorization', () => {
       ),
     ).toThrow(IssuerCheckError);
     expect(
-      authorizePublisherKey(
+      await crypto.subtle.exportKey('jwk', await authorizePublisherKey(
         document({ assertionMethod: [kid, '#release-key'] }),
         identity,
         kid,
-      ).export({ format: 'jwk' }),
-    ).toEqual(publicJwk);
+      )),
+    ).toMatchObject(publicJwk);
   });
 
   it('requires assertion references to target the top-level method collection', () => {

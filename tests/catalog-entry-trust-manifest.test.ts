@@ -68,7 +68,7 @@ function signManifest(
 }
 function optionsFor(): CatalogEntryTrustManifestCheckOptions {
   return {
-    publicKey: trustedKeys.publicKey,
+    publicKey: trustedKeys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']),
     expectedAlgorithm: 'ES256',
     nowMs: Date.parse('2026-10-31T12:00:00Z'),
   };
@@ -212,7 +212,7 @@ describe('checkCatalogEntryTrustManifest', () => {
     });
     await expect(
       checkCatalogEntryTrustManifest(entry, bytes, expired, {
-        ...optionsFor(), publicKey: otherKeys.publicKey,
+        ...optionsFor(), publicKey: otherKeys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']),
       }),
     ).resolves.toEqual({ status: 'invalid_signature' });
     await expect(
@@ -577,7 +577,7 @@ describe('checkCatalogEntryTrustManifest', () => {
     if (manifest.signature)
       manifest.signature.issuedAt = '2100-01-01T00:00:00Z';
     manifest.signature = { ...metadata, jws: 'mutated' };
-    options.publicKey = otherKeys.publicKey;
+    options.publicKey = otherKeys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
     options.nowMs = Date.parse('1900-01-01T00:00:00Z');
     options.clockToleranceMs = 0;
     await expect(pending).resolves.toEqual({ status: 'passed' });
@@ -603,7 +603,7 @@ describe('checkCatalogEntryTrustManifest', () => {
     const key = createPublicKey({
       key: trustedKeys.publicKey.export({ format: 'jwk' }),
       format: 'jwk',
-    });
+    }).toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
     let reads = 0;
     Object.defineProperty(key, 'type', {
       configurable: true,
@@ -710,17 +710,15 @@ describe('checkCatalogEntryTrustManifest', () => {
   it.each([
     'entry',
     'subject',
-  ] as const)('rejects a proxied %s without invoking traps', async (location) => {
+  ] as const)('propagates a %s proxy trap error', async (location) => {
     const { entry, manifest } = dataFixture(null);
-    let reads = 0;
+    const failure = new Error('proxy trap');
     const handler = {
       getOwnPropertyDescriptor() {
-        reads += 1;
-        throw new Error('must not inspect');
+        throw failure;
       },
       get() {
-        reads += 1;
-        throw new Error('must not read');
+        throw failure;
       },
     };
     const input = location === 'entry' ? new Proxy(entry, handler) : entry;
@@ -728,8 +726,7 @@ describe('checkCatalogEntryTrustManifest', () => {
       manifest.subject = new Proxy(manifest.subject as TrustSubject, handler);
     await expect(
       checkCatalogEntryTrustManifest(input, manifest, optionsFor()),
-    ).rejects.toThrow(TypeError);
-    expect(reads).toBe(0);
+    ).rejects.toBe(failure);
   });
   it('rejects calls that do not match the entry artifact representation', async () => {
     const bytes = new TextEncoder().encode('test');

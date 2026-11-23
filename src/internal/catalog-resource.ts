@@ -1,5 +1,4 @@
-import { types as utilTypes } from 'node:util';
-
+import { captureSdkConfiguration } from '../configure.js';
 import { type AICatalog, CatalogParseError } from '../types.js';
 import {
   fetchHttpsResource,
@@ -13,14 +12,16 @@ export interface CapturedCatalogResourceOptions {
   signal?: AbortSignal;
   resourceTimeoutMs: number;
   maxResponseBytes: number;
+  requirePublicAccessHeaders: boolean;
 }
 
 export function snapshotCatalogResourceOptions(value: unknown): CapturedCatalogResourceOptions {
+  const configuration = captureSdkConfiguration();
   if (value === undefined)
-    return { resourceTimeoutMs: 120_000, maxResponseBytes: 64 * 1024 * 1024 };
+    return { resourceTimeoutMs: 120_000, maxResponseBytes: 64 * 1024 * 1024, ...configuration };
   if (
     value === null || typeof value !== 'object' ||
-    utilTypes.isProxy(value) || Array.isArray(value)
+    Array.isArray(value)
   ) throw new TypeError('options must be an object.');
   const options: Record<string, unknown> = Object.create(null);
   for (const name of ['signal', 'resourceTimeoutMs', 'maxResponseBytes']) {
@@ -42,7 +43,7 @@ export function snapshotCatalogResourceOptions(value: unknown): CapturedCatalogR
   ) throw new TypeError('maxResponseBytes must be a positive safe integer.');
   const signal = options.signal;
   if (signal !== undefined) {
-    if (signal === null || typeof signal !== 'object' || utilTypes.isProxy(signal))
+    if (signal === null || typeof signal !== 'object')
       throw new TypeError('signal must be an AbortSignal.');
     try {
       Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')?.get?.call(signal);
@@ -51,6 +52,7 @@ export function snapshotCatalogResourceOptions(value: unknown): CapturedCatalogR
     }
   }
   return {
+    ...configuration,
     resourceTimeoutMs,
     maxResponseBytes,
     ...(signal === undefined ? {} : { signal: signal as AbortSignal }),
@@ -67,6 +69,7 @@ export function catalogTransportOptions(
     timeoutMs: options.resourceTimeoutMs,
     timeoutLabel: 'resourceTimeoutMs',
     accept,
+    requirePublicAccessHeaders: options.requirePublicAccessHeaders,
   };
 }
 
@@ -75,8 +78,7 @@ function catalogText(bytes: Uint8Array): string {
   try {
     return decoder.decode(bytes);
   } catch (cause) {
-    if (!(cause instanceof TypeError) ||
-      (cause as NodeJS.ErrnoException).code !== 'ERR_ENCODING_INVALID_ENCODED_DATA') throw cause;
+    if (!(cause instanceof TypeError)) throw cause;
     throw new CatalogParseError([
       { code: 'invalid_json', path: [], message: 'The catalog text is not valid UTF-8 JSON.' },
     ], cause);
@@ -124,6 +126,9 @@ export async function fetchCatalogResource(
     if (error instanceof CatalogParseError)
       return { result: { status: 'invalid_catalog', url: responseUrl, error }, absent: false };
     if (!(error instanceof HttpFetchError)) throw error;
-    return { result: { status: 'fetch_failed', url: responseUrl, error }, absent };
+    return {
+      result: { status: 'fetch_failed', url: responseUrl, error },
+      absent,
+    };
   }
 }

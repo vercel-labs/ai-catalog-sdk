@@ -54,7 +54,7 @@ describe('signTrustManifest', () => {
     expect(result.signature.signer).toBe(body().contributor);
     expect(result.signature.jws.split('.')[1]).toBe('');
     expect(await checkTrustManifestSignature(result, {
-      publicKey: keys.publicKey,
+      publicKey: keys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']),
       expectedAlgorithm: 'ES256',
     })).toEqual({ status: 'valid' });
   });
@@ -78,7 +78,7 @@ describe('signTrustManifest', () => {
       expect(result.signature.profile).toBe('did-web-v1');
       expect(Object.hasOwn(result.signature, 'expiresAt')).toBe(false);
       expect(await checkTrustManifestSignature(result, {
-        publicKey: keys.publicKey,
+        publicKey: keys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']),
         expectedAlgorithm: 'ES256',
       })).toEqual({ status: 'valid' });
 
@@ -182,7 +182,7 @@ describe('signTrustManifest', () => {
     expect((signed.extensions?.['example.com'] as { value: number }).value).toBe(1);
     expect((signed as unknown as { unknown: unknown }).unknown).toEqual({ signature: { jws: 'covered' } });
     expect(signed.signature.issuedAt).toBe('2026-10-30T00:00:00Z');
-    expect(await checkTrustManifestSignature(signed, { publicKey: keys.publicKey, expectedAlgorithm: 'ES256' })).toEqual({ status: 'valid' });
+    expect(await checkTrustManifestSignature(signed, { publicKey: keys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']), expectedAlgorithm: 'ES256' })).toEqual({ status: 'valid' });
   });
 
   it('rejects a payload changed by the callback before signing', async () => {
@@ -195,7 +195,7 @@ describe('signTrustManifest', () => {
   it('leaves cryptographic agreement to verification for already-detached output', async () => {
     const signed = await signTrustManifest(body(), ({ typ }) =>
       nodeJws(new Uint8Array([1]), { alg: 'ES256', typ }).replace(/\.[^.]+\./, '..'), metadata());
-    expect(await checkTrustManifestSignature(signed, { publicKey: keys.publicKey, expectedAlgorithm: 'ES256' })).toEqual({ status: 'invalid_signature' });
+    expect(await checkTrustManifestSignature(signed, { publicKey: keys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']), expectedAlgorithm: 'ES256' })).toEqual({ status: 'invalid_signature' });
   });
 
   it.each([
@@ -256,7 +256,6 @@ describe('signTrustManifest', () => {
       { contributor: body().contributor },
       { ...body(), contributor: 'not an absolute URI' },
       Object.defineProperty(body(), 'contributor', { get() { throw new Error('getter invoked'); } }),
-      new Proxy(body(), {}),
     ];
     for (const invalid of invalidBodies) {
       await expect(signTrustManifest(invalid as ReturnType<typeof body>, signer, metadata())).rejects.toThrow(TypeError);
@@ -283,7 +282,7 @@ describe('signTrustManifest', () => {
     }, compactSigner, metadata());
     expect((signed.additionalSignatures as { arbitrary: string }).arbitrary).toBe('\ud800');
     expect(await checkTrustManifestSignature(signed, {
-      publicKey: keys.publicKey,
+      publicKey: keys.publicKey.toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']),
       expectedAlgorithm: 'ES256',
     })).toEqual({ status: 'valid' });
 

@@ -1,13 +1,13 @@
 # Verification utilities
 
-Verification and signing utilities are available from `ai-catalog-sdk/node`. Authoring validation checks a catalog’s declarations and internal consistency. Verification checks signatures, artifact binding, and the applicable authentication and time requirements. Applications decide which endorsements satisfy their requirements.
+Verification and signing utilities are available from `ai-catalog-sdk`. Authoring validation checks a catalog’s declarations and internal consistency. Verification checks signatures, artifact binding, and the applicable authentication and time requirements. Applications decide which endorsements satisfy their requirements.
 
 ## Check a catalog entry
 
 `checkCatalogEntry()` validates one captured entry and evaluates its selected Trust Manifests:
 
 ```ts
-import { checkCatalogEntry } from 'ai-catalog-sdk/node';
+import { checkCatalogEntry } from 'ai-catalog-sdk';
 
 const report = await checkCatalogEntry(entryWithUrl, artifactBytes);
 
@@ -132,7 +132,13 @@ const report = await checkCatalogEntry(entryWithUrl, artifactBytes, {
 });
 ```
 
-`resolutionTimeoutMs` sets the deadline for each DID resolution, covering DNS, redirects, and reading and parsing the response; it defaults to 60,000 ms. The decoded body limit defaults to 16 MiB. Requests use HTTPS and check resolved addresses, including after redirects. A resolution timeout or size failure becomes that manifest's `issuer_check_failed` result. Selected manifests sharing a signer reuse one DID resolution within the invocation; calls do not share a DID cache. The number of selected contributors therefore affects total latency. Use `signal` to cancel the entire operation or impose an overall deadline.
+`resolutionTimeoutMs` sets the deadline for each DID resolution, covering DNS, redirects, and reading and parsing the response; it defaults to 60,000 ms. The decoded body limit defaults to 16 MiB. A resolution timeout or size failure becomes that manifest's `issuer_check_failed` result.
+
+Selected manifests sharing a signer reuse one DID resolution within the invocation; calls do not share a DID cache. The number of selected contributors therefore affects total latency. Use `signal` to cancel the entire operation or impose an overall deadline.
+
+Requests use HTTPS. In Node.js, the SDK rejects private-network destinations, including after redirects; browser network policies can permit private-network access.
+
+When the application-wide [`requirePublicAccessHeaders` setting](../README.md#configure-portable-network-access) is enabled, the SDK requires DID responses to include headers declaring public browser access. Missing required headers produce that manifest's `issuer_check_failed` result.
 
 `checkCatalogEntry()` accepts `nowMs`, an optional safe integer UTC epoch time in milliseconds used to evaluate the time window. When omitted, the SDK samples the machine's UTC clock near completion; `checkCatalogEntry()` applies the same instant to all selected endorsements. `clockToleranceMs` defaults to 60,000 and accepts non-negative safe integer milliseconds, including zero. Issuance beyond the tolerance produces `not_yet_valid`; reaching expiration plus tolerance produces `expired`. Tolerance does not repair an expiration that is at or before issuance. `issuedAt` remains an authenticated assertion by the signer, not an independently trusted timestamp.
 
@@ -143,7 +149,7 @@ Entry, manifest, option, and artifact inputs are captured before asynchronous wo
 `checkCatalogEntryTrustManifest()` checks one explicit manifest against an entry and its artifact representation using your application's verification key:
 
 ```ts
-import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/node';
+import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk';
 
 const resultForEntryWithUrl = await checkCatalogEntryTrustManifest(
   entryWithUrl,
@@ -206,7 +212,7 @@ The table below describes each status and shows where it appears in each functio
 import {
   checkCatalogSignature,
   checkTrustManifestSignature,
-} from 'ai-catalog-sdk/node';
+} from 'ai-catalog-sdk';
 
 const catalogResult = await checkCatalogSignature(catalog, {
   publicKey,
@@ -219,7 +225,7 @@ const manifestResult = await checkTrustManifestSignature(manifest, {
 });
 ```
 
-They share `SignatureCheckOptions` and `SignatureCheckResult`. The SDK implements the exact algorithm token `ES256`; supply a native public P-256 `KeyObject` or a P-256 `CryptoKey` usable for verification.
+They share `SignatureCheckOptions` and `SignatureCheckResult`. The SDK implements the exact algorithm token `ES256`; supply a public P-256 `CryptoKey` usable for verification.
 
 A `valid` result establishes only that the supplied key verifies the captured payload. It does not authenticate the claimed contributor or catalog operator, enforce issuance or expiration, check artifact binding, or establish trust. Header fields do not select a key or trigger network requests.
 
@@ -241,9 +247,9 @@ These functions validate the materialized JSON value without performing catalog 
 `checkDigest(value, expectedDigest)` compares exact bytes or a JCS-canonicalized JSON value with an AI Catalog digest:
 
 ```ts
-import { checkDigest } from 'ai-catalog-sdk/node';
+import { checkDigest } from 'ai-catalog-sdk';
 
-const result = checkDigest(
+const result = await checkDigest(
   artifactBytes, // or entry.data for an inline artifact
   'sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
 );
@@ -264,22 +270,22 @@ The result statuses have deliberately narrow meanings:
 | `invalid_digest` | The declaration is malformed, or a known algorithm has an invalid output length. |
 | `algorithm_not_implemented` | The declaration is syntactically valid, but the SDK does not implement its exact algorithm token. |
 
-The SDK currently implements the exact, case-sensitive `sha256`, `sha384`, and `sha512` tokens with 64, 96, and 128 lowercase hexadecimal characters, respectively. This is an SDK capability boundary, not a claim that other algorithms are forbidden or insecure. If the runtime cannot execute a registered implementation, the function throws `DigestAlgorithmUnavailableError` and preserves the underlying error as `cause`.
+The SDK currently implements the exact, case-sensitive `sha256`, `sha384`, and `sha512` tokens with 64, 96, and 128 lowercase hexadecimal characters, respectively. This is an SDK capability boundary, not a claim that other algorithms are forbidden or insecure. If the runtime cannot execute a registered implementation, the function rejects with `DigestAlgorithmUnavailableError` and preserves the underlying error as `cause`.
 
-`Buffer` values and `Uint8Array` subviews are accepted. Shared or detached backing buffers are rejected because they cannot provide a stable byte view for the check. Wrong JavaScript argument types, shared or detached byte views, and JSON values that cannot satisfy JCS throw `TypeError`. JSON values beyond the SDK's node or nesting-depth limits throw `RangeError`.
+`Buffer` values and `Uint8Array` subviews are accepted. Shared or detached backing buffers are rejected because they cannot provide a stable byte view for the check. The function rejects with `TypeError` for wrong JavaScript argument types, shared or detached byte views, and JSON values that cannot satisfy JCS. JSON values beyond the SDK's node or nesting-depth limits produce a rejection with `RangeError`.
 
 A `match` result establishes only that the supplied bytes or JCS-canonicalized JSON value match a declared digest. It does not establish who made the declaration, whether the digest is authoritative, or whether the content is trustworthy.
 
 ## Create a digest
 
-`createDigest(value, algorithm?)` returns an artifact digest in `algorithm:lowercase-hex` form. The algorithm defaults to `sha256`; `sha384` and `sha512` are also supported:
+`createDigest(value, algorithm?)` computes an artifact digest in `algorithm:lowercase-hex` form. The algorithm defaults to `sha256`; `sha384` and `sha512` are also supported:
 
 ```ts
-import { createDigest } from 'ai-catalog-sdk/node';
+import { createDigest } from 'ai-catalog-sdk';
 
-const artifactDigest = createDigest(artifactBytes);
-const inlineDigest = createDigest(entry.data);
-const sha384Digest = createDigest(artifactBytes, 'sha384');
+const artifactDigest = await createDigest(artifactBytes);
+const inlineDigest = await createDigest(entry.data);
+const sha384Digest = await createDigest(artifactBytes, 'sha384');
 ```
 
 A `Uint8Array` or `Buffer` is hashed as its exact byte range. Other logical JSON values are JCS-canonicalized before hashing. Strings are JSON string values, including their JSON quotes and escapes; ordinary arrays are JSON arrays. To hash text as raw bytes, encode it with `TextEncoder` first.
@@ -290,7 +296,7 @@ A `Uint8Array` or `Buffer` is hashed as its exact byte range. Other logical JSON
 
 ```ts
 import { CompactSign } from 'jose';
-import { signTrustManifest } from 'ai-catalog-sdk/node';
+import { signTrustManifest } from 'ai-catalog-sdk';
 
 const manifest = await signTrustManifest(
   entry,
@@ -335,7 +341,7 @@ These are standard JWS representations. The helper rejects unprotected headers, 
 import {
   createCatalogSignaturePayload,
   createTrustManifestSignaturePayload,
-} from 'ai-catalog-sdk/node';
+} from 'ai-catalog-sdk';
 
 const catalogPayload = createCatalogSignaturePayload(catalog);
 const manifestPayload = createTrustManifestSignaturePayload(manifest);
@@ -350,7 +356,7 @@ The helpers accept plain JSON objects and do not perform schema validation. Thei
 `canonicalizeJsonValueToBytes(value)` produces fresh RFC 8785 JCS UTF-8 bytes from a materialized JSON value:
 
 ```ts
-import { canonicalizeJsonValueToBytes } from 'ai-catalog-sdk/node';
+import { canonicalizeJsonValueToBytes } from 'ai-catalog-sdk';
 
 const bytes = canonicalizeJsonValueToBytes({ b: 2, a: 1 });
 // UTF-8 bytes for {"a":1,"b":2}
@@ -358,7 +364,7 @@ const bytes = canonicalizeJsonValueToBytes({ b: 2, a: 1 });
 
 Property names are sorted by UTF-16 code units, array order and Unicode normalization are preserved, and numbers use JCS's ECMAScript representation. Strings are canonicalized as JSON string values; parse JSON source text before passing it.
 
-Inputs must contain plain JSON objects, arrays, and primitives. Non-finite numbers, lone Unicode surrogates, noncharacters, cycles, sparse or decorated arrays, accessors, proxies, exotic objects, and other non-JSON values throw `TypeError`. Fixed node or nesting-depth limits produce `RangeError`. Canonicalization uses accepted own data properties without invoking inherited `toJSON` hooks or overridden array methods.
+Inputs must contain plain JSON objects, arrays, and primitives. Non-finite numbers, lone Unicode surrogates, noncharacters, cycles, sparse or decorated arrays, accessors, exotic objects, and other non-JSON values throw `TypeError`. Fixed node or nesting-depth limits produce `RangeError`. Canonicalization uses accepted own data properties without invoking inherited `toJSON` hooks or overridden array methods.
 
 ## Validation diagnostics
 

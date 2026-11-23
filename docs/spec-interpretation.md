@@ -20,6 +20,8 @@ The default 60-second clock tolerance for `checkCatalogEntry()` and `checkCatalo
 
 Automatic catalog-signer authentication is not implemented. The supplied-key catalog checker establishes snapshot integrity under the caller's selected key, without assigning catalog-operator authority.
 
+The snapshot's [Safe Fetching](https://github.com/Agent-Card/ai-catalog/blob/19208af2f8adbc0a6457e3ff36ce691a304fbd97/specification/ai-catalog.md#safe-fetching) rules require verification consumers to reject private-network destinations and recheck addresses after redirects. In Node.js, the SDK enforces these rules by checking DNS results and using those addresses for the connection. In browsers, the SDK relies on the browser's network-access controls: JavaScript cannot inspect or pin connection addresses, and browser policies can permit private-network access. The SDK's browser DID resolution therefore does not implement the snapshot's blanket private-address prohibition.
+
 ## Website discovery
 
 The pinned snapshot's recommended agent-driven discovery procedure includes inspecting HTML `<link>` elements when no HTTP `Link` header is present. `discoverCatalog()` intentionally inspects HTTP headers and well-known locations only; catalogs advertised solely through HTML are not discovered. The procedure is a `SHOULD` recommendation, not a requirement for every catalog consumer.

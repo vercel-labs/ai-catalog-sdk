@@ -1,3 +1,4 @@
+export { configure, type SDKConfiguration } from './configure.js';
 export {
   entryTypes,
   isCatalogEntryWithData,
@@ -37,3 +38,6 @@ export {
   type TrustSubject,
 } from './types.js';
 export { assertValidCatalog } from './internal/validation.js';
+export * from './discovery.js';
+export * from './loading.js';
+export * from './verification.js';

@@ -38,7 +38,7 @@ const publicKey = createPublicKey({
     y: 'x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0',
   },
   format: 'jwk',
-});
+}).toCryptoKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
 
 describe('checkTrustManifestSignature backend boundary', () => {
   it('does not expose an unexpected jose error as its thrown error', async () => {

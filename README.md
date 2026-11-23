@@ -1,6 +1,6 @@
 # ai-catalog-sdk
 
-Discover, parse, validate, and author JSON-native AI Catalog documents in TypeScript.
+Discover, parse, validate, and author JSON-native AI Catalog documents in TypeScript for Node.js and browsers.
 
 ## Parse a catalog
 
@@ -39,12 +39,42 @@ The parsed result is an ordinary mutable, JSON-shaped object. Parsing checks fie
 
 Parsing provides structurally usable data, including declarations that may fail authoring validation or verification. Use [authoring validation](#author-a-catalog) to check an assembled document’s declarations and consistency, and verification to evaluate its artifacts and endorsements.
 
+## Handle invalid input
+
+Use a safe parser when validation failures are expected and should be handled as values:
+
+```ts
+import { safeParseCatalogJson } from 'ai-catalog-sdk';
+
+function parseCatalogInput(source: string) {
+  const result = safeParseCatalogJson(source);
+
+  if (result.success) {
+    return result.data;
+  }
+
+  for (const issue of result.error.issues) {
+    console.error({
+      code: issue.code, // Example: "invalid_value"
+      path: issue.path, // Example: ["entries", 0]
+      message: issue.message,
+    });
+  }
+
+  return undefined;
+}
+```
+
+Use `code` to classify an issue and `path` to locate it in the input. Present `message` to users, but do not branch on its exact wording.
+
+See [Validation diagnostics](./docs/verification.md#validation-diagnostics) for diagnostic codes and handling guidance.
+
 ## Discover a website's catalog
 
 Pass an absolute HTTPS website URL to `discoverCatalog()`:
 
 ```ts
-import { discoverCatalog } from 'ai-catalog-sdk/node';
+import { discoverCatalog } from 'ai-catalog-sdk';
 
 const result = await discoverCatalog('https://example.com/tools');
 
@@ -61,6 +91,10 @@ if (result.status === 'found') {
 
 Discovery follows website redirects, then checks the final response for an HTTP `Link` with `rel="ai-catalog"`. If no catalog link is advertised, it tries `/.well-known/ai-catalog.json` at the website's origin. When the website redirects to a different origin, it tries the destination origin first, then the original origin if needed. A selected HTTP link takes precedence: if its catalog cannot be fetched or parsed, discovery returns that failure without trying the well-known locations. HTML `<link>` elements are not inspected, so catalogs advertised only in HTML will not be discovered.
 
+In browsers, discovery is subject to CORS, and cross-origin websites must permit JavaScript to read their `Link` header for the SDK to find a catalog link. See [Configure portable network access](#configure-portable-network-access) for browser requirements and optional application-wide header checking.
+
+To use a domain's well-known catalog without requesting the website or inspecting its HTTP `Link` header, pass `{ strategy: 'well-known' }`. This requests `/.well-known/ai-catalog.json` only at the input URL's origin.
+
 A `found` result contains the parsed catalog and the URL it was retrieved from after any redirects. The catalog remains unverified; apply the [verification utilities](./docs/verification.md) when your application needs artifact or endorsement checks. Discovery does not traverse nested catalogs or fetch referenced artifacts.
 
 ## Load a catalog from an entry
@@ -73,7 +107,7 @@ import {
   entryTypes,
   isEntryType,
   loadCatalogFromEntry,
-} from 'ai-catalog-sdk/node';
+} from 'ai-catalog-sdk';
 
 const discovered = await discoverCatalog('https://example.com/tools');
 
@@ -90,7 +124,7 @@ if (discovered.status === 'found') {
 }
 ```
 
-For a URL entry, the loader retrieves and parses the referenced catalog over public HTTPS. A `found` result includes `catalog`, the final response `url`, and the decoded response `bytes`.
+For a URL entry, the loader retrieves and parses the referenced catalog over HTTPS. A `found` result includes `catalog`, the final response `url`, and the decoded response `bytes`.
 
 For an inline entry, the loader parses `entry.data` as the complete catalog. A `found` result includes `catalog` and, when `baseUrl` was supplied, the same value as `url`. It has no response bytes.
 
@@ -105,7 +139,7 @@ Loading performs ordinary structural parsing, without authoring validation, veri
 `checkCatalogSignature()` checks one catalog snapshot with a public key and expected algorithm selected by the caller:
 
 ```ts
-import { checkCatalogSignature } from 'ai-catalog-sdk/node';
+import { checkCatalogSignature } from 'ai-catalog-sdk';
 
 const result = await checkCatalogSignature(catalog, {
   publicKey,
@@ -124,7 +158,7 @@ A `valid` result means the exact caller-selected key verified the signature over
 `checkCatalogEntry()` checks an entry's fields and declared artifact digest, then evaluates each selected Trust Manifest independently. A malformed selected manifest receives `invalid_manifest` without preventing the other manifests from being checked. For the `did-web-v1` profile, it resolves the contributor's current DID document and selects an authorized assertion key:
 
 ```ts
-import { checkCatalogEntry } from 'ai-catalog-sdk/node';
+import { checkCatalogEntry } from 'ai-catalog-sdk';
 
 const report = await checkCatalogEntry(entryWithUrl, artifactBytes);
 
@@ -146,7 +180,7 @@ For an entry with `url`, supply the artifact bytes obtained by your application.
 Use `checkCatalogEntryTrustManifest()` when your application supplies the verification key, such as when implementing a different signer profile:
 
 ```ts
-import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk/node';
+import { checkCatalogEntryTrustManifest } from 'ai-catalog-sdk';
 
 const result = await checkCatalogEntryTrustManifest(
   entryWithUrl,
@@ -199,14 +233,14 @@ import {
   mediaTypes,
   signTrustManifest,
   type AICatalog,
-} from 'ai-catalog-sdk/node';
+} from 'ai-catalog-sdk';
 
 const artifactBytes = await readFile('example-agent-plugin.zip');
 const entry = {
   identifier: 'urn:air:example.com:agent:example-plugin',
   type: mediaTypes.agentPluginZip,
   url: 'https://example.com/example-agent-plugin.zip',
-  digest: createDigest(artifactBytes),
+  digest: await createDigest(artifactBytes),
 };
 
 const manifest = await signTrustManifest(
@@ -230,54 +264,24 @@ The digest must describe the exact bytes published at `entry.url`. For an inline
 
 ## Choose an API
 
-The `ai-catalog-sdk` entry point provides parsing and authoring without importing Node.js built-in modules in its runtime or type declarations. For Node.js applications, `ai-catalog-sdk/node` exports every root API and adds discovery, entry loading, verification, and signing.
+The `ai-catalog-sdk` entry point provides the same APIs in Node.js and browsers.
 
 | Task | API | Import path |
 | --- | --- | --- |
 | Parse catalog JSON text | `parseCatalogJson()` or `safeParseCatalogJson()` | `ai-catalog-sdk` |
 | Parse a catalog from an existing JSON value | `parseCatalog()` or `safeParseCatalog()` | `ai-catalog-sdk` |
 | Parse one catalog entry from an existing JSON value | `parseCatalogEntry()` or `safeParseCatalogEntry()` | `ai-catalog-sdk` |
-| Discover a catalog from a website URL | `discoverCatalog()` | `ai-catalog-sdk/node` |
-| Load the catalog represented by an entry | `loadCatalogFromEntry()` | `ai-catalog-sdk/node` |
-| Check a catalog signature with a supplied public key | `checkCatalogSignature()` | `ai-catalog-sdk/node` |
-| Check an entry and its selected endorsements | `checkCatalogEntry()` | `ai-catalog-sdk/node` |
-| Check one explicit Trust Manifest against an entry with a supplied public key | `checkCatalogEntryTrustManifest()` | `ai-catalog-sdk/node` |
+| Discover a catalog from a website URL | `discoverCatalog()` | `ai-catalog-sdk` |
+| Load the catalog represented by an entry | `loadCatalogFromEntry()` | `ai-catalog-sdk` |
+| Check a catalog signature with a supplied public key | `checkCatalogSignature()` | `ai-catalog-sdk` |
+| Check an entry and its selected endorsements | `checkCatalogEntry()` | `ai-catalog-sdk` |
+| Check one explicit Trust Manifest against an entry with a supplied public key | `checkCatalogEntryTrustManifest()` | `ai-catalog-sdk` |
 | Validate an assembled catalog before serialization | `assertValidCatalog()` | `ai-catalog-sdk` |
 | Compose structural validation with Zod | `aiCatalogSchema`, `catalogEntrySchema`, or `trustManifestSchema` | `ai-catalog-sdk/zod` |
 | Use JSON Schema in TypeScript or JavaScript | `aiCatalogJsonSchema` | `ai-catalog-sdk/json-schema` |
 | Use raw JSON Schema with another validator or tool | `ai-catalog.schema.json` | `ai-catalog-sdk/schema/ai-catalog.schema.json` |
 
 The `parse*` functions throw `CatalogParseError` when input is invalid. The matching `safeParse*` functions return a discriminated `ParseResult` instead. All SDK parsers apply defensive input validation that the standalone schemas do not. See [What gets validated](#what-gets-validated) for the parsing, authoring, and schema boundaries.
-
-## Handle invalid input
-
-Use a safe parser when validation failures are expected and should be handled as values:
-
-```ts
-import { safeParseCatalogJson } from 'ai-catalog-sdk';
-
-function parseCatalogInput(source: string) {
-  const result = safeParseCatalogJson(source);
-
-  if (result.success) {
-    return result.data;
-  }
-
-  for (const issue of result.error.issues) {
-    console.error({
-      code: issue.code, // Example: "invalid_value"
-      path: issue.path, // Example: ["entries", 0]
-      message: issue.message,
-    });
-  }
-
-  return undefined;
-}
-```
-
-Use `code` to classify an issue and `path` to locate it in the input. Present `message` to users, but do not branch on its exact wording.
-
-See [Validation diagnostics](./docs/verification.md#validation-diagnostics) for diagnostic codes and handling guidance.
 
 ## Use lower-level verification utilities
 
@@ -319,9 +323,42 @@ TypeScript NodeNext consumers also need `compilerOptions.resolveJsonModule: true
 
 The SDK targets AI Catalog v0.9, the v1.0 release candidate, at an exact specification snapshot. See [Specification snapshot interpretation](./docs/spec-interpretation.md) for the pinned revision and how conflicts in that snapshot are handled.
 
+## Configure portable network access
+
+By default, discovery can select different catalogs in Node.js and browsers. A browser application fetching from another origin may be able to read the response’s status and body without being allowed to read its HTTP `Link` header.
+
+For example, a website might return `Link: </tools/catalog.json>; rel="ai-catalog"` with `Access-Control-Allow-Origin: *`, but no `Access-Control-Expose-Headers`. The SDK in Node.js requests `/tools/catalog.json`, while in a browser it tries `/.well-known/ai-catalog.json`. Those URLs can serve different catalogs.
+
+To check for these browser permissions while running in Node.js, enable `requirePublicAccessHeaders` once at startup:
+
+```ts
+import { configure } from 'ai-catalog-sdk';
+
+configure({ requirePublicAccessHeaders: true });
+```
+
+This setting applies to discovery, catalog loading, and automatic DID resolution, including their nested requests. Each invocation captures the setting when it starts.
+
+With `requirePublicAccessHeaders` enabled, missing required headers are treated as retrieval failures: `fetch_failed` for discovery and loading, or `issuer_check_failed` for DID resolution.
+
+Servers can satisfy the contract with these headers on their final responses:
+
+```http
+Access-Control-Allow-Origin: *
+Access-Control-Expose-Headers: Access-Control-Allow-Origin, Access-Control-Expose-Headers, Link
+```
+
+Alternatively, use `Access-Control-Expose-Headers: *` in place of the explicit header list.
+
+The `Link` entry lets discovery check the `Link` header, including to confirm when a catalog link is not provided.
+
+Exposing the two access-control headers lets the SDK check the same declarations in both environments. The check applies even to same-origin requests and error responses. When discovery would otherwise return `not_found`, missing required headers produce `fetch_failed` instead.
+
+When following redirects with `requirePublicAccessHeaders` enabled, the SDK in Node.js stops retrieval if any redirect response lacks `Access-Control-Allow-Origin: *`, though only the final response needs the `Access-Control-Expose-Headers` declaration shown above. Browsers follow redirects under their own permission rules and may accept a redirect that the SDK rejects in Node.js—for example, one that permits only the application's origin.
+
 ## Requirements
 
-- Node.js `>=22.20.0`
+- Node.js `>=22.20.0`, or a modern browser in a secure context with Fetch and Web Crypto
 - ES modules only
 - TypeScript `>=5.5` for typed consumers
 - Zod `^4.6.6` as a peer dependency

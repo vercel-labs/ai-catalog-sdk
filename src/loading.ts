@@ -1,11 +1,9 @@
-import { types as utilTypes } from 'node:util';
-
 import { mediaTypes } from './entry-types.js';
 import {
   fetchCatalogResource,
   snapshotCatalogResourceOptions,
 } from './internal/catalog-resource.js';
-import { HttpFetchError, throwIfAborted } from './internal/http-fetch.js';
+import { HttpFetchError, normalizeHttpFetchError, throwIfAborted } from './internal/http-fetch.js';
 import { preflightJsonValue } from './internal/json-value.js';
 import { safeParseCatalog, safeParseCatalogEntry } from './internal/parser.js';
 import {
@@ -36,8 +34,9 @@ export interface LoadCatalogFromEntryOptions {
  * The result of loading a catalog from a URL entry.
  * `found` contains the final response URL and decoded body bytes before text or
  * JSON parsing, suitable for `checkCatalogEntry(entry, bytes)`.
- * Failure URLs identify the final response when available, otherwise the
- * attempted URL or original reference. Failure results do not retain body bytes.
+ * `invalid_catalog` identifies the final response URL. Retrieval failures use
+ * the final response URL when available, or the attempted URL or original
+ * reference otherwise. Failure results do not retain body bytes.
  */
 export type UrlCatalogLoadResult =
   | { status: 'found'; catalog: AICatalog; url: string; bytes: Uint8Array }
@@ -66,8 +65,7 @@ function snapshotBaseUrl(options: LoadCatalogFromEntryOptions | undefined): stri
     new URL(descriptor.value);
     return descriptor.value;
   } catch (cause) {
-    if (!(cause instanceof TypeError) ||
-      (cause as NodeJS.ErrnoException).code !== 'ERR_INVALID_URL') throw cause;
+    if (!(cause instanceof TypeError)) throw cause;
     throw new TypeError('baseUrl must be an absolute URL string.', { cause });
   }
 }
@@ -77,7 +75,7 @@ type CapturedEntry = { url: string } | { data: unknown };
 function snapshotEntry(value: unknown): CapturedEntry {
   if (
     value === null || typeof value !== 'object' ||
-    utilTypes.isProxy(value) || Array.isArray(value)
+    Array.isArray(value)
   ) throw new TypeError('entry must be a catalog entry object.');
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null)
@@ -98,7 +96,6 @@ function snapshotEntry(value: unknown): CapturedEntry {
   }
   const issue = preflightJsonValue(envelope, {
     allowOwnProtoMember: false,
-    isDisallowedObject: utilTypes.isProxy,
     requireIJsonStrings: false,
   });
   if (issue) throw new TypeError('entry must be a bounded JSON catalog entry.');
@@ -110,7 +107,7 @@ function snapshotEntry(value: unknown): CapturedEntry {
 
 /**
  * Loads exactly the catalog represented by a catalog-typed entry.
- * URL entries use public HTTPS retrieval; inline entries use ordinary catalog
+ * URL entries use HTTPS retrieval; inline entries use ordinary catalog
  * parsing. Relative URLs are resolved against `options.baseUrl`; without a
  * base, they return `fetch_failed`. On success, `url` supplies context for the
  * returned catalog's relative references: the final response URL for URL entries,
@@ -145,7 +142,6 @@ export async function loadCatalogFromEntry(
   if ('data' in captured) {
     const issue = preflightJsonValue(captured.data, {
       allowOwnProtoMember: false,
-      isDisallowedObject: utilTypes.isProxy,
       requireIJsonStrings: false,
     });
     const parsed = issue
@@ -160,15 +156,14 @@ export async function loadCatalogFromEntry(
   try {
     url = new URL(captured.url, baseUrl);
   } catch (cause) {
-    if (!(cause instanceof TypeError) ||
-      (cause as NodeJS.ErrnoException).code !== 'ERR_INVALID_URL') throw cause;
+    if (!(cause instanceof TypeError)) throw cause;
     return {
       status: 'fetch_failed',
       url: captured.url,
-      error: new HttpFetchError(
+      error: normalizeHttpFetchError(new HttpFetchError(
         'The catalog entry URL is invalid or cannot be resolved without a base URL.',
         { cause },
-      ),
+      ), capturedOptions),
     };
   }
   const lookup = await fetchCatalogResource(url, capturedOptions);

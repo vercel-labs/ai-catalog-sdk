@@ -110,44 +110,6 @@ describe('createCatalogSignaturePayload', () => {
     expect(reads).toBe(0);
   });
 
-  it('rejects proxies without invoking traps, including nested values', () => {
-    let traps = 0;
-    const proxied = () =>
-      new Proxy(
-        { value: true },
-        {
-          get() {
-            traps += 1;
-            return true;
-          },
-          getOwnPropertyDescriptor() {
-            traps += 1;
-            return undefined;
-          },
-          getPrototypeOf() {
-            traps += 1;
-            return Object.prototype;
-          },
-          ownKeys() {
-            traps += 1;
-            return [];
-          },
-        },
-      );
-
-    expect(() =>
-      createCatalogSignaturePayload(proxied() as unknown as AICatalog),
-    ).toThrow(TypeError);
-    expect(() =>
-      createCatalogSignaturePayload({
-        specVersion: '0.9',
-        entries: [],
-        signature: proxied(),
-      } as unknown as AICatalog),
-    ).toThrow(TypeError);
-    expect(traps).toBe(0);
-  });
-
   it('rejects non-enumerable and non-JSON signature members', () => {
     const hidden: AICatalog = { specVersion: '0.9', entries: [] };
     Object.defineProperty(hidden, 'signature', {

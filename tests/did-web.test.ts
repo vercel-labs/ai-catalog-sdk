@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AddressInfo, LookupFunction } from 'node:net';
 import { brotliCompressSync, deflateSync, gzipSync } from 'node:zlib';
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const network = vi.hoisted(() => ({
   port: 0,
@@ -47,6 +47,7 @@ vi.mock('node:https', async (importOriginal) => {
 });
 
 import { resolveDidWeb } from '../src/internal/did-web.js';
+import { configure } from '../src/configure.js';
 import { fetchHttpsResource, HttpFetchError } from '../src/internal/http-fetch.js';
 import { IssuerCheckError } from '../src/internal/publisher-profile.js';
 import {
@@ -86,6 +87,58 @@ beforeEach(() => {
     response.setHeader('content-type', 'application/did+json');
     response.end(JSON.stringify(document));
   };
+});
+
+afterEach(() => configure({ requirePublicAccessHeaders: false }));
+
+describe('DID resolution response contract', () => {
+  const contract = {
+    'access-control-allow-origin': '*',
+    'access-control-expose-headers': 'Access-Control-Allow-Origin, Access-Control-Expose-Headers',
+  };
+
+  it('requires the document contract without requiring Link exposure', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    await expect(resolveDidWeb('did:web:publisher.example', options)).rejects.toMatchObject({
+      name: 'IssuerCheckError', message: 'The HTTPS resource could not be retrieved.',
+    });
+    respond = (_request, response) => response.writeHead(200, contract).end(JSON.stringify(document));
+    await expect(resolveDidWeb('did:web:publisher.example', options)).resolves.toEqual(document);
+  });
+
+  it('normalizes expected request errors while preserving cancellation', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    const diagnostic = new Error('DNS backend diagnostic');
+    network.resolve.mockRejectedValueOnce(diagnostic);
+    try {
+      await resolveDidWeb('did:web:publisher.example', options);
+      throw new Error('Expected resolution to fail.');
+    } catch (error) {
+      expect(error).toMatchObject({ name: 'IssuerCheckError', message: 'The HTTPS resource could not be retrieved.' });
+      expect(error).toMatchObject({
+        cause: { message: 'The HTTPS resource hostname could not be resolved.', cause: diagnostic },
+      });
+    }
+    const controller = new AbortController();
+    const reason = new Error('caller cancellation');
+    controller.abort(reason);
+    await expect(resolveDidWeb('did:web:publisher.example', { ...options, signal: controller.signal })).rejects.toBe(reason);
+  });
+
+  it('requires public permission on DID redirects without requiring header exposure on them', async () => {
+    configure({ requirePublicAccessHeaders: true });
+    const redirect = { 'access-control-allow-origin': '*', location: '/resolved' };
+    respond = (request, response) => {
+      if (request.url === '/.well-known/did.json') response.writeHead(302, redirect).end();
+      else response.writeHead(200, contract).end(JSON.stringify(document));
+    };
+    await expect(resolveDidWeb('did:web:publisher.example', options)).resolves.toEqual(document);
+    redirect['access-control-allow-origin'] = 'https://app.example';
+    await expect(resolveDidWeb('did:web:publisher.example', options)).rejects.toMatchObject({
+      name: 'IssuerCheckError', message: 'The HTTPS resource could not be retrieved.',
+      cause: { message: 'The HTTPS redirect response does not allow public browser access.' },
+    });
+  });
 });
 
 describe('native did:web transport', () => {
@@ -128,12 +181,27 @@ describe('native did:web transport', () => {
       status: 'checked',
       manifests: [{ status: 'passed', isPublisherEndorsement: true }],
     });
+    configure({ requirePublicAccessHeaders: true });
+    const contracted = checkCatalogEntry(entry);
+    configure({ requirePublicAccessHeaders: false });
+    await expect(contracted).resolves.toMatchObject({
+      status: 'checked', manifests: [{ status: 'issuer_check_failed' }],
+    });
+    configure({ requirePublicAccessHeaders: true });
+    respond = (_request, response) => response.writeHead(200, {
+      'access-control-allow-origin': '*',
+      'access-control-expose-headers': 'Access-Control-Allow-Origin, Access-Control-Expose-Headers',
+    }).end(JSON.stringify(did));
+    await expect(checkCatalogEntry(entry)).resolves.toMatchObject({
+      status: 'checked', manifests: [{ status: 'passed', isPublisherEndorsement: true }],
+    });
+    configure({ requirePublicAccessHeaders: false });
     did.assertionMethod = [];
     await expect(checkCatalogEntry(entry)).resolves.toMatchObject({
       status: 'checked',
       manifests: [{ status: 'issuer_check_failed' }],
     });
-    expect(network.options).toHaveLength(2);
+    expect(network.options).toHaveLength(4);
   });
 
   it('uses checked addresses at the connection boundary and verifies the HTTPS hostname', async () => {
